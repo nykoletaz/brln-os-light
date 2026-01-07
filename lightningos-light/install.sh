@@ -35,9 +35,19 @@ trap 'echo ""; echo "Installation failed during: ${CURRENT_STEP:-unknown}"; echo
 
 psql_as_postgres() {
   if command -v runuser >/dev/null 2>&1; then
-    PGCONNECT_TIMEOUT=5 runuser -u postgres -- psql "$@"
+    PGCONNECT_TIMEOUT=5 runuser -u postgres -- psql -X "$@"
   else
-    PGCONNECT_TIMEOUT=5 sudo -u postgres psql "$@"
+    PGCONNECT_TIMEOUT=5 sudo -u postgres psql -X "$@"
+  fi
+}
+
+psql_exec() {
+  local label="$1"
+  shift
+  local out
+  if ! out=$(psql_as_postgres -v ON_ERROR_STOP=1 "$@" 2>&1); then
+    print_warn "$label failed: $out"
+    exit 1
   fi
 }
 
@@ -190,11 +200,11 @@ postgres_setup() {
   if [[ "$role_exists" != "1" ]]; then
     local pw
     pw=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24)
-    psql_as_postgres -c "create role ${db_user} with login password '${pw}'"
+    psql_exec "Create role" -c "create role ${db_user} with login password '${pw}'"
     update_dsn "$db_user" "$pw" "$db_name"
   fi
   if [[ "$db_exists" != "1" ]]; then
-    psql_as_postgres -c "create database ${db_name} owner ${db_user}"
+    psql_exec "Create database" -c "create database ${db_name} owner ${db_user}"
   fi
   if [[ "$role_exists" == "1" ]]; then
     ensure_dsn "$db_user" "$db_name"
@@ -230,7 +240,7 @@ ensure_dsn() {
   if [[ -z "$current" || "$current" == *"CHANGE_ME"* ]]; then
     local pw
     pw=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24)
-    psql_as_postgres -c "alter role ${db_user} with password '${pw}'"
+    psql_exec "Alter role password" -c "alter role ${db_user} with password '${pw}'"
     update_dsn "$db_user" "$pw" "$db_name"
   fi
 }
