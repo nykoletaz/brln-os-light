@@ -311,6 +311,7 @@ install_manager() {
   fi
   print_ok "Go modules ready"
 
+  print_step "Compiling LightningOS Manager"
   (cd "$REPO_ROOT" && env $go_env GOFLAGS=-mod=mod go build -o /opt/lightningos/manager/lightningos-manager ./cmd/lightningos-manager)
   print_ok "Manager built and installed"
 }
