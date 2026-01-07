@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+set -o errtrace
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$SCRIPT_DIR"
@@ -202,9 +203,11 @@ postgres_setup() {
     pw=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 24)
     psql_exec "Create role" -c "create role ${db_user} with login password '${pw}'"
     update_dsn "$db_user" "$pw" "$db_name"
+    print_ok "Role created"
   fi
   if [[ "$db_exists" != "1" ]]; then
     psql_exec "Create database" -c "create database ${db_name} owner ${db_user}"
+    print_ok "Database created"
   fi
   if [[ "$role_exists" == "1" ]]; then
     ensure_dsn "$db_user" "$db_name"
