@@ -12,6 +12,10 @@ LND_URL="${LND_URL:-$LND_URL_DEFAULT}"
 GO_VERSION="${GO_VERSION:-1.22.7}"
 GO_TARBALL_URL="https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
 
+LND_DIR="/data/lnd"
+LND_CONF="${LND_DIR}/lnd.conf"
+LND_USER_CONF="${LND_DIR}/lnd.user.conf"
+
 CURRENT_STEP=""
 LOG_FILE="/var/log/lightningos-install.log"
 
@@ -154,7 +158,7 @@ install_node() {
 
 ensure_dirs() {
   print_step "Preparing directories"
-  mkdir -p /etc/lightningos /etc/lightningos/tls /etc/lnd /opt/lightningos/manager /opt/lightningos/ui /var/lib/lightningos /var/log/lightningos /var/log/lnd
+  mkdir -p /etc/lightningos /etc/lightningos/tls /opt/lightningos/manager /opt/lightningos/ui /var/lib/lightningos /var/log/lightningos /var/log/lnd
   chmod 750 /etc/lightningos
   chmod 750 /var/lib/lightningos
   print_ok "Directories ready"
@@ -162,16 +166,17 @@ ensure_dirs() {
 
 prepare_lnd_data_dir() {
   print_step "Preparing LND data directory"
-  mkdir -p /data /data/lnd /var/log/lnd
+  mkdir -p /data "$LND_DIR" /var/log/lnd
   if [[ -d /var/lib/lnd && -n "$(ls -A /var/lib/lnd 2>/dev/null)" ]]; then
-    if [[ -d /data/lnd && -z "$(ls -A /data/lnd 2>/dev/null)" ]]; then
+    if [[ -d "$LND_DIR" && -z "$(ls -A "$LND_DIR" 2>/dev/null)" ]]; then
       print_warn "Existing /var/lib/lnd detected; copying data to /data/lnd"
-      cp -a /var/lib/lnd/. /data/lnd/
+      cp -a /var/lib/lnd/. "$LND_DIR"/
     fi
   fi
-  chown -R lnd:lnd /data/lnd /var/log/lnd
+  chown -R lnd:lnd "$LND_DIR" /var/log/lnd
+  chmod 750 "$LND_DIR" /var/log/lnd
   if [[ ! -e /home/lnd/.lnd ]]; then
-    ln -s /data/lnd /home/lnd/.lnd
+    ln -s "$LND_DIR" /home/lnd/.lnd
     chown -h lnd:lnd /home/lnd/.lnd
   fi
   print_ok "LND data directory ready"
@@ -181,10 +186,6 @@ fix_permissions() {
   print_step "Fixing permissions"
   chown root:lightningos /etc/lightningos /etc/lightningos/tls
   chmod 750 /etc/lightningos /etc/lightningos/tls
-  if [[ -d /etc/lnd ]]; then
-    chown root:lnd /etc/lnd
-    chmod 750 /etc/lnd
-  fi
   if [[ -f /etc/lightningos/config.yaml ]]; then
     chown root:lightningos /etc/lightningos/config.yaml
     chmod 640 /etc/lightningos/config.yaml
@@ -201,21 +202,21 @@ fix_permissions() {
     chown root:lightningos /etc/lightningos/secrets.env
     chmod 660 /etc/lightningos/secrets.env
   fi
-  if [[ -f /etc/lnd/lnd.conf ]]; then
-    chown root:lnd /etc/lnd/lnd.conf
-    chmod 664 /etc/lnd/lnd.conf
+  if [[ -f "$LND_CONF" ]]; then
+    chown lnd:lnd "$LND_CONF"
+    chmod 660 "$LND_CONF"
   fi
-  if [[ -f /etc/lnd/lnd.user.conf ]]; then
-    chown root:lnd /etc/lnd/lnd.user.conf
-    chmod 664 /etc/lnd/lnd.user.conf
+  if [[ -f "$LND_USER_CONF" ]]; then
+    chown lnd:lnd "$LND_USER_CONF"
+    chmod 660 "$LND_USER_CONF"
   fi
-  if [[ -f /data/lnd/tls.cert ]]; then
-    chown lnd:lnd /data/lnd/tls.cert
-    chmod 640 /data/lnd/tls.cert
+  if [[ -f "$LND_DIR/tls.cert" ]]; then
+    chown lnd:lnd "$LND_DIR/tls.cert"
+    chmod 640 "$LND_DIR/tls.cert"
   fi
-  if [[ -f /data/lnd/data/chain/bitcoin/mainnet/admin.macaroon ]]; then
-    chown lnd:lnd /data/lnd/data/chain/bitcoin/mainnet/admin.macaroon
-    chmod 640 /data/lnd/data/chain/bitcoin/mainnet/admin.macaroon
+  if [[ -f "$LND_DIR/data/chain/bitcoin/mainnet/admin.macaroon" ]]; then
+    chown lnd:lnd "$LND_DIR/data/chain/bitcoin/mainnet/admin.macaroon"
+    chmod 640 "$LND_DIR/data/chain/bitcoin/mainnet/admin.macaroon"
   fi
   chown -R lightningos:lightningos /var/lib/lightningos /var/log/lightningos
   print_ok "Permissions updated"
@@ -231,13 +232,15 @@ copy_templates() {
     chown root:lightningos /etc/lightningos/secrets.env
     chmod 660 /etc/lightningos/secrets.env
   fi
-  if [[ ! -s /etc/lnd/lnd.conf ]]; then
-    cp "$REPO_ROOT/templates/lnd.conf" /etc/lnd/lnd.conf
-    chmod 664 /etc/lnd/lnd.conf
+  if [[ ! -s "$LND_CONF" ]]; then
+    cp "$REPO_ROOT/templates/lnd.conf" "$LND_CONF"
+    chown lnd:lnd "$LND_CONF"
+    chmod 660 "$LND_CONF"
   fi
-  if [[ ! -f /etc/lnd/lnd.user.conf ]]; then
-    cp "$REPO_ROOT/templates/lnd.user.conf" /etc/lnd/lnd.user.conf
-    chmod 664 /etc/lnd/lnd.user.conf
+  if [[ ! -f "$LND_USER_CONF" ]]; then
+    cp "$REPO_ROOT/templates/lnd.user.conf" "$LND_USER_CONF"
+    chown lnd:lnd "$LND_USER_CONF"
+    chmod 660 "$LND_USER_CONF"
   fi
   print_ok "Templates copied"
 }
@@ -252,22 +255,22 @@ migrate_lnd_paths() {
 }
 
 validate_lnd_conf() {
-  if [[ ! -f /etc/lnd/lnd.conf ]]; then
-    print_warn "/etc/lnd/lnd.conf missing"
+  if [[ ! -f "$LND_CONF" ]]; then
+    print_warn "$LND_CONF missing"
     return
   fi
   if command -v runuser >/dev/null 2>&1; then
-    if ! runuser -u lnd -- test -r /etc/lnd/lnd.conf; then
+    if ! runuser -u lnd -- test -r "$LND_CONF"; then
       print_warn "lnd.conf not readable by user lnd"
     fi
   fi
-  if ! grep -q '^bitcoin.mainnet=1' /etc/lnd/lnd.conf; then
+  if ! grep -q '^bitcoin.mainnet=1' "$LND_CONF"; then
     print_warn "lnd.conf missing bitcoin.mainnet=1"
   fi
-  if ! grep -q '^bitcoin.active=1' /etc/lnd/lnd.conf; then
+  if ! grep -q '^bitcoin.active=1' "$LND_CONF"; then
     print_warn "lnd.conf missing bitcoin.active=1"
   fi
-  if ! grep -q '^bitcoin.node=bitcoind' /etc/lnd/lnd.conf; then
+  if ! grep -q '^bitcoin.node=bitcoind' "$LND_CONF"; then
     print_warn "lnd.conf missing bitcoin.node=bitcoind"
   fi
 }
@@ -339,12 +342,12 @@ update_dsn() {
   fi
   chmod 660 /etc/lightningos/secrets.env
 
-  if ! grep -q '^db.postgres.dsn=' /etc/lnd/lnd.conf; then
-    echo "db.postgres.dsn=${dsn}" >> /etc/lnd/lnd.conf
+  if ! grep -q '^db.postgres.dsn=' "$LND_CONF"; then
+    echo "db.postgres.dsn=${dsn}" >> "$LND_CONF"
   else
-    sed -i "s|^db.postgres.dsn=.*|db.postgres.dsn=${dsn}|" /etc/lnd/lnd.conf
+    sed -i "s|^db.postgres.dsn=.*|db.postgres.dsn=${dsn}|" "$LND_CONF"
   fi
-  chmod 640 /etc/lnd/lnd.conf
+  chmod 660 "$LND_CONF"
 }
 
 ensure_dsn() {

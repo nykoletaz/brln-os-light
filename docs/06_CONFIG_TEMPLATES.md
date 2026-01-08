@@ -42,7 +42,7 @@ BITCOIN_RPC_PASS=
 
 # FILE: docs/06_CONFIG_TEMPLATES.md  (APPEND)
 
-## /etc/lnd/lnd.user.conf (gerenciado pela UI)
+## /data/lnd/lnd.user.conf (gerenciado pela UI)
 [Application Options]
 # alias=LightningOS-Node
 # minchansize=20000

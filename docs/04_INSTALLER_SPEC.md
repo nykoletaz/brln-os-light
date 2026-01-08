@@ -44,7 +44,7 @@ Instalar e configurar:
 - colocar em /usr/local/bin/lnd e lncli
 - chmod +x
 
-6) Criar /etc/lnd/lnd.conf (template) com:
+6) Criar /data/lnd/lnd.conf (template) com:
 - mainnet only
 - bitcoind remoto default (host+zmq)
 - placeholders rpcuser/rpcpass (vazios inicialmente)

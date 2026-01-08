@@ -12,7 +12,7 @@ Wants=network-online.target
 User=lnd
 Group=lnd
 Type=simple
-ExecStart=/usr/local/bin/lnd --lnddir=/data/lnd --configfile=/etc/lnd/lnd.conf --configfile=/etc/lnd/lnd.user.conf
+ExecStart=/usr/local/bin/lnd --lnddir=/data/lnd --configfile=/data/lnd/lnd.conf --configfile=/data/lnd/lnd.user.conf
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536
@@ -22,7 +22,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/data/lnd /var/log/lnd /etc/lnd
+ReadWritePaths=/data/lnd /var/log/lnd
 # Se precisar acessar /home/lnd/.lnd, ajustar paths.
 
 [Install]
@@ -48,7 +48,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/var/lib/lightningos /var/log/lightningos /etc/lightningos /etc/lnd
+ReadWritePaths=/var/lib/lightningos /var/log/lightningos /etc/lightningos /data/lnd
 
 [Install]
 WantedBy=multi-user.target

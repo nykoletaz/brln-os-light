@@ -30,7 +30,7 @@ restlisten=127.0.0.1:8080
 db.backend=postgres
 # A DSN deve vir de uma fonte segura.
 # Opção A: inserir diretamente com perms 600 no lnd.conf (menos ideal)
-# Opção B: gerar arquivo /etc/lnd/lnd.postgres.conf root-only e include (se suportado)
+# Opção B: gerar arquivo /data/lnd/lnd.postgres.conf root-only e include (se suportado)
 # Opção C: gerenciar via flag/env no service (preferível)
 #
 # Exemplo (se suportado):

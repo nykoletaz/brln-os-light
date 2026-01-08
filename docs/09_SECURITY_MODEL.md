@@ -21,7 +21,7 @@
 - `lnd` e `lightningos` são system users sem shell.
 - Manager só precisa:
   - ler tls/macaroon do LND (preferível via grupo/ACL)
-  - editar /etc/lnd/lnd.conf (via root? alternativa: manager roda sem root e usa helper via sudoers com comandos restritos)
+  - editar /data/lnd/lnd.conf (via root? alternativa: manager roda sem root e usa helper via sudoers com comandos restritos)
 Recomendação v0.1: rodar manager sem root + usar helper com sudoers restrito (v0.2). No MVP pode rodar com permissões ampliadas, mas documentar.
 Implementação v0.1: `lightningos` no grupo `lnd`, com tls.cert/admin.macaroon 640 para leitura via grupo.
 

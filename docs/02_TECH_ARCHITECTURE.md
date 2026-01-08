@@ -22,7 +22,7 @@
 
 4) LND
 - Binário instalado no sistema
-- Config em /etc/lnd/lnd.conf (preferido)
+- Config em /data/lnd/lnd.conf (preferido)
 - Dados em /data/lnd (ou /home/lnd/.lnd conforme setup)
 - gRPC apenas localhost
 
@@ -70,10 +70,10 @@
 ## Configuração do LND (base + overrides)
 Para permitir personalizações sem risco, o LND usará dois arquivos de config:
 
-- Base (gerenciado pelo instalador): /etc/lnd/lnd.conf
-- Overrides do usuário (gerenciado pela UI): /etc/lnd/lnd.user.conf
+- Base (gerenciado pelo instalador): /data/lnd/lnd.conf
+- Overrides do usuário (gerenciado pela UI): /data/lnd/lnd.user.conf
 
 O serviço inicia com:
-lnd --configfile=/etc/lnd/lnd.conf --configfile=/etc/lnd/lnd.user.conf
+lnd --configfile=/data/lnd/lnd.conf --configfile=/data/lnd/lnd.user.conf
 
 O arquivo lnd.user.conf contém apenas opções selecionadas via UI, como alias e limites de canais.

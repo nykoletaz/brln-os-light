@@ -17,7 +17,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/var/lib/lightningos /var/log/lightningos /etc/lightningos /etc/lnd
+ReadWritePaths=/var/lib/lightningos /var/log/lightningos /etc/lightningos /data/lnd
 
 [Install]
 WantedBy=multi-user.target

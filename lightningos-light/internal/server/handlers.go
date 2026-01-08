@@ -22,8 +22,8 @@ import (
 
 const (
   secretsPath = "/etc/lightningos/secrets.env"
-  lndConfPath = "/etc/lnd/lnd.conf"
-  lndUserConfPath = "/etc/lnd/lnd.user.conf"
+  lndConfPath = "/data/lnd/lnd.conf"
+  lndUserConfPath = "/data/lnd/lnd.user.conf"
 )
 
 type healthIssue struct {
