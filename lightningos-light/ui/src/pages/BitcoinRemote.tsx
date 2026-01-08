@@ -7,6 +7,13 @@ export default function BitcoinRemote() {
   const [rpcPass, setRpcPass] = useState('')
   const [message, setMessage] = useState('')
 
+  const syncLabel = (info: any) => {
+    if (!info || typeof info.verification_progress !== 'number') {
+      return 'n/a'
+    }
+    return `${(info.verification_progress * 100).toFixed(2)}%`
+  }
+
   useEffect(() => {
     getBitcoin().then(setStatus).catch(() => null)
   }, [])
@@ -45,6 +52,20 @@ export default function BitcoinRemote() {
           <div>
             <p className="text-fog/60">ZMQ</p>
             <p>{status?.zmq_rawblock_ok && status?.zmq_rawtx_ok ? 'OK' : 'CHECK'}</p>
+          </div>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-3 text-sm">
+          <div>
+            <p className="text-fog/60">Chain</p>
+            <p>{status?.chain || 'n/a'}</p>
+          </div>
+          <div>
+            <p className="text-fog/60">Blocks</p>
+            <p>{status?.blocks ?? 'n/a'}</p>
+          </div>
+          <div>
+            <p className="text-fog/60">Sync</p>
+            <p>{syncLabel(status)}</p>
           </div>
         </div>
       </div>

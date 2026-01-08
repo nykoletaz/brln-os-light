@@ -9,6 +9,13 @@ export default function Dashboard() {
   const [lnd, setLnd] = useState<any>(null)
   const [status, setStatus] = useState('Loading...')
 
+  const syncLabel = (info: any) => {
+    if (!info || typeof info.verification_progress !== 'number') {
+      return 'n/a'
+    }
+    return `${(info.verification_progress * 100).toFixed(2)}%`
+  }
+
   useEffect(() => {
     let mounted = true
     const load = async () => {
@@ -94,6 +101,9 @@ export default function Dashboard() {
               <div className="flex justify-between"><span>RPC</span><span>{bitcoin.rpc_ok ? 'OK' : 'FAIL'}</span></div>
               <div className="flex justify-between"><span>ZMQ Raw Block</span><span>{bitcoin.zmq_rawblock_ok ? 'OK' : 'FAIL'}</span></div>
               <div className="flex justify-between"><span>ZMQ Raw Tx</span><span>{bitcoin.zmq_rawtx_ok ? 'OK' : 'FAIL'}</span></div>
+              <div className="flex justify-between"><span>Chain</span><span>{bitcoin.chain || 'n/a'}</span></div>
+              <div className="flex justify-between"><span>Blocks</span><span>{bitcoin.blocks ?? 'n/a'}</span></div>
+              <div className="flex justify-between"><span>Sync</span><span>{syncLabel(bitcoin)}</span></div>
             </div>
           ) : (
             <p className="text-fog/60 mt-4">Loading bitcoin remote status...</p>

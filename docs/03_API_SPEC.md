@@ -62,6 +62,11 @@ Response:
   "mode": "remote",
   "rpchost": "bitcoin.br-ln.com:8085",
   "rpc_ok": true,
+  "chain": "main",
+  "blocks": 931396,
+  "headers": 931396,
+  "verification_progress": 0.9999,
+  "initial_block_download": false,
   "zmq_rawblock_ok": true,
   "zmq_rawtx_ok": true
 }
@@ -89,12 +94,21 @@ Behavior:
 - Atualizar lnd.conf
 - Restart LND
 Response:
-{ "ok": true }
+{
+  "ok": true,
+  "info": {
+    "chain": "main",
+    "blocks": 931396,
+    "headers": 931396,
+    "verification_progress": 0.9999,
+    "initial_block_download": false
+  }
+}
 
 ### POST /api/wizard/lnd/create-wallet
 Body:
 {
-  "wallet_password": "string"
+  "seed_passphrase": "string (optional)"
 }
 Behavior:
 - Chamar gRPC: GenSeed

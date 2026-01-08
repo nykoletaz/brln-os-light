@@ -14,6 +14,7 @@ export default function Wizard() {
   const [bitcoinHost, setBitcoinHost] = useState('')
   const [zmqBlock, setZmqBlock] = useState('')
   const [zmqTx, setZmqTx] = useState('')
+  const [bitcoinInfo, setBitcoinInfo] = useState<any>(null)
   const [walletMode, setWalletMode] = useState<'create' | 'import'>('create')
   const [walletPassword, setWalletPassword] = useState('')
   const [walletPasswordConfirm, setWalletPasswordConfirm] = useState('')
@@ -28,16 +29,30 @@ export default function Wizard() {
       setBitcoinHost(data.rpchost)
       setZmqBlock(data.zmq_rawblock)
       setZmqTx(data.zmq_rawtx)
+      setBitcoinInfo(data)
     }).catch(() => null)
   }, [])
 
   const next = () => setStep((prev) => Math.min(prev + 1, 4))
 
+  const syncLabel = (info: any) => {
+    if (!info || typeof info.verification_progress !== 'number') {
+      return 'n/a'
+    }
+    return `${(info.verification_progress * 100).toFixed(2)}%`
+  }
+
   const handleBitcoin = async () => {
     setStatus('Testing connection...')
     try {
-      await postBitcoinRemote({ rpcuser: rpcUser, rpcpass: rpcPass })
-      setStatus('Saved. RPC OK.')
+      const res = await postBitcoinRemote({ rpcuser: rpcUser, rpcpass: rpcPass })
+      const info = res?.info
+      if (info) {
+        setBitcoinInfo(info)
+        setStatus(`RPC OK. ${info.chain || 'main'} @ ${info.blocks ?? 'n/a'} (${syncLabel(info)})`)
+      } else {
+        setStatus('Saved. RPC OK.')
+      }
       next()
     } catch (err: any) {
       setStatus(err?.message || 'Failed to validate RPC. Check credentials.')
@@ -45,17 +60,17 @@ export default function Wizard() {
   }
 
   const handleGenerateSeed = async () => {
-    if (!walletPassword || walletPassword !== walletPasswordConfirm) {
+    if ((walletPassword || walletPasswordConfirm) && walletPassword !== walletPasswordConfirm) {
       setStatus('Wallet password mismatch.')
       return
     }
     setStatus('Generating seed...')
     try {
-      const res = await createWalletSeed({ wallet_password: walletPassword })
+      const res = await createWalletSeed()
       setSeedWords(res.seed_words || [])
       setStatus('Seed generated. Write it down.')
-    } catch {
-      setStatus('Seed generation failed.')
+    } catch (err: any) {
+      setStatus(err?.message || 'Seed generation failed.')
     }
   }
 
@@ -125,6 +140,20 @@ export default function Wizard() {
               <p>{zmqTx || 'tcp://bitcoin.br-ln.com:28333'}</p>
             </div>
           </div>
+          <div className="grid gap-4 lg:grid-cols-3 text-sm text-fog/60">
+            <div>
+              <p className="uppercase text-xs">Chain</p>
+              <p>{bitcoinInfo?.chain || 'n/a'}</p>
+            </div>
+            <div>
+              <p className="uppercase text-xs">Blocks</p>
+              <p>{bitcoinInfo?.blocks ?? 'n/a'}</p>
+            </div>
+            <div>
+              <p className="uppercase text-xs">Sync</p>
+              <p>{syncLabel(bitcoinInfo)}</p>
+            </div>
+          </div>
           <div className="grid gap-4 lg:grid-cols-2">
             <input className="input-field" placeholder="RPC user" value={rpcUser} onChange={(e) => setRpcUser(e.target.value)} />
             <input className="input-field" placeholder="RPC password" type="password" value={rpcPass} onChange={(e) => setRpcPass(e.target.value)} />
@@ -144,6 +173,7 @@ export default function Wizard() {
             <input className="input-field" placeholder="Wallet password" type="password" value={walletPassword} onChange={(e) => setWalletPassword(e.target.value)} />
             <input className="input-field" placeholder="Confirm password" type="password" value={walletPasswordConfirm} onChange={(e) => setWalletPasswordConfirm(e.target.value)} />
           </div>
+          <p className="text-xs text-fog/60">Password is required to initialize and unlock the wallet. Seed generation does not require it.</p>
 
           {walletMode === 'create' ? (
             <div className="space-y-3">

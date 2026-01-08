@@ -338,6 +338,25 @@ manager_build_stamp() {
   date +%s
 }
 
+ui_build_stamp() {
+  if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    local rev dirty
+    rev=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo "nogit")
+    dirty=$(git -C "$REPO_ROOT" status --porcelain -- ui 2>/dev/null | sha256sum | awk '{print $1}')
+    echo "${rev}-${dirty}"
+    return
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    find "$REPO_ROOT/ui" -type f ! -path "*/node_modules/*" -print0 \
+      | sort -z \
+      | xargs -0 sha256sum \
+      | sha256sum \
+      | awk '{print $1}'
+    return
+  fi
+  date +%s
+}
+
 install_manager() {
   print_step "Building LightningOS Manager"
   local stamp_file="/opt/lightningos/manager/.build_stamp"
@@ -381,13 +400,25 @@ install_manager() {
 
 install_ui() {
   print_step "Installing UI"
-  if [[ -d "$REPO_ROOT/ui/dist" ]]; then
-    rm -rf /opt/lightningos/ui/*
-    cp -a "$REPO_ROOT/ui/dist/." /opt/lightningos/ui/
-  else
+  local stamp_file="/opt/lightningos/ui/.build_stamp"
+  local current_stamp
+  local need_build="true"
+  current_stamp=$(ui_build_stamp)
+  if [[ -d "$REPO_ROOT/ui/dist" && -f "$stamp_file" ]]; then
+    local existing_stamp
+    existing_stamp=$(cat "$stamp_file" 2>/dev/null || true)
+    if [[ -n "$current_stamp" && "$existing_stamp" == "$current_stamp" ]]; then
+      need_build="false"
+    fi
+  fi
+  if [[ "$need_build" == "true" ]]; then
     build_ui
-    rm -rf /opt/lightningos/ui/*
-    cp -a "$REPO_ROOT/ui/dist/." /opt/lightningos/ui/
+  fi
+  rm -rf /opt/lightningos/ui/*
+  cp -a "$REPO_ROOT/ui/dist/." /opt/lightningos/ui/
+  if [[ -n "$current_stamp" ]]; then
+    echo "$current_stamp" > "$stamp_file"
+    chmod 0644 "$stamp_file"
   fi
   print_ok "UI installed"
 }

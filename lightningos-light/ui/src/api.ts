@@ -38,8 +38,8 @@ export const getLndConfig = () => request('/api/lnd/config')
 export const postBitcoinRemote = (payload: { rpcuser: string; rpcpass: string }) =>
   request('/api/wizard/bitcoin-remote', { method: 'POST', body: JSON.stringify(payload) })
 
-export const createWalletSeed = (payload: { wallet_password: string }) =>
-  request('/api/wizard/lnd/create-wallet', { method: 'POST', body: JSON.stringify(payload) })
+export const createWalletSeed = (payload?: { seed_passphrase?: string; wallet_password?: string }) =>
+  request('/api/wizard/lnd/create-wallet', { method: 'POST', body: JSON.stringify(payload ?? {}) })
 
 export const initWallet = (payload: { wallet_password: string; seed_words: string[] }) =>
   request('/api/wizard/lnd/init-wallet', { method: 'POST', body: JSON.stringify(payload) })

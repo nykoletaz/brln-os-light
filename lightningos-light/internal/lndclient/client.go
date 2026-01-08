@@ -116,7 +116,7 @@ func (c *Client) GetStatus(ctx context.Context) (Status, error) {
   return status, nil
 }
 
-func (c *Client) GenSeed(ctx context.Context, walletPassword string) ([]string, error) {
+func (c *Client) GenSeed(ctx context.Context, seedPassphrase string) ([]string, error) {
   conn, err := c.dial(ctx, false)
   if err != nil {
     return nil, err
@@ -125,7 +125,11 @@ func (c *Client) GenSeed(ctx context.Context, walletPassword string) ([]string, 
 
   client := lnrpc.NewWalletUnlockerClient(conn)
 
-  resp, err := client.GenSeed(ctx, &lnrpc.GenSeedRequest{})
+  req := &lnrpc.GenSeedRequest{}
+  if strings.TrimSpace(seedPassphrase) != "" {
+    req.AezeedPassphrase = []byte(seedPassphrase)
+  }
+  resp, err := client.GenSeed(ctx, req)
   if err != nil {
     return nil, err
   }

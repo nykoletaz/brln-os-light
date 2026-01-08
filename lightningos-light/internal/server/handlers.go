@@ -162,6 +162,12 @@ type bitcoinStatus struct {
   RPCOk bool `json:"rpc_ok"`
   ZMQRawBlockOk bool `json:"zmq_rawblock_ok"`
   ZMQRawTxOk bool `json:"zmq_rawtx_ok"`
+  Chain string `json:"chain,omitempty"`
+  Blocks int64 `json:"blocks,omitempty"`
+  Headers int64 `json:"headers,omitempty"`
+  VerificationProgress float64 `json:"verification_progress,omitempty"`
+  InitialBlockDownload bool `json:"initial_block_download,omitempty"`
+  BestBlockHash string `json:"best_block_hash,omitempty"`
 }
 
 func (s *Server) handleBitcoin(w http.ResponseWriter, r *http.Request) {
@@ -187,8 +193,18 @@ func (s *Server) bitcoinStatus(ctx context.Context) (bitcoinStatus, error) {
   }
 
   if rpcUser != "" && rpcPass != "" {
-    ok, _ := testBitcoinRPC(ctx, s.cfg.BitcoinRemote.RPCHost, rpcUser, rpcPass)
-    status.RPCOk = ok
+    info, err := fetchBitcoinInfo(ctx, s.cfg.BitcoinRemote.RPCHost, rpcUser, rpcPass)
+    if err == nil {
+      status.RPCOk = true
+      status.Chain = info.Chain
+      status.Blocks = info.Blocks
+      status.Headers = info.Headers
+      status.VerificationProgress = info.VerificationProgress
+      status.InitialBlockDownload = info.InitialBlockDownload
+      status.BestBlockHash = info.BestBlockHash
+    } else {
+      status.RPCOk = false
+    }
   }
 
   status.ZMQRawBlockOk = testTCP(s.cfg.BitcoinRemote.ZMQRawBlock)
@@ -281,13 +297,11 @@ func (s *Server) handleWizardBitcoinRemote(w http.ResponseWriter, r *http.Reques
   ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
   defer cancel()
 
-  rpcOk, err := testBitcoinRPC(ctx, s.cfg.BitcoinRemote.RPCHost, req.RPCUser, req.RPCPass)
-  if err != nil || !rpcOk {
+  info, err := fetchBitcoinInfo(ctx, s.cfg.BitcoinRemote.RPCHost, req.RPCUser, req.RPCPass)
+  if err != nil {
     msg := "bitcoin rpc check failed"
-    if err != nil {
-      msg = fmt.Sprintf("bitcoin rpc check failed: %v", err)
-      s.logger.Printf("bitcoin rpc check failed: %v", err)
-    }
+    msg = fmt.Sprintf("bitcoin rpc check failed: %v", err)
+    s.logger.Printf("bitcoin rpc check failed: %v", err)
     writeError(w, http.StatusBadRequest, msg)
     return
   }
@@ -305,28 +319,30 @@ func (s *Server) handleWizardBitcoinRemote(w http.ResponseWriter, r *http.Reques
 
   _ = system.SystemctlRestart(ctx, "lnd")
 
-  writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+  writeJSON(w, http.StatusOK, map[string]any{"ok": true, "info": info})
 }
 
 func (s *Server) handleCreateWallet(w http.ResponseWriter, r *http.Request) {
   var req struct {
     WalletPassword string `json:"wallet_password"`
+    SeedPassphrase string `json:"seed_passphrase"`
   }
   if err := readJSON(r, &req); err != nil {
     writeError(w, http.StatusBadRequest, "invalid json")
-    return
-  }
-  if req.WalletPassword == "" {
-    writeError(w, http.StatusBadRequest, "wallet_password required")
     return
   }
 
   ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
   defer cancel()
 
-  seed, err := s.lnd.GenSeed(ctx, req.WalletPassword)
+  seedPassphrase := strings.TrimSpace(req.SeedPassphrase)
+  if seedPassphrase == "" {
+    seedPassphrase = strings.TrimSpace(req.WalletPassword)
+  }
+  seed, err := s.lnd.GenSeed(ctx, seedPassphrase)
   if err != nil {
-    writeError(w, http.StatusInternalServerError, "gen seed failed")
+    s.logger.Printf("gen seed failed: %v", err)
+    writeError(w, http.StatusInternalServerError, fmt.Sprintf("gen seed failed: %v", err))
     return
   }
 
@@ -691,11 +707,27 @@ func (e rpcStatusError) Error() string {
   return fmt.Sprintf("rpc status %d: %s", e.statusCode, e.message)
 }
 
+type rpcErrorDetail struct {
+  Code int `json:"code"`
+  Message string `json:"message"`
+}
+
 type rpcErrorPayload struct {
-  Error *struct {
-    Code int `json:"code"`
-    Message string `json:"message"`
-  } `json:"error"`
+  Error *rpcErrorDetail `json:"error"`
+}
+
+type bitcoinInfo struct {
+  Chain string `json:"chain"`
+  Blocks int64 `json:"blocks"`
+  Headers int64 `json:"headers"`
+  VerificationProgress float64 `json:"verificationprogress"`
+  InitialBlockDownload bool `json:"initialblockdownload"`
+  BestBlockHash string `json:"bestblockhash"`
+}
+
+type bitcoinRPCResponse struct {
+  Result bitcoinInfo `json:"result"`
+  Error *rpcErrorDetail `json:"error"`
 }
 
 func parseRPCError(body []byte) string {
@@ -709,7 +741,18 @@ func parseRPCError(body []byte) string {
   return payload.Error.Message
 }
 
-func doBitcoinRPC(ctx context.Context, url, user, pass string) (bool, error) {
+func parseBitcoinInfo(body []byte) (bitcoinInfo, error) {
+  var payload bitcoinRPCResponse
+  if err := json.Unmarshal(body, &payload); err != nil {
+    return bitcoinInfo{}, err
+  }
+  if payload.Error != nil {
+    return bitcoinInfo{}, fmt.Errorf(payload.Error.Message)
+  }
+  return payload.Result, nil
+}
+
+func doBitcoinRPC(ctx context.Context, url, user, pass string) ([]byte, error) {
   payload := map[string]any{
     "jsonrpc": "1.0",
     "id": "lightningos",
@@ -727,47 +770,59 @@ func doBitcoinRPC(ctx context.Context, url, user, pass string) (bool, error) {
 
   resp, err := http.DefaultClient.Do(req)
   if err != nil {
-    return false, err
+    return nil, err
   }
   defer resp.Body.Close()
 
   body, _ := io.ReadAll(resp.Body)
   if resp.StatusCode != http.StatusOK {
     msg := parseRPCError(body)
-    return false, rpcStatusError{statusCode: resp.StatusCode, message: msg}
+    return nil, rpcStatusError{statusCode: resp.StatusCode, message: msg}
   }
 
   if msg := parseRPCError(body); msg != "" {
-    return false, rpcStatusError{statusCode: resp.StatusCode, message: msg}
+    return nil, rpcStatusError{statusCode: resp.StatusCode, message: msg}
   }
-  return true, nil
+  return body, nil
 }
 
-func testBitcoinRPC(ctx context.Context, host, user, pass string) (bool, error) {
+func fetchBitcoinInfo(ctx context.Context, host, user, pass string) (bitcoinInfo, error) {
   if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
-    return doBitcoinRPC(ctx, host, user, pass)
+    body, err := doBitcoinRPC(ctx, host, user, pass)
+    if err != nil {
+      return bitcoinInfo{}, err
+    }
+    return parseBitcoinInfo(body)
   }
 
-  ok, err := doBitcoinRPC(ctx, "http://"+host, user, pass)
-  if err == nil && ok {
-    return ok, nil
+  body, err := doBitcoinRPC(ctx, "http://"+host, user, pass)
+  if err == nil {
+    return parseBitcoinInfo(body)
   }
   var statusErr rpcStatusError
   if err != nil && errors.As(err, &statusErr) {
-    return false, err
+    return bitcoinInfo{}, err
   }
 
-  ok, httpsErr := doBitcoinRPC(ctx, "https://"+host, user, pass)
-  if httpsErr == nil && ok {
-    return ok, nil
+  body, httpsErr := doBitcoinRPC(ctx, "https://"+host, user, pass)
+  if httpsErr == nil {
+    return parseBitcoinInfo(body)
   }
   if err != nil && httpsErr != nil {
-    return false, fmt.Errorf("rpc http failed: %v; https failed: %v", err, httpsErr)
+    return bitcoinInfo{}, fmt.Errorf("rpc http failed: %v; https failed: %v", err, httpsErr)
   }
+  if err != nil {
+    return bitcoinInfo{}, err
+  }
+  return bitcoinInfo{}, httpsErr
+}
+
+func testBitcoinRPC(ctx context.Context, host, user, pass string) (bool, error) {
+  _, err := fetchBitcoinInfo(ctx, host, user, pass)
   if err != nil {
     return false, err
   }
-  return false, httpsErr
+  return true, nil
 }
 
 func storeBitcoinSecrets(user, pass string) error {
