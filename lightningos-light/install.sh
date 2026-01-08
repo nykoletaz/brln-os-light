@@ -173,6 +173,8 @@ ensure_dirs() {
 prepare_lnd_data_dir() {
   print_step "Preparing LND data directory"
   mkdir -p /data "$LND_DIR" /var/log/lnd
+  chown -R lnd:lnd /data
+  chmod 750 /data
   chown -R lnd:lnd "$LND_DIR" /var/log/lnd
   chmod 750 "$LND_DIR" /var/log/lnd
   if [[ ! -e /home/lnd/.lnd ]]; then

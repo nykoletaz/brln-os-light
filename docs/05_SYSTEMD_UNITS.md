@@ -9,7 +9,7 @@ After=network-online.target postgresql.service
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/bin/lnd
+ExecStart=/usr/local/bin/lnd --lnddir=/home/lnd/.lnd
 ExecStop=/usr/local/bin/lncli stop
 
 # Gerenciamento de processo

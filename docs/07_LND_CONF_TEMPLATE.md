@@ -57,10 +57,6 @@ wtclient.sweep-fee-rate=10
 [routing]
 routing.strictgraphpruning=true
 
-[RPC]
-rpclisten=127.0.0.1:10009
-restlisten=127.0.0.1:8080
-
 # DB backend: postgres
 [db]
 db.backend=postgres
