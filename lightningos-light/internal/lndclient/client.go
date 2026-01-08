@@ -3,6 +3,7 @@ package lndclient
 import (
   "context"
   "crypto/x509"
+  "encoding/hex"
   "fmt"
   "log"
   "os"
@@ -10,9 +11,8 @@ import (
   "time"
 
   "lightningos-light/internal/config"
+  "lightningos-light/lnrpc"
 
-  "github.com/lightningnetwork/lnd/lnrpc"
-  "github.com/lightningnetwork/lnd/macaroons"
   "google.golang.org/grpc"
   "google.golang.org/grpc/credentials"
 )
@@ -24,6 +24,18 @@ type Client struct {
 
 func New(cfg *config.Config, logger *log.Logger) *Client {
   return &Client{cfg: cfg, logger: logger}
+}
+
+type macaroonCredential struct {
+  macaroon string
+}
+
+func (m macaroonCredential) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+  return map[string]string{"macaroon": m.macaroon}, nil
+}
+
+func (m macaroonCredential) RequireTransportSecurity() bool {
+  return true
 }
 
 func (c *Client) dial(ctx context.Context, withMacaroon bool) (*grpc.ClientConn, error) {
@@ -40,14 +52,11 @@ func (c *Client) dial(ctx context.Context, withMacaroon bool) (*grpc.ClientConn,
   opts := []grpc.DialOption{grpc.WithTransportCredentials(creds)}
 
   if withMacaroon {
-    mac, err := os.ReadFile(c.cfg.LND.AdminMacaroonPath)
+    macBytes, err := os.ReadFile(c.cfg.LND.AdminMacaroonPath)
     if err != nil {
       return nil, err
     }
-    macCred, err := macaroons.NewMacaroonCredential(mac)
-    if err != nil {
-      return nil, err
-    }
+    macCred := macaroonCredential{hex.EncodeToString(macBytes)}
     opts = append(opts, grpc.WithPerRPCCredentials(macCred))
   }
 
@@ -76,7 +85,7 @@ func (c *Client) GetStatus(ctx context.Context) (Status, error) {
     WalletState: "unlocked",
     SyncedToChain: info.SyncedToChain,
     SyncedToGraph: info.SyncedToGraph,
-    BlockHeight: info.BlockHeight,
+    BlockHeight: int64(info.BlockHeight),
   }
 
   channels, err := client.ListChannels(ctx, &lnrpc.ListChannelsRequest{})
