@@ -143,6 +143,38 @@ ensure_dirs() {
   print_ok "Directories ready"
 }
 
+fix_permissions() {
+  print_step "Fixing permissions"
+  chown root:lightningos /etc/lightningos /etc/lightningos/tls
+  chmod 750 /etc/lightningos /etc/lightningos/tls
+  if [[ -f /etc/lightningos/config.yaml ]]; then
+    chown root:lightningos /etc/lightningos/config.yaml
+    chmod 640 /etc/lightningos/config.yaml
+  fi
+  if [[ -f /etc/lightningos/tls/server.crt ]]; then
+    chown root:lightningos /etc/lightningos/tls/server.crt
+    chmod 640 /etc/lightningos/tls/server.crt
+  fi
+  if [[ -f /etc/lightningos/tls/server.key ]]; then
+    chown root:lightningos /etc/lightningos/tls/server.key
+    chmod 640 /etc/lightningos/tls/server.key
+  fi
+  if [[ -f /etc/lightningos/secrets.env ]]; then
+    chown root:root /etc/lightningos/secrets.env
+    chmod 600 /etc/lightningos/secrets.env
+  fi
+  if [[ -f /etc/lnd/lnd.conf ]]; then
+    chown root:lightningos /etc/lnd/lnd.conf
+    chmod 664 /etc/lnd/lnd.conf
+  fi
+  if [[ -f /etc/lnd/lnd.user.conf ]]; then
+    chown root:lightningos /etc/lnd/lnd.user.conf
+    chmod 664 /etc/lnd/lnd.user.conf
+  fi
+  chown -R lightningos:lightningos /var/lib/lightningos /var/log/lightningos
+  print_ok "Permissions updated"
+}
+
 copy_templates() {
   print_step "Copying config templates"
   if [[ ! -f /etc/lightningos/config.yaml ]]; then
@@ -360,6 +392,46 @@ service_status_summary() {
   done
 }
 
+show_manager_logs() {
+  if command -v journalctl >/dev/null 2>&1; then
+    print_warn "Recent lightningos-manager logs:"
+    journalctl -u lightningos-manager -n 200 --no-pager || true
+  else
+    print_warn "journalctl not available; skipping logs"
+  fi
+}
+
+verify_manager_listener() {
+  print_step "Verifying manager listener"
+  if ! systemctl is-active --quiet lightningos-manager; then
+    print_warn "lightningos-manager is not active"
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl status lightningos-manager --no-pager || true
+    fi
+    show_manager_logs
+    return
+  fi
+
+  if command -v ss >/dev/null 2>&1; then
+    if ss -ltn | grep -q ':8443'; then
+      print_ok "Port 8443 is listening"
+    else
+      print_warn "Port 8443 is not listening"
+      show_manager_logs
+    fi
+  else
+    print_warn "ss not available; skipping port check"
+  fi
+
+  if command -v curl >/dev/null 2>&1; then
+    if curl -sk --max-time 3 https://127.0.0.1:8443/api/health >/dev/null; then
+      print_ok "Health endpoint reachable"
+    else
+      print_warn "Health endpoint not reachable"
+    fi
+  fi
+}
+
 main() {
   require_root
   print_step "LightningOS Light installation starting"
@@ -370,13 +442,16 @@ main() {
   install_node
   ensure_dirs
   copy_templates
+  fix_permissions
   postgres_setup
   install_lnd
   install_manager
   install_ui
   generate_tls
+  fix_permissions
   install_systemd
   service_status_summary
+  verify_manager_listener
   local_ip=$(get_lan_ip)
   echo ""
   echo "Installation complete."

@@ -1,6 +1,6 @@
 # LightningOS Light
 
-LightningOS Light is a local-only Lightning node manager with a guided wizard, dashboard, and wallet. The manager serves the UI and API over HTTPS on `127.0.0.1:8443` and integrates with systemd, Postgres, smartctl, and LND gRPC.
+LightningOS Light is a Lightning node manager with a guided wizard, dashboard, and wallet. The manager serves the UI and API over HTTPS on `0.0.0.0:8443` by default for LAN access (set `server.host: "127.0.0.1"` for local-only) and integrates with systemd, Postgres, smartctl, and LND gRPC.
 
 ## Highlights
 - Mainnet only (remote Bitcoin default)
@@ -13,7 +13,7 @@ LightningOS Light is a local-only Lightning node manager with a guided wizard, d
 - `cmd/lightningos-manager`: Go backend (API + static UI)
 - `ui`: React + Tailwind UI
 - `templates`: systemd units and config templates
-- `scripts/install.sh`: idempotent installer
+- `install.sh`: idempotent installer (wrapper in `scripts/install.sh`)
 - `configs/config.yaml`: local dev config
 
 ## Install (Ubuntu Server)
@@ -45,6 +45,14 @@ Access the UI from another machine on the same LAN:
 Notes:
 - You can override LND URL with `LND_URL=...` or version with `LND_VERSION=...`.
 - The installer will generate a Postgres role and update `LND_PG_DSN` in `/etc/lightningos/secrets.env`.
+
+## Troubleshooting
+If `https://<SERVER_LAN_IP>:8443` is not reachable:
+```bash
+systemctl status lightningos-manager --no-pager
+journalctl -u lightningos-manager -n 200 --no-pager
+ss -ltn | grep :8443
+```
 
 ## Development
 See `DEVELOPMENT.md` for local dev setup and build instructions.
