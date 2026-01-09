@@ -49,9 +49,21 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
   defer lndCancel()
   lndStatus, err := s.lnd.GetStatus(lndCtx)
   if err != nil {
-    if isTimeoutError(err) && s.lndWarmupActive() {
-      issues = append(issues, healthIssue{Component: "lnd", Level: "WARN", Message: "LND warming up after restart"})
-      status = elevate(status, "WARN")
+    if isTimeoutError(err) {
+      if s.lndWarmupActive() {
+        issues = append(issues, healthIssue{Component: "lnd", Level: "WARN", Message: "LND warming up after restart (GetInfo timeout)"})
+        status = elevate(status, "WARN")
+      } else {
+        probeCtx, probeCancel := context.WithTimeout(r.Context(), 3*time.Second)
+        defer probeCancel()
+        if _, peerErr := s.lnd.ListPeers(probeCtx); peerErr == nil {
+          issues = append(issues, healthIssue{Component: "lnd", Level: "WARN", Message: "LND GetInfo timeout (gRPC reachable)"})
+          status = elevate(status, "WARN")
+        } else {
+          issues = append(issues, healthIssue{Component: "lnd", Level: "ERR", Message: lndStatusMessage(err)})
+          status = elevate(status, "ERR")
+        }
+      }
     } else {
       issues = append(issues, healthIssue{Component: "lnd", Level: "ERR", Message: lndStatusMessage(err)})
       status = elevate(status, "ERR")
