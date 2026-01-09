@@ -22,6 +22,8 @@ export default function Wallet() {
   const [amount, setAmount] = useState('')
   const [memo, setMemo] = useState('')
   const [invoice, setInvoice] = useState('')
+  const [invoiceCopied, setInvoiceCopied] = useState(false)
+  const [invoiceNotice, setInvoiceNotice] = useState('')
   const [paymentRequest, setPaymentRequest] = useState('')
   const [status, setStatus] = useState('')
 
@@ -87,6 +89,8 @@ export default function Wallet() {
 
   const handleInvoice = async () => {
     setStatus('Creating invoice...')
+    setInvoiceNotice('')
+    setInvoiceCopied(false)
     try {
       const res = await createInvoice({ amount_sat: Number(amount), memo })
       setInvoice(res.payment_request)
@@ -94,6 +98,22 @@ export default function Wallet() {
     } catch {
       setStatus('Invoice failed.')
     }
+  }
+
+  const handleCopyInvoice = async () => {
+    if (!invoice) return
+    try {
+      await navigator.clipboard.writeText(invoice)
+      setInvoiceCopied(true)
+    } catch {
+      setInvoiceNotice('Copy failed. Select and copy manually.')
+    }
+  }
+
+  const handleClearInvoice = () => {
+    setInvoice('')
+    setInvoiceCopied(false)
+    setInvoiceNotice('')
   }
 
   const handlePay = async () => {
@@ -173,7 +193,23 @@ export default function Wallet() {
           <input className="input-field" placeholder="Memo" value={memo} onChange={(e) => setMemo(e.target.value)} />
           <button className="btn-primary" onClick={handleInvoice}>Generate invoice</button>
           {invoice && (
-            <textarea className="input-field min-h-[120px]" value={invoice} readOnly />
+            <div className="rounded-2xl border border-white/10 bg-ink/60 p-3">
+              <div className="flex items-center justify-between text-xs text-fog/60">
+                <span>Invoice (Lightning)</span>
+                <button className="text-fog/50 hover:text-fog" onClick={handleClearInvoice}>
+                  Close
+                </button>
+              </div>
+              <p className="mt-2 text-xs font-mono break-all">{invoice}</p>
+              <div className="mt-2 flex items-center gap-2">
+                <button className="btn-secondary text-xs px-3 py-1.5" onClick={handleCopyInvoice}>
+                  {invoiceCopied ? 'Copied' : 'Copy invoice'}
+                </button>
+              </div>
+              {invoiceNotice && (
+                <p className="mt-2 text-xs text-ember">{invoiceNotice}</p>
+              )}
+            </div>
           )}
         </div>
 
