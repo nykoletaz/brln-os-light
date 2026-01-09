@@ -25,6 +25,7 @@ const (
   lndConfPath = "/data/lnd/lnd.conf"
   lndPasswordPath = "/data/lnd/password.txt"
   lndWalletDBPath = "/data/lnd/data/chain/bitcoin/mainnet/wallet.db"
+  lndRPCTimeout = 10 * time.Second
 )
 
 type healthIssue struct {
@@ -40,7 +41,7 @@ type healthResponse struct {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-  ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+  ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
   defer cancel()
 
   issues := []healthIssue{}
@@ -315,7 +316,7 @@ type lndStatusResponse struct {
 }
 
 func (s *Server) handleLNDStatus(w http.ResponseWriter, r *http.Request) {
-  ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+  ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
   defer cancel()
 
   resp := lndStatusResponse{}
@@ -769,7 +770,7 @@ func updateLNDConfOptions(raw string, alias string, minChanSize int64, maxChanSi
 }
 
 func (s *Server) handleWalletSummary(w http.ResponseWriter, r *http.Request) {
-  ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+  ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
   defer cancel()
 
   status, err := s.lnd.GetStatus(ctx)

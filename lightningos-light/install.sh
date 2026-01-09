@@ -312,6 +312,12 @@ fix_permissions() {
     chown lnd:lnd "$LND_DIR/data/chain/bitcoin/mainnet/admin.macaroon"
     chmod 640 "$LND_DIR/data/chain/bitcoin/mainnet/admin.macaroon"
   fi
+  for dir in "$LND_DIR/data" "$LND_DIR/data/chain" "$LND_DIR/data/chain/bitcoin" "$LND_DIR/data/chain/bitcoin/mainnet"; do
+    if [[ -d "$dir" ]]; then
+      chown lnd:lnd "$dir"
+      chmod 750 "$dir"
+    fi
+  done
   chown -R lightningos:lightningos /var/lib/lightningos /var/log/lightningos
   print_ok "Permissions updated"
 }
