@@ -241,8 +241,26 @@ func (s *Server) uninstallLndg(ctx context.Context) error {
 
 func (s *Server) startLndg(ctx context.Context) error {
   paths := lndgAppPaths()
-  if !fileExists(paths.ComposePath) {
-    return errors.New("LNDg is not installed")
+  if err := os.MkdirAll(paths.Root, 0750); err != nil {
+    return fmt.Errorf("failed to create app directory: %w", err)
+  }
+  if err := os.MkdirAll(paths.DataDir, 0750); err != nil {
+    return fmt.Errorf("failed to create app data directory: %w", err)
+  }
+  if err := os.MkdirAll(paths.PgDir, 0750); err != nil {
+    return fmt.Errorf("failed to create app db directory: %w", err)
+  }
+  if err := ensureFile(paths.DockerfilePath, lndgDockerfile); err != nil {
+    return err
+  }
+  if err := ensureFile(paths.EntrypointPath, lndgEntrypoint); err != nil {
+    return err
+  }
+  if err := ensureFile(paths.ComposePath, lndgComposeContents(paths)); err != nil {
+    return err
+  }
+  if err := ensureLndgEnv(paths); err != nil {
+    return err
   }
   return runCompose(ctx, paths.Root, paths.ComposePath, "up", "-d")
 }
@@ -630,8 +648,8 @@ ADMIN_FILE="$DATA_DIR/lndg-admin.txt"
 
 mkdir -p "$DATA_DIR"
 
-if [ ! -f "$SETTINGS_FILE" ]; then
-  python initialize.py -d -net "$LNDG_NETWORK" -rpc "$LNDG_RPC_SERVER" -lnddir "$LNDG_LND_DIR" -wn -f
+  if [ ! -f "$SETTINGS_FILE" ]; then
+  python initialize.py -d -net "$LNDG_NETWORK" -rpc "$LNDG_RPC_SERVER" -dir "$LNDG_LND_DIR" -wn -f
 fi
 
 python - <<'PY'
