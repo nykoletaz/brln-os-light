@@ -643,6 +643,19 @@ func (s *Server) handleLNChannels(w http.ResponseWriter, r *http.Request) {
   })
 }
 
+func (s *Server) handleLNPeers(w http.ResponseWriter, r *http.Request) {
+  ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
+  defer cancel()
+
+  peers, err := s.lnd.ListPeers(ctx)
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, lndStatusMessage(err))
+    return
+  }
+
+  writeJSON(w, http.StatusOK, map[string]any{"peers": peers})
+}
+
 func (s *Server) handleLNConnectPeer(w http.ResponseWriter, r *http.Request) {
   var req struct {
     Address string `json:"address"`

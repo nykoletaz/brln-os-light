@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { closeChannel, connectPeer, getLnChannels, openChannel, updateChannelFees } from '../api'
+import { closeChannel, connectPeer, getLnChannels, getLnPeers, openChannel, updateChannelFees } from '../api'
 
 type Channel = {
   channel_point: string
@@ -13,15 +13,35 @@ type Channel = {
   remote_balance_sat: number
 }
 
+type Peer = {
+  pub_key: string
+  address: string
+  inbound: boolean
+  bytes_sent: number
+  bytes_recv: number
+  sat_sent: number
+  sat_recv: number
+  ping_time: number
+  sync_type: string
+  last_error: string
+}
+
 export default function LightningOps() {
   const [channels, setChannels] = useState<Channel[]>([])
   const [activeCount, setActiveCount] = useState(0)
   const [inactiveCount, setInactiveCount] = useState(0)
   const [status, setStatus] = useState('')
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [search, setSearch] = useState('')
+  const [minCapacity, setMinCapacity] = useState('')
+  const [sortBy, setSortBy] = useState<'capacity' | 'local' | 'remote' | 'alias'>('capacity')
+  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc')
+  const [showPrivate, setShowPrivate] = useState(true)
 
   const [peerAddress, setPeerAddress] = useState('')
   const [peerStatus, setPeerStatus] = useState('')
+  const [peers, setPeers] = useState<Peer[]>([])
+  const [peerListStatus, setPeerListStatus] = useState('')
 
   const [openPubkey, setOpenPubkey] = useState('')
   const [openAmount, setOpenAmount] = useState('')
@@ -42,15 +62,29 @@ export default function LightningOps() {
 
   const load = async () => {
     setStatus('Loading channels...')
-    try {
-      const res = await getLnChannels()
+    setPeerListStatus('Loading peers...')
+    const [channelsResult, peersResult] = await Promise.allSettled([
+      getLnChannels(),
+      getLnPeers()
+    ])
+    if (channelsResult.status === 'fulfilled') {
+      const res = channelsResult.value
       const list = Array.isArray(res?.channels) ? res.channels : []
       setChannels(list)
       setActiveCount(res?.active_count ?? 0)
       setInactiveCount(res?.inactive_count ?? 0)
       setStatus('')
-    } catch (err: any) {
-      setStatus(err?.message || 'Failed to load channels.')
+    } else {
+      const message = (channelsResult.reason as any)?.message || 'Failed to load channels.'
+      setStatus(message)
+    }
+    if (peersResult.status === 'fulfilled') {
+      const res = peersResult.value
+      setPeers(Array.isArray(res?.peers) ? res.peers : [])
+      setPeerListStatus('')
+    } else {
+      const message = (peersResult.reason as any)?.message || 'Failed to load peers.'
+      setPeerListStatus(message)
     }
   }
 
@@ -59,14 +93,52 @@ export default function LightningOps() {
   }, [])
 
   const filteredChannels = useMemo(() => {
+    let list = channels
     if (filter === 'active') {
-      return channels.filter((ch) => ch.active)
+      list = list.filter((ch) => ch.active)
     }
     if (filter === 'inactive') {
-      return channels.filter((ch) => !ch.active)
+      list = list.filter((ch) => !ch.active)
     }
-    return channels
-  }, [channels, filter])
+    if (!showPrivate) {
+      list = list.filter((ch) => !ch.private)
+    }
+    if (search.trim()) {
+      const query = search.trim().toLowerCase()
+      list = list.filter((ch) => {
+        return (
+          ch.peer_alias?.toLowerCase().includes(query) ||
+          ch.remote_pubkey?.toLowerCase().includes(query) ||
+          ch.channel_point?.toLowerCase().includes(query)
+        )
+      })
+    }
+    const minCap = Number(minCapacity || 0)
+    if (minCap > 0) {
+      list = list.filter((ch) => ch.capacity_sat >= minCap)
+    }
+    const sorted = [...list]
+    const direction = sortDir === 'desc' ? -1 : 1
+    sorted.sort((a, b) => {
+      if (sortBy === 'alias') {
+        const aVal = (a.peer_alias || a.remote_pubkey || '').toLowerCase()
+        const bVal = (b.peer_alias || b.remote_pubkey || '').toLowerCase()
+        return aVal.localeCompare(bVal) * direction
+      }
+      const aVal = sortBy === 'capacity'
+        ? a.capacity_sat
+        : sortBy === 'local'
+          ? a.local_balance_sat
+          : a.remote_balance_sat
+      const bVal = sortBy === 'capacity'
+        ? b.capacity_sat
+        : sortBy === 'local'
+          ? b.local_balance_sat
+          : b.remote_balance_sat
+      return (aVal - bVal) * direction
+    })
+    return sorted
+  }, [channels, filter, minCapacity, search, showPrivate, sortBy, sortDir])
 
   const handleConnectPeer = async () => {
     setPeerStatus('Connecting...')
@@ -305,10 +377,41 @@ export default function LightningOps() {
       <div className="section-card space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-semibold">Channels</h3>
-          <div className="flex gap-2 text-xs">
+          <div className="flex flex-wrap gap-2 text-xs">
             <button className={filter === 'all' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('all')}>All</button>
             <button className={filter === 'active' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('active')}>Active</button>
             <button className={filter === 'inactive' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('inactive')}>Inactive</button>
+          </div>
+        </div>
+        <div className="grid gap-3 lg:grid-cols-4">
+          <input
+            className="input-field"
+            placeholder="Search alias, pubkey, or channel point"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <input
+            className="input-field"
+            placeholder="Min capacity (sat)"
+            type="number"
+            min={0}
+            value={minCapacity}
+            onChange={(e) => setMinCapacity(e.target.value)}
+          />
+          <select className="input-field" value={sortBy} onChange={(e) => setSortBy(e.target.value as any)}>
+            <option value="capacity">Sort by capacity</option>
+            <option value="local">Sort by local balance</option>
+            <option value="remote">Sort by remote balance</option>
+            <option value="alias">Sort by peer</option>
+          </select>
+          <div className="flex items-center gap-2">
+            <button className="btn-secondary text-xs px-3 py-2" onClick={() => setSortDir(sortDir === 'desc' ? 'asc' : 'desc')}>
+              {sortDir === 'desc' ? 'Desc' : 'Asc'}
+            </button>
+            <label className="flex items-center gap-2 text-xs text-fog/70">
+              <input type="checkbox" checked={showPrivate} onChange={(e) => setShowPrivate(e.target.checked)} />
+              Show private
+            </label>
           </div>
         </div>
         {filteredChannels.length ? (
@@ -329,11 +432,56 @@ export default function LightningOps() {
                   <div>Local: <span className="text-fog">{ch.local_balance_sat} sat</span></div>
                   <div>Remote: <span className="text-fog">{ch.remote_balance_sat} sat</span></div>
                 </div>
+                <div className="mt-2 text-xs text-fog/50">
+                  {ch.private ? 'Private channel' : 'Public channel'}
+                </div>
               </div>
             ))}
           </div>
         ) : (
           <p className="text-sm text-fog/60">No channels found.</p>
+        )}
+      </div>
+
+      <div className="section-card space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold">Peers</h3>
+          <span className="text-xs text-fog/60">Connected: {peers.length}</span>
+        </div>
+        {peerListStatus && <p className="text-sm text-brass">{peerListStatus}</p>}
+        {peers.length ? (
+          <div className="grid gap-3">
+            {peers.map((peer) => (
+              <div key={peer.pub_key} className="rounded-2xl border border-white/10 bg-ink/60 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-fog/60">{peer.pub_key}</p>
+                    <p className="text-xs text-fog/50">{peer.address || 'address unknown'}</p>
+                  </div>
+                  <span className="rounded-full px-3 py-1 text-xs bg-white/10 text-fog/70">
+                    {peer.inbound ? 'Inbound' : 'Outbound'}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-3 lg:grid-cols-3 text-xs text-fog/70">
+                  <div>Sat sent: <span className="text-fog">{peer.sat_sent}</span></div>
+                  <div>Sat recv: <span className="text-fog">{peer.sat_recv}</span></div>
+                  <div>Ping: <span className="text-fog">{peer.ping_time} ms</span></div>
+                </div>
+                <div className="mt-2 grid gap-3 lg:grid-cols-2 text-xs text-fog/60">
+                  <div>Bytes sent: <span className="text-fog">{peer.bytes_sent}</span></div>
+                  <div>Bytes recv: <span className="text-fog">{peer.bytes_recv}</span></div>
+                </div>
+                {peer.sync_type && (
+                  <p className="mt-2 text-xs text-fog/50">Sync: {peer.sync_type}</p>
+                )}
+                {peer.last_error && (
+                  <p className="mt-2 text-xs text-ember">Last error: {peer.last_error}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-fog/60">No connected peers found.</p>
         )}
       </div>
     </section>

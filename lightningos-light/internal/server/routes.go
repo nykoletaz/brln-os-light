@@ -39,6 +39,7 @@ func (s *Server) routes() http.Handler {
 
   r.Route("/api/lnops", func(r chi.Router) {
     r.Get("/channels", s.handleLNChannels)
+    r.Get("/peers", s.handleLNPeers)
     r.Post("/peer", s.handleLNConnectPeer)
     r.Post("/channel/open", s.handleLNOpenChannel)
     r.Post("/channel/close", s.handleLNCloseChannel)

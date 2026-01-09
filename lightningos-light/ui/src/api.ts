@@ -72,6 +72,7 @@ export const payInvoice = (payload: { payment_request: string }) =>
   request('/api/wallet/pay', { method: 'POST', body: JSON.stringify(payload) })
 
 export const getLnChannels = () => request('/api/lnops/channels')
+export const getLnPeers = () => request('/api/lnops/peers')
 export const connectPeer = (payload: { address?: string; pubkey?: string; host?: string }) =>
   request('/api/lnops/peer', { method: 'POST', body: JSON.stringify(payload) })
 export const openChannel = (payload: {

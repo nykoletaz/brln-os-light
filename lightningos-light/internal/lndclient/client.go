@@ -296,6 +296,43 @@ func (c *Client) ListChannels(ctx context.Context) ([]ChannelInfo, error) {
   return channels, nil
 }
 
+func (c *Client) ListPeers(ctx context.Context) ([]PeerInfo, error) {
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return nil, err
+  }
+  defer conn.Close()
+
+  client := lnrpc.NewLightningClient(conn)
+
+  resp, err := client.ListPeers(ctx, &lnrpc.ListPeersRequest{LatestError: true})
+  if err != nil {
+    return nil, err
+  }
+
+  peers := make([]PeerInfo, 0, len(resp.Peers))
+  for _, peer := range resp.Peers {
+    lastErr := ""
+    if len(peer.Errors) > 0 {
+      lastErr = peer.Errors[len(peer.Errors)-1].GetMessage()
+    }
+    peers = append(peers, PeerInfo{
+      PubKey: peer.PubKey,
+      Address: peer.Address,
+      Inbound: peer.Inbound,
+      BytesSent: peer.BytesSent,
+      BytesRecv: peer.BytesRecv,
+      SatSent: peer.SatSent,
+      SatRecv: peer.SatRecv,
+      PingTime: peer.PingTime,
+      SyncType: peer.SyncType.String(),
+      LastError: lastErr,
+    })
+  }
+
+  return peers, nil
+}
+
 func (c *Client) ConnectPeer(ctx context.Context, pubkey string, host string) error {
   conn, err := c.dial(ctx, true)
   if err != nil {
@@ -470,6 +507,19 @@ type ChannelInfo struct {
   CapacitySat int64 `json:"capacity_sat"`
   LocalBalanceSat int64 `json:"local_balance_sat"`
   RemoteBalanceSat int64 `json:"remote_balance_sat"`
+}
+
+type PeerInfo struct {
+  PubKey string `json:"pub_key"`
+  Address string `json:"address"`
+  Inbound bool `json:"inbound"`
+  BytesSent uint64 `json:"bytes_sent"`
+  BytesRecv uint64 `json:"bytes_recv"`
+  SatSent int64 `json:"sat_sent"`
+  SatRecv int64 `json:"sat_recv"`
+  PingTime int64 `json:"ping_time"`
+  SyncType string `json:"sync_type"`
+  LastError string `json:"last_error"`
 }
 
 type RecentActivity struct {
