@@ -346,11 +346,17 @@ func ensureDocker(ctx context.Context) error {
 }
 
 func installDocker(ctx context.Context) error {
-  if err := runApt(ctx, "update"); err != nil {
+  if _, err := runApt(ctx, "update"); err != nil {
     return err
   }
-  if err := runApt(ctx, "install", "-y", "docker.io", "docker-compose-plugin"); err != nil {
-    return err
+  out, err := runApt(ctx, "install", "-y", "docker.io", "docker-compose-plugin")
+  if err != nil {
+    if strings.Contains(out, "Unable to locate package docker-compose-plugin") {
+      out, err = runApt(ctx, "install", "-y", "docker.io", "docker-compose")
+    }
+    if err != nil {
+      return fmt.Errorf("docker install failed: %s", strings.TrimSpace(out))
+    }
   }
   if _, err := system.RunCommandWithSudo(ctx, "systemctl", "enable", "--now", "docker"); err != nil {
     return fmt.Errorf("failed to start docker: %w", err)
@@ -362,8 +368,14 @@ func ensureCompose(ctx context.Context) error {
   if _, _, err := resolveCompose(ctx); err == nil {
     return nil
   }
-  if err := runApt(ctx, "install", "-y", "docker-compose-plugin"); err != nil {
-    return err
+  out, err := runApt(ctx, "install", "-y", "docker-compose-plugin")
+  if err != nil {
+    if strings.Contains(out, "Unable to locate package docker-compose-plugin") {
+      out, err = runApt(ctx, "install", "-y", "docker-compose")
+    }
+    if err != nil {
+      return fmt.Errorf("docker compose install failed: %s", strings.TrimSpace(out))
+    }
   }
   if _, _, err := resolveCompose(ctx); err != nil {
     return err
@@ -371,22 +383,24 @@ func ensureCompose(ctx context.Context) error {
   return nil
 }
 
-func runApt(ctx context.Context, args ...string) error {
+func runApt(ctx context.Context, args ...string) (string, error) {
+  var out string
   for attempt := 0; attempt < 10; attempt++ {
-    out, err := runAptOnce(ctx, args...)
+    var err error
+    out, err = runAptOnce(ctx, args...)
     if err == nil {
-      return nil
+      return out, nil
     }
     if strings.Contains(out, "password is required") {
-      return errors.New("docker install needs passwordless sudo for lightningos (re-run install.sh or add /etc/sudoers.d/lightningos)")
+      return out, errors.New("docker install needs passwordless sudo for lightningos (re-run install.sh or add /etc/sudoers.d/lightningos)")
     }
     if strings.Contains(out, "Could not get lock") || strings.Contains(out, "dpkg frontend lock") || strings.Contains(out, "dpkg/lock") {
       time.Sleep(3 * time.Second)
       continue
     }
-    return fmt.Errorf("apt-get failed: %s", strings.TrimSpace(out))
+    return out, fmt.Errorf("apt-get failed: %s", strings.TrimSpace(out))
   }
-  return errors.New("apt-get blocked by dpkg lock")
+  return out, errors.New("apt-get blocked by dpkg lock")
 }
 
 func runAptOnce(ctx context.Context, args ...string) (string, error) {
