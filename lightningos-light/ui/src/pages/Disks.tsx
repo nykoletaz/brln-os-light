@@ -5,7 +5,9 @@ export default function Disks() {
   const [disks, setDisks] = useState<any[]>([])
 
   useEffect(() => {
-    getDisk().then(setDisks).catch(() => null)
+    getDisk()
+      .then((data) => setDisks(Array.isArray(data) ? data : []))
+      .catch(() => null)
   }, [])
 
   return (

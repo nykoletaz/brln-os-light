@@ -29,7 +29,7 @@ export default function Dashboard() {
         ])
         if (!mounted) return
         setSystem(sys)
-        setDisk(disks)
+        setDisk(Array.isArray(disks) ? disks : [])
         setBitcoin(btc)
         setPostgres(pg)
         setLnd(lndStatus)

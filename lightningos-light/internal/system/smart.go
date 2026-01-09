@@ -24,7 +24,7 @@ func ReadDiskSmart(ctx context.Context) ([]DiskSmart, error) {
     return nil, err
   }
 
-  var out []DiskSmart
+  out := make([]DiskSmart, 0, len(devices))
   for _, dev := range devices {
     smart, err := smartctlDevice(ctx, "/dev/"+dev)
     if err != nil {
