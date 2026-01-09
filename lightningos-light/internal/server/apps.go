@@ -391,7 +391,8 @@ func runApt(ctx context.Context, args ...string) error {
 
 func runAptOnce(ctx context.Context, args ...string) (string, error) {
   aptPath := "/usr/bin/apt-get"
-  out, err := system.RunCommandWithSudo(ctx, "systemd-run", "--wait", "--pipe", "--collect", aptPath, args...)
+  systemdArgs := append([]string{"--wait", "--pipe", "--collect", aptPath}, args...)
+  out, err := system.RunCommandWithSudo(ctx, "systemd-run", systemdArgs...)
   if err == nil {
     return out, nil
   }

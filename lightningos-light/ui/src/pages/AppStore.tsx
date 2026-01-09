@@ -84,9 +84,9 @@ export default function AppStore() {
             <div key={app.id} className="section-card space-y-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-start gap-4">
-                  <div className="h-12 w-12 rounded-2xl bg-ink/70 flex items-center justify-center overflow-hidden">
+                  <div className="h-12 w-12 rounded-2xl bg-transparent flex items-center justify-center overflow-hidden">
                     {icon ? (
-                      <img src={icon} alt={`${app.name} icon`} className="h-10 w-10 rounded-xl object-cover" />
+                      <img src={icon} alt={`${app.name} icon`} className="h-12 w-12 rounded-2xl object-cover" />
                     ) : (
                       <span className="text-xs text-fog/50">APP</span>
                     )}
