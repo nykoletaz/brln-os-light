@@ -16,6 +16,9 @@ NODE_VERSION="${NODE_VERSION:-20}"
 
 POSTGRES_VERSION="${POSTGRES_VERSION:-17}"
 
+ALLOW_STOP_UNATTENDED_UPGRADES="${ALLOW_STOP_UNATTENDED_UPGRADES:-1}"
+UNATTENDED_NOTICE_SHOWN=0
+
 LND_DIR="/data/lnd"
 LND_CONF="${LND_DIR}/lnd.conf"
 
@@ -113,7 +116,20 @@ wait_for_apt_locks() {
   local retries=60
   local i
   for i in $(seq 1 "$retries"); do
-    if pgrep -x apt-get >/dev/null 2>&1 || pgrep -x dpkg >/dev/null 2>&1 || pgrep -x unattended-upgrades >/dev/null 2>&1 || pgrep -x unattended-upgr >/dev/null 2>&1; then
+    local has_lock="false"
+    if pgrep -x unattended-upgrades >/dev/null 2>&1 || pgrep -x unattended-upgr >/dev/null 2>&1; then
+      has_lock="true"
+      if [[ "$ALLOW_STOP_UNATTENDED_UPGRADES" == "1" ]]; then
+        stop_unattended_upgrades
+      elif [[ "$UNATTENDED_NOTICE_SHOWN" -eq 0 ]]; then
+        print_warn "unattended-upgrades is running; set ALLOW_STOP_UNATTENDED_UPGRADES=1 to stop it automatically"
+        UNATTENDED_NOTICE_SHOWN=1
+      fi
+    fi
+    if pgrep -x apt-get >/dev/null 2>&1 || pgrep -x dpkg >/dev/null 2>&1; then
+      has_lock="true"
+    fi
+    if [[ "$has_lock" == "true" ]]; then
       print_warn "Waiting for apt/dpkg lock... (attempt ${i}/${retries})"
       if command -v ps >/dev/null 2>&1; then
         ps -eo pid,comm,args | awk '/(apt-get|apt|dpkg|unattended)/ && !/awk/ {print "  " $0}'
@@ -150,6 +166,13 @@ apt_get() {
   cat "$log" >&2
   rm -f "$log"
   return 1
+}
+
+stop_unattended_upgrades() {
+  print_warn "Stopping unattended-upgrades to release apt locks"
+  systemctl stop unattended-upgrades >/dev/null 2>&1 || true
+  systemctl stop apt-daily.service apt-daily-upgrade.service >/dev/null 2>&1 || true
+  systemctl stop apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
 }
 
 setup_postgres_repo() {
