@@ -4,12 +4,15 @@ import (
   "context"
   "crypto/rand"
   "encoding/base64"
+  "encoding/json"
   "errors"
   "fmt"
+  "io"
   "net/http"
   "os"
   "os/exec"
   "path/filepath"
+  "runtime"
   "strings"
   "time"
 
@@ -380,13 +383,15 @@ func ensureCompose(ctx context.Context) error {
     return nil
   }
   out, err := runApt(ctx, "install", "-y", "docker-compose-plugin")
-  if err != nil {
-    if strings.Contains(out, "Unable to locate package docker-compose-plugin") {
-      out, err = runApt(ctx, "install", "-y", "docker-compose")
-    }
-    if err != nil {
-      return fmt.Errorf("docker compose install failed: %s", strings.TrimSpace(out))
-    }
+  if err != nil && strings.Contains(err.Error(), "passwordless sudo") {
+    return err
+  }
+  out, err = runApt(ctx, "install", "-y", "docker-compose")
+  if err != nil && strings.Contains(err.Error(), "passwordless sudo") {
+    return err
+  }
+  if err := installComposePluginBinary(ctx); err != nil && strings.Contains(err.Error(), "passwordless sudo") {
+    return err
   }
   if _, _, err := resolveCompose(ctx); err != nil {
     return err
@@ -466,13 +471,21 @@ func getComposeStatus(ctx context.Context, appRoot string, composePath string, s
 }
 
 func resolveCompose(ctx context.Context) (string, []string, error) {
-  if _, err := system.RunCommandWithSudo(ctx, "docker", "compose", "version"); err == nil {
+  out, err := system.RunCommandWithSudo(ctx, "docker", "compose", "version")
+  if err == nil {
     return "docker", []string{"compose"}, nil
   }
-  if _, err := system.RunCommandWithSudo(ctx, "docker-compose", "version"); err == nil {
+  if strings.Contains(out, "password is required") || strings.Contains(err.Error(), "password is required") {
+    return "", nil, errors.New("docker compose requires passwordless sudo for lightningos")
+  }
+  out, err = system.RunCommandWithSudo(ctx, "docker-compose", "version")
+  if err == nil {
     return "docker-compose", []string{}, nil
   }
-  return "", nil, errors.New("docker compose not available")
+  if strings.Contains(out, "password is required") || strings.Contains(err.Error(), "password is required") {
+    return "", nil, errors.New("docker-compose requires passwordless sudo for lightningos")
+  }
+  return "", nil, errors.New("docker compose not available (install docker-compose-plugin or docker-compose)")
 }
 
 func ensureFile(path string, content string) error {
@@ -516,6 +529,72 @@ func readEnvValue(path string, key string) string {
     }
   }
   return ""
+}
+
+type composeRelease struct {
+  TagName string `json:"tag_name"`
+}
+
+func installComposePluginBinary(ctx context.Context) error {
+  if fileExists("/usr/local/lib/docker/cli-plugins/docker-compose") {
+    return nil
+  }
+  tag := fetchLatestComposeTag(ctx)
+  if tag == "" {
+    tag = "v2.32.4"
+  }
+  arch := mapComposeArch(runtime.GOARCH)
+  if arch == "" {
+    return fmt.Errorf("unsupported architecture for docker compose: %s", runtime.GOARCH)
+  }
+  url := fmt.Sprintf("https://github.com/docker/compose/releases/download/%s/docker-compose-linux-%s", tag, arch)
+  targetDir := "/usr/local/lib/docker/cli-plugins"
+  targetPath := filepath.Join(targetDir, "docker-compose")
+  if _, err := system.RunCommandWithSudo(ctx, "mkdir", "-p", targetDir); err != nil {
+    return err
+  }
+  if _, err := system.RunCommandWithSudo(ctx, "curl", "-fsSL", "-o", targetPath, url); err != nil {
+    return err
+  }
+  if _, err := system.RunCommandWithSudo(ctx, "chmod", "0755", targetPath); err != nil {
+    return err
+  }
+  return nil
+}
+
+func fetchLatestComposeTag(ctx context.Context) string {
+  req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/docker/compose/releases/latest", nil)
+  if err != nil {
+    return ""
+  }
+  resp, err := http.DefaultClient.Do(req)
+  if err != nil {
+    return ""
+  }
+  defer resp.Body.Close()
+  if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+    return ""
+  }
+  body, err := io.ReadAll(resp.Body)
+  if err != nil {
+    return ""
+  }
+  var release composeRelease
+  if err := json.Unmarshal(body, &release); err != nil {
+    return ""
+  }
+  return strings.TrimSpace(release.TagName)
+}
+
+func mapComposeArch(goarch string) string {
+  switch goarch {
+  case "amd64":
+    return "x86_64"
+  case "arm64":
+    return "aarch64"
+  default:
+    return ""
+  }
 }
 
 const lndgDockerfile = `FROM python:3.11-slim
