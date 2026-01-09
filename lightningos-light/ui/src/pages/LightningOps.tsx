@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { closeChannel, connectPeer, getLnChannels, getLnPeers, openChannel, updateChannelFees } from '../api'
+import { closeChannel, connectPeer, disconnectPeer, getLnChannels, getLnPeers, openChannel, updateChannelFees } from '../api'
 
 type Channel = {
   channel_point: string
@@ -15,6 +15,7 @@ type Channel = {
 
 type Peer = {
   pub_key: string
+  alias: string
   address: string
   inbound: boolean
   bytes_sent: number
@@ -42,6 +43,7 @@ export default function LightningOps() {
   const [peerStatus, setPeerStatus] = useState('')
   const [peers, setPeers] = useState<Peer[]>([])
   const [peerListStatus, setPeerListStatus] = useState('')
+  const [peerActionStatus, setPeerActionStatus] = useState('')
 
   const [openPubkey, setOpenPubkey] = useState('')
   const [openAmount, setOpenAmount] = useState('')
@@ -149,6 +151,19 @@ export default function LightningOps() {
       load()
     } catch (err: any) {
       setPeerStatus(err?.message || 'Peer connection failed.')
+    }
+  }
+
+  const handleDisconnect = async (pubkey: string) => {
+    const confirmed = window.confirm('Disconnect this peer?')
+    if (!confirmed) return
+    setPeerActionStatus('Disconnecting peer...')
+    try {
+      await disconnectPeer({ pubkey })
+      setPeerActionStatus('Peer disconnected.')
+      load()
+    } catch (err: any) {
+      setPeerActionStatus(err?.message || 'Disconnect failed.')
     }
   }
 
@@ -448,6 +463,7 @@ export default function LightningOps() {
           <h3 className="text-lg font-semibold">Peers</h3>
           <span className="text-xs text-fog/60">Connected: {peers.length}</span>
         </div>
+        {peerActionStatus && <p className="text-sm text-brass">{peerActionStatus}</p>}
         {peerListStatus && <p className="text-sm text-brass">{peerListStatus}</p>}
         {peers.length ? (
           <div className="grid gap-3">
@@ -455,13 +471,21 @@ export default function LightningOps() {
               <div key={peer.pub_key} className="rounded-2xl border border-white/10 bg-ink/60 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm text-fog/60">{peer.pub_key}</p>
+                    <p className="text-sm text-fog/60">{peer.alias || peer.pub_key}</p>
                     <p className="text-xs text-fog/50">{peer.address || 'address unknown'}</p>
                   </div>
-                  <span className="rounded-full px-3 py-1 text-xs bg-white/10 text-fog/70">
-                    {peer.inbound ? 'Inbound' : 'Outbound'}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full px-3 py-1 text-xs bg-white/10 text-fog/70">
+                      {peer.inbound ? 'Inbound' : 'Outbound'}
+                    </span>
+                    <button className="btn-secondary text-xs px-3 py-1.5" onClick={() => handleDisconnect(peer.pub_key)}>
+                      Disconnect
+                    </button>
+                  </div>
                 </div>
+                {peer.alias && (
+                  <p className="mt-2 text-xs text-fog/50">Pubkey: {peer.pub_key}</p>
+                )}
                 <div className="mt-3 grid gap-3 lg:grid-cols-3 text-xs text-fog/70">
                   <div>Sat sent: <span className="text-fog">{peer.sat_sent}</span></div>
                   <div>Sat recv: <span className="text-fog">{peer.sat_recv}</span></div>

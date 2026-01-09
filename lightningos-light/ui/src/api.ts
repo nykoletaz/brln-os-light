@@ -75,6 +75,8 @@ export const getLnChannels = () => request('/api/lnops/channels')
 export const getLnPeers = () => request('/api/lnops/peers')
 export const connectPeer = (payload: { address?: string; pubkey?: string; host?: string }) =>
   request('/api/lnops/peer', { method: 'POST', body: JSON.stringify(payload) })
+export const disconnectPeer = (payload: { pubkey: string }) =>
+  request('/api/lnops/peer/disconnect', { method: 'POST', body: JSON.stringify(payload) })
 export const openChannel = (payload: {
   pubkey: string
   local_funding_sat: number

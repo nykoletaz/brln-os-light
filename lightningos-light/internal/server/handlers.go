@@ -694,6 +694,31 @@ func (s *Server) handleLNConnectPeer(w http.ResponseWriter, r *http.Request) {
   writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+func (s *Server) handleLNDisconnectPeer(w http.ResponseWriter, r *http.Request) {
+  var req struct {
+    Pubkey string `json:"pubkey"`
+  }
+  if err := readJSON(r, &req); err != nil {
+    writeError(w, http.StatusBadRequest, "invalid json")
+    return
+  }
+  pubkey := strings.TrimSpace(req.Pubkey)
+  if pubkey == "" {
+    writeError(w, http.StatusBadRequest, "pubkey required")
+    return
+  }
+
+  ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
+  defer cancel()
+
+  if err := s.lnd.DisconnectPeer(ctx, pubkey); err != nil {
+    writeError(w, http.StatusInternalServerError, lndStatusMessage(err))
+    return
+  }
+
+  writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func (s *Server) handleLNOpenChannel(w http.ResponseWriter, r *http.Request) {
   var req struct {
     Pubkey string `json:"pubkey"`

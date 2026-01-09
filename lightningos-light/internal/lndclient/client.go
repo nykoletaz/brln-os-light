@@ -310,14 +310,33 @@ func (c *Client) ListPeers(ctx context.Context) ([]PeerInfo, error) {
     return nil, err
   }
 
+  aliasMap := map[string]string{}
+  if channels, err := client.ListChannels(ctx, &lnrpc.ListChannelsRequest{PeerAliasLookup: true}); err == nil {
+    for _, ch := range channels.Channels {
+      if ch.RemotePubkey != "" && ch.PeerAlias != "" {
+        aliasMap[ch.RemotePubkey] = ch.PeerAlias
+      }
+    }
+  }
+
   peers := make([]PeerInfo, 0, len(resp.Peers))
   for _, peer := range resp.Peers {
+    alias := aliasMap[peer.PubKey]
+    if alias == "" {
+      info, err := client.GetNodeInfo(ctx, &lnrpc.NodeInfoRequest{PubKey: peer.PubKey, IncludeChannels: false})
+      if err == nil && info.GetNode() != nil {
+        alias = info.GetNode().Alias
+      }
+    }
     lastErr := ""
     if len(peer.Errors) > 0 {
-      lastErr = peer.Errors[len(peer.Errors)-1].GetMessage()
+      if last := peer.Errors[len(peer.Errors)-1]; last != nil {
+        lastErr = last.Error
+      }
     }
     peers = append(peers, PeerInfo{
       PubKey: peer.PubKey,
+      Alias: alias,
       Address: peer.Address,
       Inbound: peer.Inbound,
       BytesSent: peer.BytesSent,
@@ -348,6 +367,18 @@ func (c *Client) ConnectPeer(ctx context.Context, pubkey string, host string) er
     },
     Timeout: 8,
   })
+  return err
+}
+
+func (c *Client) DisconnectPeer(ctx context.Context, pubkey string) error {
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return err
+  }
+  defer conn.Close()
+
+  client := lnrpc.NewLightningClient(conn)
+  _, err = client.DisconnectPeer(ctx, &lnrpc.DisconnectPeerRequest{PubKey: pubkey})
   return err
 }
 
@@ -511,6 +542,7 @@ type ChannelInfo struct {
 
 type PeerInfo struct {
   PubKey string `json:"pub_key"`
+  Alias string `json:"alias"`
   Address string `json:"address"`
   Inbound bool `json:"inbound"`
   BytesSent uint64 `json:"bytes_sent"`
