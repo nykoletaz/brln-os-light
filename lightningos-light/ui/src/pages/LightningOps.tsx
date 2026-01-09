@@ -27,6 +27,13 @@ type Peer = {
   last_error: string
 }
 
+const formatPing = (value: number) => {
+  if (!value || value <= 0) return 'n/a'
+  const ms = value / 1000
+  if (ms < 1000) return `${ms.toFixed(1)} ms`
+  return `${(ms / 1000).toFixed(1)} s`
+}
+
 export default function LightningOps() {
   const [channels, setChannels] = useState<Channel[]>([])
   const [activeCount, setActiveCount] = useState(0)
@@ -499,7 +506,7 @@ export default function LightningOps() {
                 <div className="mt-3 grid gap-3 lg:grid-cols-3 text-xs text-fog/70">
                   <div>Sat sent: <span className="text-fog">{peer.sat_sent}</span></div>
                   <div>Sat recv: <span className="text-fog">{peer.sat_recv}</span></div>
-                  <div>Ping: <span className="text-fog">{peer.ping_time} ms</span></div>
+                  <div>Ping: <span className="text-fog">{formatPing(peer.ping_time)}</span></div>
                 </div>
                 <div className="mt-2 grid gap-3 lg:grid-cols-2 text-xs text-fog/60">
                   <div>Bytes sent: <span className="text-fog">{peer.bytes_sent}</span></div>
