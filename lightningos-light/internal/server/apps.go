@@ -52,6 +52,7 @@ type lndgPaths struct {
   DockerfilePath string
   EntrypointPath string
   AdminPasswordPath string
+  DbPasswordPath string
 }
 
 func lndgDefinition() appDefinition {
@@ -76,6 +77,7 @@ func lndgAppPaths() lndgPaths {
     DockerfilePath: filepath.Join(root, "Dockerfile"),
     EntrypointPath: filepath.Join(root, "entrypoint.sh"),
     AdminPasswordPath: filepath.Join(dataDir, "lndg-admin.txt"),
+    DbPasswordPath: filepath.Join(dataDir, "lndg-db-password.txt"),
   }
 }
 
@@ -313,19 +315,56 @@ func lndgComposeContents(paths lndgPaths) string {
 func ensureLndgEnv(paths lndgPaths) error {
   if fileExists(paths.EnvPath) {
     if !fileExists(paths.AdminPasswordPath) {
-      if err := writeFile(paths.AdminPasswordPath, readEnvValue(paths.EnvPath, "LNDG_ADMIN_PASSWORD"), 0600); err != nil {
+      adminPassword := readEnvValue(paths.EnvPath, "LNDG_ADMIN_PASSWORD")
+      if adminPassword == "" {
+        adminPassword = readSecretFile(paths.AdminPasswordPath)
+        if adminPassword != "" {
+          if err := appendEnvLine(paths.EnvPath, "LNDG_ADMIN_PASSWORD", adminPassword); err != nil {
+            return err
+          }
+        }
+      }
+      if adminPassword == "" {
+        return errors.New("LNDG_ADMIN_PASSWORD missing from .env")
+      }
+      if err := writeFile(paths.AdminPasswordPath, adminPassword+"\n", 0600); err != nil {
+        return err
+      }
+    }
+    if !fileExists(paths.DbPasswordPath) {
+      dbPassword := readEnvValue(paths.EnvPath, "LNDG_DB_PASSWORD")
+      if dbPassword == "" {
+        dbPassword = readSecretFile(paths.DbPasswordPath)
+        if dbPassword != "" {
+          if err := appendEnvLine(paths.EnvPath, "LNDG_DB_PASSWORD", dbPassword); err != nil {
+            return err
+          }
+        }
+      }
+      if dbPassword == "" {
+        return errors.New("LNDG_DB_PASSWORD missing from .env")
+      }
+      if err := writeFile(paths.DbPasswordPath, dbPassword+"\n", 0600); err != nil {
         return err
       }
     }
     return nil
   }
-  adminPassword, err := randomToken(20)
-  if err != nil {
-    return err
+  adminPassword := readSecretFile(paths.AdminPasswordPath)
+  if adminPassword == "" {
+    var err error
+    adminPassword, err = randomToken(20)
+    if err != nil {
+      return err
+    }
   }
-  dbPassword, err := randomToken(24)
-  if err != nil {
-    return err
+  dbPassword := readSecretFile(paths.DbPasswordPath)
+  if dbPassword == "" {
+    var err error
+    dbPassword, err = randomToken(24)
+    if err != nil {
+      return err
+    }
   }
   env := strings.Join([]string{
     "LNDG_ADMIN_USER=lndg-admin",
@@ -339,8 +378,15 @@ func ensureLndgEnv(paths lndgPaths) error {
   if err := writeFile(paths.EnvPath, env, 0600); err != nil {
     return err
   }
-  if err := writeFile(paths.AdminPasswordPath, adminPassword+"\n", 0600); err != nil {
-    return err
+  if !fileExists(paths.AdminPasswordPath) {
+    if err := writeFile(paths.AdminPasswordPath, adminPassword+"\n", 0600); err != nil {
+      return err
+    }
+  }
+  if !fileExists(paths.DbPasswordPath) {
+    if err := writeFile(paths.DbPasswordPath, dbPassword+"\n", 0600); err != nil {
+      return err
+    }
   }
   return nil
 }
@@ -549,6 +595,29 @@ func readEnvValue(path string, key string) string {
     }
   }
   return ""
+}
+
+func readSecretFile(path string) string {
+  content, err := os.ReadFile(path)
+  if err != nil {
+    return ""
+  }
+  return strings.TrimSpace(string(content))
+}
+
+func appendEnvLine(path string, key string, value string) error {
+  if value == "" {
+    return nil
+  }
+  file, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+  if err != nil {
+    return fmt.Errorf("failed to update %s: %w", path, err)
+  }
+  defer file.Close()
+  if _, err := file.WriteString(fmt.Sprintf("%s=%s\n", key, value)); err != nil {
+    return fmt.Errorf("failed to update %s: %w", path, err)
+  }
+  return nil
 }
 
 type composeRelease struct {
