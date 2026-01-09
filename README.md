@@ -48,6 +48,8 @@ Notes:
 - You can override LND URL with `LND_URL=...` or version with `LND_VERSION=...`.
 - The installer will generate a Postgres role and update `LND_PG_DSN` in `/etc/lightningos/secrets.env`.
 - The UI version label comes from `ui/public/version.txt`.
+- PostgreSQL uses the PGDG repository by default. Set `POSTGRES_VERSION=16` (or another major) to override.
+- Tor uses the Tor Project repository when available. If your Ubuntu codename is unsupported, it falls back to `jammy`.
 
 ## Installer permissions (what `install.sh` enforces)
 - Users:
@@ -105,5 +107,4 @@ cd ..
 sudo rm -rf /opt/lightningos/ui/*
 sudo cp -a ui/dist/. /opt/lightningos/ui/
 ```
-
 

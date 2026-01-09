@@ -12,6 +12,8 @@ LND_URL="${LND_URL:-$LND_URL_DEFAULT}"
 GO_VERSION="${GO_VERSION:-1.22.7}"
 GO_TARBALL_URL="https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
 
+POSTGRES_VERSION="${POSTGRES_VERSION:-17}"
+
 LND_DIR="/data/lnd"
 LND_CONF="${LND_DIR}/lnd.conf"
 
@@ -92,6 +94,91 @@ require_root() {
   fi
 }
 
+get_os_codename() {
+  local codename=""
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    codename="${VERSION_CODENAME:-}"
+  fi
+  if [[ -z "$codename" ]]; then
+    codename=$(lsb_release -cs 2>/dev/null || true)
+  fi
+  echo "$codename"
+}
+
+wait_for_apt_locks() {
+  local retries=60
+  local i
+  for i in $(seq 1 "$retries"); do
+    if pgrep -x apt-get >/dev/null 2>&1 || pgrep -x dpkg >/dev/null 2>&1 || pgrep -x unattended-upgrades >/dev/null 2>&1 || pgrep -x unattended-upgr >/dev/null 2>&1; then
+      sleep 5
+      continue
+    fi
+    return 0
+  done
+  return 1
+}
+
+apt_get() {
+  local out
+  local attempt
+  for attempt in $(seq 1 5); do
+    wait_for_apt_locks || true
+    if out=$(apt-get "$@" 2>&1); then
+      echo "$out"
+      return 0
+    fi
+    if echo "$out" | grep -q "Could not get lock"; then
+      print_warn "apt lock busy; waiting before retry"
+      sleep 5
+      continue
+    fi
+    echo "$out" >&2
+    return 1
+  done
+  echo "$out" >&2
+  return 1
+}
+
+setup_postgres_repo() {
+  print_step "Configuring PostgreSQL repository"
+  local codename
+  codename=$(get_os_codename)
+  if [[ -z "$codename" ]]; then
+    print_warn "Could not detect OS codename; skipping PGDG repo"
+    return
+  fi
+  apt_get install -y ca-certificates curl gnupg >/dev/null
+  curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+  echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt ${codename}-pgdg main" \
+    > /etc/apt/sources.list.d/pgdg.list
+  print_ok "PostgreSQL repo ready (${codename}-pgdg)"
+}
+
+setup_tor_repo() {
+  print_step "Configuring Tor repository"
+  local codename
+  codename=$(get_os_codename)
+  if [[ -z "$codename" ]]; then
+    print_warn "Could not detect OS codename; skipping Tor repo"
+    return
+  fi
+  apt_get install -y ca-certificates curl gnupg >/dev/null
+  if ! curl -fsI "https://deb.torproject.org/torproject.org/dists/${codename}/InRelease" >/dev/null 2>&1; then
+    print_warn "Tor repo not available for ${codename}, falling back to jammy"
+    codename="jammy"
+  fi
+  curl -fsSL https://deb.torproject.org/torproject.org/A3C4F0F979CAA22CDBA8F512EE8CBC9E886DDD89.asc \
+    | gpg --dearmor \
+    | tee /usr/share/keyrings/tor-archive-keyring.gpg >/dev/null
+  cat > /etc/apt/sources.list.d/tor.list <<EOF
+deb     [arch=amd64 signed-by=/usr/share/keyrings/tor-archive-keyring.gpg] https://deb.torproject.org/torproject.org ${codename} main
+deb-src [arch=amd64 signed-by=/usr/share/keyrings/tor-archive-keyring.gpg] https://deb.torproject.org/torproject.org ${codename} main
+EOF
+  print_ok "Tor repo ready (${codename})"
+}
+
 ensure_user() {
   local user="$1"
   local home="$2"
@@ -125,7 +212,6 @@ create_lnd_user() {
     fi
   fi
   ensure_group_member lnd bitcoin
-  ensure_group_member lnd debian-tor
   print_ok "User lnd ready"
 }
 
@@ -158,8 +244,16 @@ EOF
 
 install_packages() {
   print_step "Installing base packages"
-  apt-get update
-  apt-get install -y postgresql smartmontools curl jq ca-certificates openssl build-essential git sudo tor apt-transport-https
+  apt_get update
+  setup_postgres_repo
+  setup_tor_repo
+  apt_get update
+  apt_get install -y \
+    postgresql-common \
+    postgresql-client-common \
+    postgresql-"${POSTGRES_VERSION}" \
+    postgresql-client-"${POSTGRES_VERSION}" \
+    smartmontools curl jq ca-certificates openssl build-essential git sudo tor deb.torproject.org-keyring apt-transport-https
   print_ok "Base packages installed"
 }
 
@@ -192,9 +286,9 @@ configure_tor() {
   strip_crlf "$torrc"
   start_tor_service
   if systemctl list-unit-files | grep -q '^tor@default\.service'; then
-    systemctl reload tor@default >/dev/null 2>&1 || true
+    systemctl restart tor@default >/dev/null 2>&1 || true
   else
-    systemctl reload tor >/dev/null 2>&1 || true
+    systemctl restart tor >/dev/null 2>&1 || true
   fi
   if ! wait_for_tor_control; then
     print_warn "Tor control port 9051 not ready yet"
@@ -206,8 +300,8 @@ install_i2pd() {
   print_step "Installing i2pd"
   if ! command -v i2pd >/dev/null 2>&1; then
     curl -fsSL https://repo.i2pd.xyz/.help/add_repo | bash -s -
-    apt-get update
-    apt-get install -y i2pd
+    apt_get update
+    apt_get install -y i2pd
   fi
   systemctl enable --now i2pd >/dev/null 2>&1 || true
   print_ok "i2pd installed"
@@ -661,7 +755,7 @@ start_tor_service() {
 }
 
 wait_for_tor_control() {
-  local retries=15
+  local retries=60
   local i
   for i in $(seq 1 "$retries"); do
     if command -v ss >/dev/null 2>&1; then
@@ -732,13 +826,14 @@ verify_manager_listener() {
 main() {
   require_root
   print_step "LightningOS Light installation starting"
-  create_lnd_user
-  ensure_user lightningos /var/lib/lightningos
-  ensure_group_member lightningos lnd
-  ensure_group_member lightningos systemd-journal
   configure_sudoers
   install_packages
   configure_tor
+  create_lnd_user
+  ensure_group_member lnd debian-tor
+  ensure_user lightningos /var/lib/lightningos
+  ensure_group_member lightningos lnd
+  ensure_group_member lightningos systemd-journal
   install_i2pd
   install_go
   install_node
