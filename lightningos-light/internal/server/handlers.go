@@ -25,7 +25,8 @@ const (
   lndConfPath = "/data/lnd/lnd.conf"
   lndPasswordPath = "/data/lnd/password.txt"
   lndWalletDBPath = "/data/lnd/data/chain/bitcoin/mainnet/wallet.db"
-  lndRPCTimeout = 10 * time.Second
+  lndRPCTimeout = 15 * time.Second
+  lndWarmupPeriod = 90 * time.Second
 )
 
 type healthIssue struct {
@@ -49,8 +50,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
   lndStatus, err := s.lnd.GetStatus(ctx)
   if err != nil {
-    issues = append(issues, healthIssue{Component: "lnd", Level: "ERR", Message: lndStatusMessage(err)})
-    status = elevate(status, "ERR")
+    if isTimeoutError(err) && s.lndWarmupActive() {
+      issues = append(issues, healthIssue{Component: "lnd", Level: "WARN", Message: "LND warming up after restart"})
+      status = elevate(status, "WARN")
+    } else {
+      issues = append(issues, healthIssue{Component: "lnd", Level: "ERR", Message: lndStatusMessage(err)})
+      status = elevate(status, "ERR")
+    }
   } else if lndStatus.WalletState == "locked" {
     issues = append(issues, healthIssue{Component: "lnd", Level: "ERR", Message: "LND wallet locked"})
     status = elevate(status, "ERR")
@@ -96,6 +102,14 @@ func elevate(current string, next string) string {
     return "WARN"
   }
   return current
+}
+
+func isTimeoutError(err error) bool {
+  if err == nil {
+    return false
+  }
+  msg := strings.ToLower(err.Error())
+  return strings.Contains(msg, "deadline exceeded") || strings.Contains(msg, "context deadline exceeded")
 }
 
 func lndStatusMessage(err error) string {
@@ -509,6 +523,9 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
     writeError(w, http.StatusInternalServerError, "restart failed")
     return
   }
+  if service == "lnd" {
+    s.markLNDRestart()
+  }
 
   writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -668,7 +685,9 @@ func (s *Server) handleLNDConfigPost(w http.ResponseWriter, r *http.Request) {
   if req.ApplyNow {
     ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
     defer cancel()
-    _ = system.SystemctlRestart(ctx, "lnd")
+    if system.SystemctlRestart(ctx, "lnd") == nil {
+      s.markLNDRestart()
+    }
   }
 
   writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -702,6 +721,7 @@ func (s *Server) handleLNDConfigRaw(w http.ResponseWriter, r *http.Request) {
       writeError(w, http.StatusInternalServerError, "lnd restart failed, rollback applied")
       return
     }
+    s.markLNDRestart()
   }
 
   writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -794,12 +814,39 @@ func isHexColor(value string) bool {
   return true
 }
 
+func (s *Server) markLNDRestart() {
+  s.lndRestartMu.Lock()
+  s.lastLNDRestart = time.Now()
+  s.lndRestartMu.Unlock()
+}
+
+func (s *Server) lndWarmupActive() bool {
+  s.lndRestartMu.RLock()
+  last := s.lastLNDRestart
+  s.lndRestartMu.RUnlock()
+  if last.IsZero() {
+    return false
+  }
+  return time.Since(last) <= lndWarmupPeriod
+}
+
 func (s *Server) handleWalletSummary(w http.ResponseWriter, r *http.Request) {
   ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
   defer cancel()
 
   status, err := s.lnd.GetStatus(ctx)
   if err != nil {
+    if isTimeoutError(err) && s.lndWarmupActive() {
+      writeJSON(w, http.StatusOK, map[string]any{
+        "balances": map[string]int64{
+          "onchain_sat": 0,
+          "lightning_sat": 0,
+        },
+        "activity": []RecentActivity{},
+        "warning": "LND warming up after restart",
+      })
+      return
+    }
     writeError(w, http.StatusInternalServerError, lndStatusMessage(err))
     return
   }

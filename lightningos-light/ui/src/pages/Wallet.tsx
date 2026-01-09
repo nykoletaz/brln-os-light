@@ -12,6 +12,7 @@ const emptySummary = {
 export default function Wallet() {
   const [summary, setSummary] = useState<any>(emptySummary)
   const [summaryError, setSummaryError] = useState('')
+  const [summaryWarning, setSummaryWarning] = useState('')
   const [summaryLoading, setSummaryLoading] = useState(true)
   const [amount, setAmount] = useState('')
   const [memo, setMemo] = useState('')
@@ -23,10 +24,12 @@ export default function Wallet() {
     let mounted = true
     const load = async () => {
       setSummaryError('')
+      setSummaryWarning('')
       try {
         const data = await getWalletSummary()
         if (!mounted) return
         setSummary(data || emptySummary)
+        setSummaryWarning(data?.warning || '')
       } catch (err: any) {
         if (!mounted) return
         const message = err?.message || 'Wallet summary unavailable'
@@ -86,6 +89,9 @@ export default function Wallet() {
         </div>
         {summaryLoading && !summaryError && (
           <p className="mt-4 text-sm text-fog/60">Fetching wallet balances...</p>
+        )}
+        {summaryWarning && !summaryError && (
+          <p className="mt-4 text-sm text-brass">{summaryWarning}</p>
         )}
         {summaryError && (
           <p className="mt-4 text-sm text-ember">Wallet status: {summaryError}</p>

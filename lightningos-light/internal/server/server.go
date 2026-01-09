@@ -5,6 +5,7 @@ import (
   "fmt"
   "log"
   "net/http"
+  "sync"
   "time"
 
   "lightningos-light/internal/config"
@@ -15,6 +16,8 @@ type Server struct {
   cfg    *config.Config
   logger *log.Logger
   lnd    *lndclient.Client
+  lndRestartMu sync.RWMutex
+  lastLNDRestart time.Time
 }
 
 func New(cfg *config.Config, logger *log.Logger) *Server {
