@@ -55,6 +55,7 @@ export const getLogs = (service: string, lines: number) =>
 
 export const updateLndConfig = (payload: {
   alias: string
+  color: string
   min_channel_size_sat: number
   max_channel_size_sat: number
   apply_now: boolean

@@ -563,11 +563,13 @@ func (s *Server) handleLNDConfigGet(w http.ResponseWriter, r *http.Request) {
   resp := map[string]any{
     "supported": map[string]bool{
       "alias": true,
+      "color": true,
       "min_channel_size_sat": true,
       "max_channel_size_sat": true,
     },
     "current": map[string]any{
       "alias": current.Alias,
+      "color": current.Color,
       "min_channel_size_sat": current.MinChanSize,
       "max_channel_size_sat": current.MaxChanSize,
     },
@@ -579,6 +581,7 @@ func (s *Server) handleLNDConfigGet(w http.ResponseWriter, r *http.Request) {
 
 type lndUserConf struct {
   Alias string
+  Color string
   MinChanSize int64
   MaxChanSize int64
 }
@@ -607,6 +610,8 @@ func parseLNDUserConf(raw string) lndUserConf {
     switch key {
     case "alias":
       conf.Alias = value
+    case "color":
+      conf.Color = value
     case "minchansize":
       conf.MinChanSize, _ = strconv.ParseInt(value, 10, 64)
     case "maxchansize":
@@ -619,6 +624,7 @@ func parseLNDUserConf(raw string) lndUserConf {
 func (s *Server) handleLNDConfigPost(w http.ResponseWriter, r *http.Request) {
   var req struct {
     Alias string `json:"alias"`
+    Color string `json:"color"`
     MinChannelSizeSat int64 `json:"min_channel_size_sat"`
     MaxChannelSizeSat int64 `json:"max_channel_size_sat"`
     ApplyNow bool `json:"apply_now"`
@@ -640,13 +646,17 @@ func (s *Server) handleLNDConfigPost(w http.ResponseWriter, r *http.Request) {
     writeError(w, http.StatusBadRequest, "alias too long")
     return
   }
+  if strings.TrimSpace(req.Color) != "" && !isHexColor(req.Color) {
+    writeError(w, http.StatusBadRequest, "color must be hex (#RRGGBB)")
+    return
+  }
 
   raw, err := os.ReadFile(lndConfPath)
   if err != nil {
     writeError(w, http.StatusInternalServerError, "failed to read lnd.conf")
     return
   }
-  updated := updateLNDConfOptions(string(raw), req.Alias, req.MinChannelSizeSat, req.MaxChannelSizeSat)
+  updated := updateLNDConfOptions(string(raw), req.Alias, req.Color, req.MinChannelSizeSat, req.MaxChannelSizeSat)
   if walletPasswordAvailable() {
     updated = ensureUnlockLines(updated)
   }
@@ -703,9 +713,10 @@ type lndOptionUpdate struct {
   seen bool
 }
 
-func updateLNDConfOptions(raw string, alias string, minChanSize int64, maxChanSize int64) string {
+func updateLNDConfOptions(raw string, alias string, color string, minChanSize int64, maxChanSize int64) string {
   updates := map[string]*lndOptionUpdate{
     "alias": {value: alias, remove: strings.TrimSpace(alias) == ""},
+    "color": {value: color, remove: strings.TrimSpace(color) == ""},
     "minchansize": {value: strconv.FormatInt(minChanSize, 10), remove: minChanSize <= 0},
     "maxchansize": {value: strconv.FormatInt(maxChanSize, 10), remove: maxChanSize <= 0},
   }
@@ -767,6 +778,20 @@ func updateLNDConfOptions(raw string, alias string, minChanSize int64, maxChanSi
   }
 
   return strings.Join(lines, "\n")
+}
+
+func isHexColor(value string) bool {
+  trimmed := strings.TrimSpace(value)
+  if len(trimmed) != 7 || !strings.HasPrefix(trimmed, "#") {
+    return false
+  }
+  for _, r := range trimmed[1:] {
+    if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
+      continue
+    }
+    return false
+  }
+  return true
 }
 
 func (s *Server) handleWalletSummary(w http.ResponseWriter, r *http.Request) {

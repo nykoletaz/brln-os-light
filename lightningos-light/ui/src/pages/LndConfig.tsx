@@ -4,6 +4,8 @@ import { getLndConfig, updateLndConfig, updateLndRawConfig } from '../api'
 export default function LndConfig() {
   const [config, setConfig] = useState<any>(null)
   const [alias, setAlias] = useState('')
+  const [color, setColor] = useState('#ff9900')
+  const [colorInput, setColorInput] = useState('#ff9900')
   const [minChan, setMinChan] = useState('')
   const [maxChan, setMaxChan] = useState('')
   const [raw, setRaw] = useState('')
@@ -14,17 +16,29 @@ export default function LndConfig() {
     getLndConfig().then((data: any) => {
       setConfig(data)
       setAlias(data.current.alias || '')
-      setMinChan(data.current.min_channel_size_sat?.toString() || '')
-      setMaxChan(data.current.max_channel_size_sat?.toString() || '')
+      const nextColor = data.current.color || '#ff9900'
+      setColor(nextColor)
+      setColorInput(nextColor)
+      const minVal = Number(data.current.min_channel_size_sat || 0)
+      const maxVal = Number(data.current.max_channel_size_sat || 0)
+      setMinChan(minVal > 0 ? minVal.toString() : '')
+      setMaxChan(maxVal > 0 ? maxVal.toString() : '')
       setRaw(data.raw_user_conf || '')
     }).catch(() => null)
   }, [])
 
+  const isHexColor = (value: string) => /^#[0-9a-fA-F]{6}$/.test(value.trim())
+
   const handleSave = async () => {
+    if (!isHexColor(color)) {
+      setStatus('Color must be hex (#RRGGBB).')
+      return
+    }
     setStatus('Saving...')
     try {
       await updateLndConfig({
         alias,
+        color,
         min_channel_size_sat: Number(minChan || 0),
         max_channel_size_sat: Number(maxChan || 0),
         apply_now: true
@@ -61,12 +75,68 @@ export default function LndConfig() {
             {advanced ? 'Hide advanced' : 'Show advanced'}
           </button>
         </div>
-        <div className="grid gap-4 lg:grid-cols-3">
-          <input className="input-field" placeholder="Alias" value={alias} onChange={(e) => setAlias(e.target.value)} />
-          <input className="input-field" placeholder="Min channel size (sat)" value={minChan} onChange={(e) => setMinChan(e.target.value)} />
-          <input className="input-field" placeholder="Max channel size (sat)" value={maxChan} onChange={(e) => setMaxChan(e.target.value)} />
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="space-y-2">
+            <label className="text-sm text-fog/70">Alias</label>
+            <input className="input-field" placeholder="Node name" value={alias} onChange={(e) => setAlias(e.target.value)} />
+            <p className="text-xs text-fog/50">Public node name shown in the graph.</p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-fog/70">Node color</label>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <input
+                className="h-12 w-16 rounded-xl border border-white/10 bg-ink/60 p-1"
+                type="color"
+                value={color}
+                onChange={(e) => {
+                  setColor(e.target.value)
+                  setColorInput(e.target.value)
+                }}
+              />
+              <input
+                className="input-field flex-1"
+                placeholder="#ff9900"
+                value={colorInput}
+                onChange={(e) => {
+                  const next = e.target.value
+                  setColorInput(next)
+                  if (isHexColor(next)) {
+                    setColor(next)
+                  }
+                }}
+              />
+            </div>
+            <p className="text-xs text-fog/50">HEX color for your node in the public graph.</p>
+          </div>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="space-y-2">
+            <label className="text-sm text-fog/70">Min channel size (sat)</label>
+            <input
+              className="input-field"
+              placeholder="20000"
+              type="number"
+              min={0}
+              value={minChan}
+              onChange={(e) => setMinChan(e.target.value)}
+            />
+            <p className="text-xs text-fog/50">LND enforces a minimum of 20000 sat. Leave blank to use default.</p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-fog/70">Max channel size (sat)</label>
+            <input
+              className="input-field"
+              placeholder="Optional"
+              type="number"
+              min={0}
+              value={maxChan}
+              onChange={(e) => setMaxChan(e.target.value)}
+            />
+            <p className="text-xs text-fog/50">Leave blank to use the LND default. Must be higher than min size.</p>
+          </div>
         </div>
         <button className="btn-primary" onClick={handleSave}>Save and restart LND</button>
+        <p className="text-xs text-fog/50">Changes require an LND restart and are applied automatically.</p>
       </div>
 
       {advanced && (
