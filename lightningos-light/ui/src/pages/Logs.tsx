@@ -17,10 +17,10 @@ export default function Logs() {
     setStatus('Loading logs...')
     try {
       const res = await getLogs(service, lines)
-      setData(res.lines || [])
+      setData(Array.isArray(res?.lines) ? res.lines : [])
       setStatus('')
-    } catch {
-      setStatus('Log fetch failed.')
+    } catch (err: any) {
+      setStatus(err?.message || 'Log fetch failed.')
     }
   }
 

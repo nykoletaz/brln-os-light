@@ -548,7 +548,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 
   out, err := system.JournalTail(ctx, service, lines)
   if err != nil {
-    writeError(w, http.StatusInternalServerError, "log read failed")
+    writeError(w, http.StatusInternalServerError, fmt.Sprintf("log read failed: %v", err))
     return
   }
 

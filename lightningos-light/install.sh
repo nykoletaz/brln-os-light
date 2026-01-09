@@ -704,6 +704,7 @@ main() {
   create_lnd_user
   ensure_user lightningos /var/lib/lightningos
   ensure_group_member lightningos lnd
+  ensure_group_member lightningos systemd-journal
   configure_sudoers
   install_packages
   configure_tor
