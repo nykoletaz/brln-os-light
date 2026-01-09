@@ -9,6 +9,7 @@ import Disks from './pages/Disks'
 import Logs from './pages/Logs'
 import BitcoinRemote from './pages/BitcoinRemote'
 import LndConfig from './pages/LndConfig'
+import AppStore from './pages/AppStore'
 import Placeholder from './pages/Placeholder'
 
 const routes = [
@@ -20,7 +21,7 @@ const routes = [
   { key: 'lnd', label: 'LND Config', element: <LndConfig /> },
   { key: 'disks', label: 'Disks', element: <Disks /> },
   { key: 'logs', label: 'Logs', element: <Logs /> },
-  { key: 'apps', label: 'Apps', element: <Placeholder title="App Store" /> },
+  { key: 'apps', label: 'Apps', element: <AppStore /> },
   { key: 'bitcoin-local', label: 'Bitcoin Local', element: <Placeholder title="Bitcoin Local" /> }
 ]
 

@@ -29,6 +29,11 @@ func (s *Server) routes() http.Handler {
   r.Get("/api/logs", s.handleLogs)
   r.Post("/api/lnd/config", s.handleLNDConfigPost)
   r.Post("/api/lnd/config/raw", s.handleLNDConfigRaw)
+  r.Get("/api/apps", s.handleAppsList)
+  r.Post("/api/apps/{id}/install", s.handleAppInstall)
+  r.Post("/api/apps/{id}/uninstall", s.handleAppUninstall)
+  r.Post("/api/apps/{id}/start", s.handleAppStart)
+  r.Post("/api/apps/{id}/stop", s.handleAppStop)
 
   r.Route("/api/wallet", func(r chi.Router) {
     r.Get("/summary", s.handleWalletSummary)

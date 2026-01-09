@@ -92,3 +92,9 @@ export const updateChannelFees = (payload: {
   fee_rate_ppm?: number
   time_lock_delta?: number
 }) => request('/api/lnops/channel/fees', { method: 'POST', body: JSON.stringify(payload) })
+
+export const getApps = () => request('/api/apps')
+export const installApp = (id: string) => request(`/api/apps/${id}/install`, { method: 'POST' })
+export const uninstallApp = (id: string) => request(`/api/apps/${id}/uninstall`, { method: 'POST' })
+export const startApp = (id: string) => request(`/api/apps/${id}/start`, { method: 'POST' })
+export const stopApp = (id: string) => request(`/api/apps/${id}/stop`, { method: 'POST' })

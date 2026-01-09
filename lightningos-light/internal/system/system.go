@@ -237,6 +237,23 @@ func RunCommand(ctx context.Context, name string, args ...string) (string, error
   return string(out), nil
 }
 
+func RunCommandWithSudo(ctx context.Context, name string, args ...string) (string, error) {
+  out, err := RunCommand(ctx, name, args...)
+  if err == nil {
+    return out, nil
+  }
+  sudoPath, sudoErr := exec.LookPath("sudo")
+  if sudoErr != nil {
+    return out, err
+  }
+  sudoArgs := append([]string{"-n", name}, args...)
+  sudoOut, sudoErr := RunCommand(ctx, sudoPath, sudoArgs...)
+  if sudoErr == nil {
+    return sudoOut, nil
+  }
+  return sudoOut, fmt.Errorf("%s failed: %w; sudo failed: %v", name, err, sudoErr)
+}
+
 func systemctlPath() string {
   if path, err := exec.LookPath("systemctl"); err == nil {
     return path
