@@ -89,6 +89,7 @@ func (c *Client) GetStatus(ctx context.Context) (Status, error) {
     SyncedToChain: info.SyncedToChain,
     SyncedToGraph: info.SyncedToGraph,
     BlockHeight: int64(info.BlockHeight),
+    Version: info.Version,
   }
 
   channels, err := client.ListChannels(ctx, &lnrpc.ListChannelsRequest{})
@@ -523,6 +524,7 @@ type Status struct {
   SyncedToChain bool
   SyncedToGraph bool
   BlockHeight int64
+  Version string
   ChannelsActive int
   ChannelsInactive int
   OnchainSat int64

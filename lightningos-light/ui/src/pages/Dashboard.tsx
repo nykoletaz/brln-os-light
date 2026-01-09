@@ -128,7 +128,10 @@ export default function Dashboard() {
         </div>
 
         <div className="section-card">
-          <h3 className="text-lg font-semibold">LND</h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">LND</h3>
+            <span className="text-xs text-fog/60">{lnd?.version ? `v${lnd.version}` : ''}</span>
+          </div>
           {lnd ? (
             <div className="mt-4 text-sm space-y-2">
               <div className="flex justify-between"><span>Wallet</span><span>{lnd.wallet_state}</span></div>
