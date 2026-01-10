@@ -19,6 +19,7 @@ RuntimeDirectory=lightningd
 RuntimeDirectoryMode=0710
 User=lnd
 Group=lnd
+UMask=0027
 
 NoNewPrivileges=true
 PrivateTmp=true

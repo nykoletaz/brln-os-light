@@ -288,36 +288,37 @@ func ensureLndgEnv(ctx context.Context, paths lndgPaths) error {
         return err
       }
     }
-    if !fileExists(paths.AdminPasswordPath) {
-      adminPassword := readEnvValue(paths.EnvPath, "LNDG_ADMIN_PASSWORD")
-      if adminPassword == "" {
-        adminPassword = readSecretFile(paths.AdminPasswordPath)
-        if adminPassword != "" {
-          if err := appendEnvLine(paths.EnvPath, "LNDG_ADMIN_PASSWORD", adminPassword); err != nil {
-            return err
-          }
+    adminPassword := readEnvValue(paths.EnvPath, "LNDG_ADMIN_PASSWORD")
+    if adminPassword == "" {
+      adminPassword = readSecretFile(paths.AdminPasswordPath)
+      if adminPassword != "" {
+        if err := setEnvValue(paths.EnvPath, "LNDG_ADMIN_PASSWORD", adminPassword); err != nil {
+          return err
         }
       }
-      if adminPassword == "" {
-        return errors.New("LNDG_ADMIN_PASSWORD missing from .env")
-      }
+    }
+    if adminPassword == "" {
+      return errors.New("LNDG_ADMIN_PASSWORD missing from .env")
+    }
+    if readSecretFile(paths.AdminPasswordPath) != adminPassword {
       if err := writeFile(paths.AdminPasswordPath, adminPassword+"\n", 0600); err != nil {
         return err
       }
     }
-    if !fileExists(paths.DbPasswordPath) {
-      dbPassword := readEnvValue(paths.EnvPath, "LNDG_DB_PASSWORD")
-      if dbPassword == "" {
-        dbPassword = readSecretFile(paths.DbPasswordPath)
-        if dbPassword != "" {
-          if err := appendEnvLine(paths.EnvPath, "LNDG_DB_PASSWORD", dbPassword); err != nil {
-            return err
-          }
+
+    dbPassword := readEnvValue(paths.EnvPath, "LNDG_DB_PASSWORD")
+    if dbPassword == "" {
+      dbPassword = readSecretFile(paths.DbPasswordPath)
+      if dbPassword != "" {
+        if err := setEnvValue(paths.EnvPath, "LNDG_DB_PASSWORD", dbPassword); err != nil {
+          return err
         }
       }
-      if dbPassword == "" {
-        return errors.New("LNDG_DB_PASSWORD missing from .env")
-      }
+    }
+    if dbPassword == "" {
+      return errors.New("LNDG_DB_PASSWORD missing from .env")
+    }
+    if readSecretFile(paths.DbPasswordPath) != dbPassword {
       if err := writeFile(paths.DbPasswordPath, dbPassword+"\n", 0600); err != nil {
         return err
       }
@@ -729,11 +730,12 @@ ADMIN_FILE="$DATA_DIR/lndg-admin.txt"
 : "${LNDG_NETWORK:=mainnet}"
 : "${LNDG_RPC_SERVER:=host.docker.internal:10009}"
 : "${LNDG_ADMIN_USER:=lndg-admin}"
+: "${LNDG_ADMIN_PASSWORD:?LNDG_ADMIN_PASSWORD is required}"
 
 mkdir -p "$DATA_DIR"
 
   if [ ! -f "$SETTINGS_FILE" ]; then
-  python initialize.py -d -net "$LNDG_NETWORK" -rpc "$LNDG_RPC_SERVER" -dir "$LNDG_LND_DIR" -wn -f
+  python initialize.py -d -net "$LNDG_NETWORK" -rpc "$LNDG_RPC_SERVER" -dir "$LNDG_LND_DIR" -u "$LNDG_ADMIN_USER" -pw "$LNDG_ADMIN_PASSWORD" -wn -f
 fi
 
 python - <<'PY'

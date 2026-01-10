@@ -21,6 +21,7 @@ UNATTENDED_NOTICE_SHOWN=0
 
 LND_DIR="/data/lnd"
 LND_CONF="${LND_DIR}/lnd.conf"
+LND_FIX_PERMS_SCRIPT="/usr/local/sbin/lightningos-fix-lnd-perms"
 
 CURRENT_STEP=""
 LOG_FILE="/var/log/lightningos-install.log"
@@ -285,7 +286,7 @@ configure_sudoers() {
     return
   fi
   local system_cmds
-  system_cmds="${systemctl_path} restart lnd, ${systemctl_path} restart lightningos-manager, ${systemctl_path} restart postgresql"
+  system_cmds="${systemctl_path} restart lnd, ${systemctl_path} restart lightningos-manager, ${systemctl_path} restart postgresql, ${LND_FIX_PERMS_SCRIPT}"
   local app_cmds=()
   [[ -n "$apt_get_path" ]] && app_cmds+=("${apt_get_path} *")
   [[ -n "$apt_path" ]] && app_cmds+=("${apt_path} *")
@@ -431,6 +432,18 @@ ensure_dirs() {
   chmod 750 /etc/lightningos
   chmod 750 /var/lib/lightningos
   print_ok "Directories ready"
+}
+
+install_helper_scripts() {
+  print_step "Installing helper scripts"
+  local src="$REPO_ROOT/scripts/fix-lnd-perms.sh"
+  if [[ -f "$src" ]]; then
+    mkdir -p "$(dirname "$LND_FIX_PERMS_SCRIPT")"
+    install -m 0755 "$src" "$LND_FIX_PERMS_SCRIPT"
+    print_ok "Helper scripts installed"
+  else
+    print_warn "Missing helper script: $src"
+  fi
 }
 
 prepare_lnd_data_dir() {
@@ -925,6 +938,7 @@ main() {
   install_go
   install_node
   ensure_dirs
+  install_helper_scripts
   prepare_lnd_data_dir
   copy_templates
   validate_lnd_conf

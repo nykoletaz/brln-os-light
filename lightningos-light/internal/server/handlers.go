@@ -25,6 +25,8 @@ const (
   lndConfPath = "/data/lnd/lnd.conf"
   lndPasswordPath = "/data/lnd/password.txt"
   lndWalletDBPath = "/data/lnd/data/chain/bitcoin/mainnet/wallet.db"
+  lndAdminMacaroonPath = "/data/lnd/data/chain/bitcoin/mainnet/admin.macaroon"
+  lndFixPermsScript = "/usr/local/sbin/lightningos-fix-lnd-perms"
   lndRPCTimeout = 15 * time.Second
   lndWarmupPeriod = 90 * time.Second
 )
@@ -492,6 +494,7 @@ func (s *Server) handleInitWallet(w http.ResponseWriter, r *http.Request) {
     writeError(w, http.StatusInternalServerError, "wallet unlock setup failed")
     return
   }
+  s.scheduleLNDPermissionsFix("init wallet")
 
   writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -521,6 +524,7 @@ func (s *Server) handleUnlockWallet(w http.ResponseWriter, r *http.Request) {
     writeError(w, http.StatusInternalServerError, "wallet unlock setup failed")
     return
   }
+  s.scheduleLNDPermissionsFix("unlock wallet")
 
   writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -1445,6 +1449,37 @@ func storeWalletUnlock(password string) error {
     return err
   }
   return ensureWalletUnlockConfig()
+}
+
+func (s *Server) scheduleLNDPermissionsFix(reason string) {
+  if s == nil {
+    return
+  }
+  go func() {
+    waitCtx, waitCancel := context.WithTimeout(context.Background(), 12*time.Second)
+    waitForFile(waitCtx, lndAdminMacaroonPath)
+    waitCancel()
+    runCtx, runCancel := context.WithTimeout(context.Background(), 6*time.Second)
+    defer runCancel()
+    if _, err := system.RunCommandWithSudo(runCtx, lndFixPermsScript); err != nil {
+      s.logger.Printf("lnd permissions fix failed (%s): %v", reason, err)
+    }
+  }()
+}
+
+func waitForFile(ctx context.Context, path string) {
+  ticker := time.NewTicker(300 * time.Millisecond)
+  defer ticker.Stop()
+  for {
+    if _, err := os.Stat(path); err == nil {
+      return
+    }
+    select {
+    case <-ctx.Done():
+      return
+    case <-ticker.C:
+    }
+  }
 }
 
 func storeWalletPassword(password string) error {
