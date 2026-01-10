@@ -32,6 +32,13 @@ By default, the manager binds to `0.0.0.0:8443` so you can access it from anothe
 ## UI version label
 The sidebar version label is read from `ui/public/version.txt`.
 
+## App Store development
+- App handlers live in `internal/server/apps_<app>.go` and are registered in `internal/server/apps_registry.go`.
+- Validate app registry:
+```bash
+go test ./internal/server -run TestValidateAppRegistry
+```
+
 ## Rebuild only (server)
 Use this when you only want to recompile without running the full installer.
 

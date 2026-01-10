@@ -28,6 +28,14 @@ type lndgPaths struct {
   BuildHashPath string
 }
 
+type lndgApp struct {
+  server *Server
+}
+
+func newLndgApp(s *Server) appHandler {
+  return lndgApp{server: s}
+}
+
 func lndgDefinition() appDefinition {
   return appDefinition{
     ID: "lndg",
@@ -35,6 +43,44 @@ func lndgDefinition() appDefinition {
     Description: "Advanced analytics, automation, and insights for your LND node.",
     Port: 8889,
   }
+}
+
+func (a lndgApp) Definition() appDefinition {
+  return lndgDefinition()
+}
+
+func (a lndgApp) Info(ctx context.Context) (appInfo, error) {
+  def := a.Definition()
+  info := newAppInfo(def)
+  paths := lndgAppPaths()
+  if !fileExists(paths.ComposePath) {
+    return info, nil
+  }
+  info.Installed = true
+  info.AdminPasswordPath = paths.AdminPasswordPath
+  status, err := getComposeStatus(ctx, paths.Root, paths.ComposePath, "lndg")
+  if err != nil {
+    info.Status = "unknown"
+    return info, err
+  }
+  info.Status = status
+  return info, nil
+}
+
+func (a lndgApp) Install(ctx context.Context) error {
+  return a.server.installLndg(ctx)
+}
+
+func (a lndgApp) Uninstall(ctx context.Context) error {
+  return a.server.uninstallLndg(ctx)
+}
+
+func (a lndgApp) Start(ctx context.Context) error {
+  return a.server.startLndg(ctx)
+}
+
+func (a lndgApp) Stop(ctx context.Context) error {
+  return a.server.stopLndg(ctx)
 }
 
 func lndgAppPaths() lndgPaths {

@@ -91,6 +91,24 @@ ss -ltn | grep :8443
 - If you see `Is a directory: /var/log/lndg-controller.log`, remove `/var/lib/lightningos/apps-data/lndg/data/lndg-controller.log` on the host and restart LNDg.
 - If LND is using Postgres, LNDg may log `channel.db` missing. This is expected and harmless.
 
+## App Store architecture
+- Each app implements a handler in `internal/server/apps_<app>.go`.
+- Apps are registered in `internal/server/apps_registry.go`.
+- App files live under `/var/lib/lightningos/apps/<app>` and persistent data under `/var/lib/lightningos/apps-data/<app>`.
+- Docker is installed on-demand by apps that need it (core install stays Docker-free).
+- Registry sanity checks ensure unique app IDs and ports.
+
+### Adding a new app
+1) Create `internal/server/apps_<app>.go` and implement the `appHandler` interface.
+2) Register the app in `internal/server/apps_registry.go`.
+3) Add a card in `ui/src/pages/AppStore.tsx` and an icon in `ui/src/assets/apps/`.
+
+### App Store checks
+Run the registry sanity tests:
+```bash
+go test ./internal/server -run TestValidateAppRegistry
+```
+
 ## Development
 See `DEVELOPMENT.md` for local dev setup and build instructions.
 

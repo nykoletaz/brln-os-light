@@ -1,5 +1,7 @@
 package server
 
+import "context"
+
 const (
   appsRoot = "/var/lib/lightningos/apps"
   appsDataRoot = "/var/lib/lightningos/apps-data"
@@ -20,4 +22,24 @@ type appInfo struct {
   Status string `json:"status"`
   Port int `json:"port"`
   AdminPasswordPath string `json:"admin_password_path,omitempty"`
+}
+
+type appHandler interface {
+  Definition() appDefinition
+  Info(ctx context.Context) (appInfo, error)
+  Install(ctx context.Context) error
+  Uninstall(ctx context.Context) error
+  Start(ctx context.Context) error
+  Stop(ctx context.Context) error
+}
+
+func newAppInfo(def appDefinition) appInfo {
+  return appInfo{
+    ID: def.ID,
+    Name: def.Name,
+    Description: def.Description,
+    Installed: false,
+    Status: "not_installed",
+    Port: def.Port,
+  }
 }
