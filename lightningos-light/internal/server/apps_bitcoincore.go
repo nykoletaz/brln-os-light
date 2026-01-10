@@ -91,6 +91,9 @@ func (s *Server) installBitcoinCore(ctx context.Context) error {
   if err := ensureDocker(ctx); err != nil {
     return err
   }
+  if err := ensureBitcoinCoreImage(ctx); err != nil {
+    return err
+  }
   paths := bitcoinCoreAppPaths()
   if err := os.MkdirAll(paths.Root, 0750); err != nil {
     return fmt.Errorf("failed to create app directory: %w", err)
@@ -122,6 +125,9 @@ func (s *Server) startBitcoinCore(ctx context.Context) error {
   paths := bitcoinCoreAppPaths()
   if err := os.MkdirAll(paths.Root, 0750); err != nil {
     return fmt.Errorf("failed to create app directory: %w", err)
+  }
+  if err := ensureBitcoinCoreImage(ctx); err != nil {
+    return err
   }
   if err := ensureBitcoinCoreSeedConfig(paths); err != nil {
     return err
@@ -201,8 +207,11 @@ func syncBitcoinCoreConfig(ctx context.Context, paths bitcoinCorePaths) error {
   if !fileExists(paths.SeedConfigPath) {
     return fmt.Errorf("missing seed config %s", paths.SeedConfigPath)
   }
+  if err := ensureBitcoinCoreImage(ctx); err != nil {
+    return err
+  }
   cmd := "if [ ! -f /home/bitcoin/.bitcoin/bitcoin.conf ]; then cp /tmp/bitcoin.conf /home/bitcoin/.bitcoin/bitcoin.conf; chmod 640 /home/bitcoin/.bitcoin/bitcoin.conf; fi"
-  _, err := system.RunCommandWithSudo(
+  out, err := system.RunCommandWithSudo(
     ctx,
     "docker",
     "run",
@@ -220,7 +229,26 @@ func syncBitcoinCoreConfig(ctx context.Context, paths bitcoinCorePaths) error {
     cmd,
   )
   if err != nil {
-    return fmt.Errorf("failed to seed bitcoin.conf: %w", err)
+    msg := strings.TrimSpace(out)
+    if msg == "" {
+      return fmt.Errorf("failed to seed bitcoin.conf: %w", err)
+    }
+    return fmt.Errorf("failed to seed bitcoin.conf: %s", msg)
+  }
+  return nil
+}
+
+func ensureBitcoinCoreImage(ctx context.Context) error {
+  if _, err := system.RunCommandWithSudo(ctx, "docker", "image", "inspect", bitcoinCoreImage); err == nil {
+    return nil
+  }
+  out, err := system.RunCommandWithSudo(ctx, "docker", "pull", bitcoinCoreImage)
+  if err != nil {
+    msg := strings.TrimSpace(out)
+    if msg == "" {
+      return fmt.Errorf("failed to pull %s: %w", bitcoinCoreImage, err)
+    }
+    return fmt.Errorf("failed to pull %s: %s", bitcoinCoreImage, msg)
   }
   return nil
 }

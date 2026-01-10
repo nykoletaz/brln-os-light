@@ -272,6 +272,9 @@ func readBitcoinCoreConfig(ctx context.Context, paths bitcoinCorePaths) (string,
     }
   }
 
+  if err := ensureBitcoinCoreImage(ctx); err != nil {
+    return "", err
+  }
   out, err := system.RunCommandWithSudo(
     ctx,
     "docker",
@@ -298,7 +301,11 @@ func readBitcoinCoreConfig(ctx context.Context, paths bitcoinCorePaths) (string,
       }
     }
   }
-  return "", fmt.Errorf("read bitcoin.conf failed: %w", err)
+  msg := strings.TrimSpace(out)
+  if msg == "" {
+    return "", fmt.Errorf("read bitcoin.conf failed: %w", err)
+  }
+  return "", fmt.Errorf("read bitcoin.conf failed: %s", msg)
 }
 
 func writeBitcoinCoreConfig(ctx context.Context, paths bitcoinCorePaths, content string) error {
@@ -315,7 +322,10 @@ func writeBitcoinCoreConfig(ctx context.Context, paths bitcoinCorePaths, content
     "chown 101:101 " + bitcoinCoreConfigPathInContainer,
     "chmod 640 " + bitcoinCoreConfigPathInContainer,
   }, " && ")
-  if _, err := system.RunCommandWithSudo(
+  if err := ensureBitcoinCoreImage(ctx); err != nil {
+    return err
+  }
+  out, err := system.RunCommandWithSudo(
     ctx,
     "docker",
     "run",
@@ -331,8 +341,13 @@ func writeBitcoinCoreConfig(ctx context.Context, paths bitcoinCorePaths, content
     bitcoinCoreImage,
     "-c",
     cmd,
-  ); err != nil {
-    return fmt.Errorf("write bitcoin.conf failed: %w", err)
+  )
+  if err != nil {
+    msg := strings.TrimSpace(out)
+    if msg == "" {
+      return fmt.Errorf("write bitcoin.conf failed: %w", err)
+    }
+    return fmt.Errorf("write bitcoin.conf failed: %s", msg)
   }
   return nil
 }
