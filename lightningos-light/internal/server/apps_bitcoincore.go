@@ -15,6 +15,7 @@ type bitcoinCorePaths struct {
   Root string
   DataDir string
   ConfigPath string
+  SeedConfigPath string
   ComposePath string
 }
 
@@ -79,6 +80,7 @@ func bitcoinCoreAppPaths() bitcoinCorePaths {
     Root: root,
     DataDir: dataDir,
     ConfigPath: filepath.Join(dataDir, "bitcoin.conf"),
+    SeedConfigPath: filepath.Join(root, "bitcoin.conf"),
     ComposePath: filepath.Join(root, "docker-compose.yaml"),
   }
 }
@@ -91,10 +93,10 @@ func (s *Server) installBitcoinCore(ctx context.Context) error {
   if err := os.MkdirAll(paths.Root, 0750); err != nil {
     return fmt.Errorf("failed to create app directory: %w", err)
   }
-  if err := ensureBitcoinCoreDataDir(ctx, paths.DataDir); err != nil {
+  if err := ensureBitcoinCoreSeedConfig(paths); err != nil {
     return err
   }
-  if err := ensureBitcoinCoreConfig(paths); err != nil {
+  if err := syncBitcoinCoreConfig(ctx, paths); err != nil {
     return err
   }
   if _, err := ensureFileWithChange(paths.ComposePath, bitcoinCoreComposeContents(paths)); err != nil {
@@ -119,10 +121,10 @@ func (s *Server) startBitcoinCore(ctx context.Context) error {
   if err := os.MkdirAll(paths.Root, 0750); err != nil {
     return fmt.Errorf("failed to create app directory: %w", err)
   }
-  if err := ensureBitcoinCoreDataDir(ctx, paths.DataDir); err != nil {
+  if err := ensureBitcoinCoreSeedConfig(paths); err != nil {
     return err
   }
-  if err := ensureBitcoinCoreConfig(paths); err != nil {
+  if err := syncBitcoinCoreConfig(ctx, paths); err != nil {
     return err
   }
   if _, err := ensureFileWithChange(paths.ComposePath, bitcoinCoreComposeContents(paths)); err != nil {
@@ -155,22 +157,22 @@ func bitcoinCoreComposeContents(paths bitcoinCorePaths) string {
 `, paths.DataDir)
 }
 
-func ensureBitcoinCoreConfig(paths bitcoinCorePaths) error {
-  info, err := os.Stat(paths.ConfigPath)
+func ensureBitcoinCoreSeedConfig(paths bitcoinCorePaths) error {
+  info, err := os.Stat(paths.SeedConfigPath)
   if err == nil {
     if info.IsDir() {
-      return fmt.Errorf("%s is a directory", paths.ConfigPath)
+      return fmt.Errorf("%s is a directory", paths.SeedConfigPath)
     }
     return nil
   }
   if !os.IsNotExist(err) {
-    return fmt.Errorf("failed to stat %s: %w", paths.ConfigPath, err)
+    return fmt.Errorf("failed to stat %s: %w", paths.SeedConfigPath, err)
   }
   content, err := defaultBitcoinCoreConfig()
   if err != nil {
     return err
   }
-  return writeFile(paths.ConfigPath, content, 0640)
+  return writeFile(paths.SeedConfigPath, content, 0640)
 }
 
 func defaultBitcoinCoreConfig() (string, error) {
@@ -193,25 +195,29 @@ func defaultBitcoinCoreConfig() (string, error) {
   return strings.Join(lines, "\n"), nil
 }
 
-func ensureBitcoinCoreDataDir(ctx context.Context, dir string) error {
-  info, err := os.Stat(dir)
-  if err == nil {
-    if !info.IsDir() {
-      return fmt.Errorf("%s exists and is not a directory", dir)
-    }
-    return nil
+func syncBitcoinCoreConfig(ctx context.Context, paths bitcoinCorePaths) error {
+  if !fileExists(paths.SeedConfigPath) {
+    return fmt.Errorf("missing seed config %s", paths.SeedConfigPath)
   }
-  if !os.IsNotExist(err) {
-    return fmt.Errorf("failed to stat %s: %w", dir, err)
-  }
-  if _, err := system.RunCommandWithSudo(ctx, "mkdir", "-p", dir); err != nil {
-    return fmt.Errorf("failed to create %s: %w", dir, err)
-  }
-  if _, err := system.RunCommandWithSudo(ctx, "chown", "lightningos:lightningos", dir); err != nil {
-    return fmt.Errorf("failed to set owner on %s: %w", dir, err)
-  }
-  if _, err := system.RunCommandWithSudo(ctx, "chmod", "750", dir); err != nil {
-    return fmt.Errorf("failed to set permissions on %s: %w", dir, err)
+  cmd := "if [ ! -f /home/bitcoin/.bitcoin/bitcoin.conf ]; then cp /tmp/bitcoin.conf /home/bitcoin/.bitcoin/bitcoin.conf; chmod 640 /home/bitcoin/.bitcoin/bitcoin.conf; fi"
+  _, err := system.RunCommandWithSudo(
+    ctx,
+    "docker",
+    "run",
+    "--rm",
+    "--user",
+    "0:0",
+    "-v",
+    fmt.Sprintf("%s:/home/bitcoin/.bitcoin", paths.DataDir),
+    "-v",
+    fmt.Sprintf("%s:/tmp/bitcoin.conf:ro", paths.SeedConfigPath),
+    "bitcoin/bitcoin:latest",
+    "sh",
+    "-c",
+    cmd,
+  )
+  if err != nil {
+    return fmt.Errorf("failed to seed bitcoin.conf: %w", err)
   }
   return nil
 }

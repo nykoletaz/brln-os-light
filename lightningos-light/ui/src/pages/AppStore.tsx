@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getApps, installApp, startApp, stopApp, uninstallApp } from '../api'
 import lndgIcon from '../assets/apps/lndg.ico'
+import bitcoincoreIcon from '../assets/apps/bitcoincore.svg'
 
 type AppInfo = {
   id: string
@@ -13,7 +14,8 @@ type AppInfo = {
 }
 
 const iconMap: Record<string, string> = {
-  lndg: lndgIcon
+  lndg: lndgIcon,
+  bitcoincore: bitcoincoreIcon
 }
 
 const internalRoutes: Record<string, string> = {
@@ -107,7 +109,11 @@ export default function AppStore() {
               </div>
 
               <div className="text-xs text-fog/50 space-y-1">
-                <p>Default port: {app.port || '-'}</p>
+                {app.port ? (
+                  <p>Default port: {app.port}</p>
+                ) : internalRoute ? (
+                  <p>Default access: Bitcoin Local</p>
+                ) : null}
                 {app.admin_password_path && (
                   <p>Admin password saved at {app.admin_password_path}</p>
                 )}
