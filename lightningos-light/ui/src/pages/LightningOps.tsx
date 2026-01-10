@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { closeChannel, connectPeer, disconnectPeer, getLnChannels, getLnPeers, openChannel, updateChannelFees } from '../api'
+import { boostPeers, closeChannel, connectPeer, disconnectPeer, getLnChannels, getLnPeers, openChannel, updateChannelFees } from '../api'
 
 type Channel = {
   channel_point: string
@@ -49,6 +49,8 @@ export default function LightningOps() {
   const [peerAddress, setPeerAddress] = useState('')
   const [peerTemporary, setPeerTemporary] = useState(false)
   const [peerStatus, setPeerStatus] = useState('')
+  const [boostStatus, setBoostStatus] = useState('')
+  const [boostRunning, setBoostRunning] = useState(false)
   const [peers, setPeers] = useState<Peer[]>([])
   const [peerListStatus, setPeerListStatus] = useState('')
   const [peerActionStatus, setPeerActionStatus] = useState('')
@@ -176,6 +178,23 @@ export default function LightningOps() {
     }
   }
 
+  const handleBoostPeers = async () => {
+    setBoostRunning(true)
+    setBoostStatus('Boosting peers (this can take a while)...')
+    try {
+      const res = await boostPeers({ limit: 25 })
+      const connected = res?.connected ?? 0
+      const skipped = res?.skipped ?? 0
+      const failed = res?.failed ?? 0
+      setBoostStatus(`Boost complete. Connected ${connected}, skipped ${skipped}, failed ${failed}.`)
+      load()
+    } catch (err: any) {
+      setBoostStatus(err?.message || 'Boost failed.')
+    } finally {
+      setBoostRunning(false)
+    }
+  }
+
   const handleOpenChannel = async () => {
     setOpenStatus('Opening channel...')
     const localFunding = Number(openAmount || 0)
@@ -294,8 +313,19 @@ export default function LightningOps() {
             />
             Temporary peer (no auto-reconnect)
           </label>
-          <button className="btn-primary" onClick={handleConnectPeer}>Connect peer</button>
+          <div className="flex flex-wrap gap-3">
+            <button className="btn-primary" onClick={handleConnectPeer}>Connect peer</button>
+            <button
+              className="btn-secondary disabled:opacity-60 disabled:cursor-not-allowed"
+              onClick={handleBoostPeers}
+              disabled={boostRunning}
+              title="Processo demorado. Aguarde."
+            >
+              {boostRunning ? 'Boosting...' : 'Boost peers'}
+            </button>
+          </div>
           {peerStatus && <p className="text-sm text-brass">{peerStatus}</p>}
+          {boostStatus && <p className="text-sm text-brass">{boostStatus}</p>}
         </div>
 
         <div className="section-card space-y-4">

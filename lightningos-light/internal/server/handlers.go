@@ -27,6 +27,9 @@ const (
   lndWalletDBPath = "/data/lnd/data/chain/bitcoin/mainnet/wallet.db"
   lndAdminMacaroonPath = "/data/lnd/data/chain/bitcoin/mainnet/admin.macaroon"
   lndFixPermsScript = "/usr/local/sbin/lightningos-fix-lnd-perms"
+  mempoolBaseURL = "https://mempool.space/api/v1/lightning"
+  boostPeersDefaultLimit = 25
+  boostPeersMaxLimit = 100
   lndRPCTimeout = 15 * time.Second
   lndWarmupPeriod = 90 * time.Second
 )
@@ -236,6 +239,38 @@ type bitcoinStatus struct {
   VerificationProgress float64 `json:"verification_progress,omitempty"`
   InitialBlockDownload bool `json:"initial_block_download,omitempty"`
   BestBlockHash string `json:"best_block_hash,omitempty"`
+}
+
+type mempoolConnectivityNode struct {
+  PublicKey string `json:"publicKey"`
+  Alias string `json:"alias"`
+}
+
+type mempoolNodeInfo struct {
+  PublicKey string `json:"public_key"`
+  Alias string `json:"alias"`
+  Sockets string `json:"sockets"`
+}
+
+type boostPeersRequest struct {
+  Limit int `json:"limit"`
+}
+
+type boostPeerResult struct {
+  Pubkey string `json:"pubkey"`
+  Alias string `json:"alias"`
+  Socket string `json:"socket,omitempty"`
+  Status string `json:"status"`
+  Error string `json:"error,omitempty"`
+}
+
+type boostPeersResponse struct {
+  Requested int `json:"requested"`
+  Attempted int `json:"attempted"`
+  Connected int `json:"connected"`
+  Skipped int `json:"skipped"`
+  Failed int `json:"failed"`
+  Results []boostPeerResult `json:"results"`
 }
 
 func (s *Server) handleBitcoin(w http.ResponseWriter, r *http.Request) {
@@ -748,6 +783,218 @@ func (s *Server) handleLNDisconnectPeer(w http.ResponseWriter, r *http.Request) 
   }
 
   writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleLNBoostPeers(w http.ResponseWriter, r *http.Request) {
+  var req boostPeersRequest
+  if err := readJSON(r, &req); err != nil {
+    writeError(w, http.StatusBadRequest, "invalid json")
+    return
+  }
+
+  limit := req.Limit
+  if limit <= 0 {
+    limit = boostPeersDefaultLimit
+  }
+  if limit > boostPeersMaxLimit {
+    limit = boostPeersMaxLimit
+  }
+
+  peersCtx, peersCancel := context.WithTimeout(r.Context(), lndRPCTimeout)
+  peers, err := s.lnd.ListPeers(peersCtx)
+  peersCancel()
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, lndStatusMessage(err))
+    return
+  }
+
+  existing := map[string]bool{}
+  for _, peer := range peers {
+    if peer.PubKey != "" {
+      existing[peer.PubKey] = true
+    }
+  }
+
+  rankingCtx, rankingCancel := context.WithTimeout(r.Context(), 10*time.Second)
+  ranking, err := fetchMempoolConnectivity(rankingCtx)
+  rankingCancel()
+  if err != nil {
+    s.logger.Printf("mempool connectivity fetch failed: %v", err)
+    writeError(w, http.StatusInternalServerError, "mempool connectivity fetch failed")
+    return
+  }
+
+  if limit > len(ranking) {
+    limit = len(ranking)
+  }
+
+  resp := boostPeersResponse{
+    Requested: limit,
+  }
+  results := make([]boostPeerResult, 0, limit)
+
+  for i := 0; i < limit; i++ {
+    node := ranking[i]
+    pubkey := strings.TrimSpace(node.PublicKey)
+    alias := strings.TrimSpace(node.Alias)
+    if pubkey == "" {
+      results = append(results, boostPeerResult{
+        Alias: alias,
+        Status: "skipped",
+        Error: "missing pubkey",
+      })
+      resp.Skipped++
+      continue
+    }
+    if existing[pubkey] {
+      results = append(results, boostPeerResult{
+        Pubkey: pubkey,
+        Alias: alias,
+        Status: "skipped",
+        Error: "already connected",
+      })
+      resp.Skipped++
+      continue
+    }
+
+    infoCtx, infoCancel := context.WithTimeout(r.Context(), 8*time.Second)
+    info, err := fetchMempoolNodeInfo(infoCtx, pubkey)
+    infoCancel()
+    if err != nil {
+      results = append(results, boostPeerResult{
+        Pubkey: pubkey,
+        Alias: alias,
+        Status: "failed",
+        Error: "mempool node lookup failed",
+      })
+      resp.Failed++
+      continue
+    }
+    if alias == "" {
+      alias = strings.TrimSpace(info.Alias)
+    }
+    socket := firstSocket(info.Sockets)
+    if socket == "" {
+      results = append(results, boostPeerResult{
+        Pubkey: pubkey,
+        Alias: alias,
+        Status: "skipped",
+        Error: "no socket found",
+      })
+      resp.Skipped++
+      continue
+    }
+
+    connectCtx, connectCancel := context.WithTimeout(r.Context(), lndRPCTimeout)
+    err = s.lnd.ConnectPeer(connectCtx, pubkey, socket, true)
+    connectCancel()
+    resp.Attempted++
+    if err != nil {
+      if isAlreadyConnected(err) {
+        results = append(results, boostPeerResult{
+          Pubkey: pubkey,
+          Alias: alias,
+          Socket: socket,
+          Status: "skipped",
+          Error: "already connected",
+        })
+        resp.Skipped++
+      } else {
+        results = append(results, boostPeerResult{
+          Pubkey: pubkey,
+          Alias: alias,
+          Socket: socket,
+          Status: "failed",
+          Error: err.Error(),
+        })
+        resp.Failed++
+      }
+      continue
+    }
+
+    existing[pubkey] = true
+    results = append(results, boostPeerResult{
+      Pubkey: pubkey,
+      Alias: alias,
+      Socket: socket,
+      Status: "connected",
+    })
+    resp.Connected++
+  }
+
+  resp.Results = results
+  writeJSON(w, http.StatusOK, resp)
+}
+
+func fetchMempoolConnectivity(ctx context.Context) ([]mempoolConnectivityNode, error) {
+  var nodes []mempoolConnectivityNode
+  url := mempoolBaseURL + "/nodes/rankings/connectivity"
+  if err := fetchMempoolJSON(ctx, url, &nodes); err != nil {
+    return nil, err
+  }
+  return nodes, nil
+}
+
+func fetchMempoolNodeInfo(ctx context.Context, pubkey string) (mempoolNodeInfo, error) {
+  var info mempoolNodeInfo
+  url := mempoolBaseURL + "/nodes/" + pubkey
+  if err := fetchMempoolJSON(ctx, url, &info); err != nil {
+    return mempoolNodeInfo{}, err
+  }
+  return info, nil
+}
+
+func fetchMempoolJSON(ctx context.Context, url string, dst any) error {
+  req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+  if err != nil {
+    return err
+  }
+  client := &http.Client{Timeout: 10 * time.Second}
+  resp, err := client.Do(req)
+  if err != nil {
+    return err
+  }
+  defer resp.Body.Close()
+  if resp.StatusCode != http.StatusOK {
+    body, _ := io.ReadAll(resp.Body)
+    msg := strings.TrimSpace(string(body))
+    if msg == "" {
+      msg = resp.Status
+    }
+    return fmt.Errorf("mempool api error: %s", msg)
+  }
+  return json.NewDecoder(resp.Body).Decode(dst)
+}
+
+func firstSocket(raw string) string {
+  if raw == "" {
+    return ""
+  }
+  parts := strings.Split(raw, ",")
+  if len(parts) == 0 {
+    return ""
+  }
+  socket := strings.TrimSpace(parts[0])
+  if socket == "" {
+    return ""
+  }
+  if strings.Contains(socket, "@") {
+    pieces := strings.SplitN(socket, "@", 2)
+    if len(pieces) == 2 {
+      socket = strings.TrimSpace(pieces[1])
+    }
+  }
+  return socket
+}
+
+func isAlreadyConnected(err error) bool {
+  if err == nil {
+    return false
+  }
+  msg := strings.ToLower(err.Error())
+  return strings.Contains(msg, "already connected") ||
+    strings.Contains(msg, "already have a connection") ||
+    strings.Contains(msg, "already connected to peer")
 }
 
 func (s *Server) handleLNOpenChannel(w http.ResponseWriter, r *http.Request) {

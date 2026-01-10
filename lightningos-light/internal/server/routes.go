@@ -47,6 +47,7 @@ func (s *Server) routes() http.Handler {
     r.Get("/peers", s.handleLNPeers)
     r.Post("/peer", s.handleLNConnectPeer)
     r.Post("/peer/disconnect", s.handleLNDisconnectPeer)
+    r.Post("/peers/boost", s.handleLNBoostPeers)
     r.Post("/channel/open", s.handleLNOpenChannel)
     r.Post("/channel/close", s.handleLNCloseChannel)
     r.Post("/channel/fees", s.handleLNUpdateFees)
