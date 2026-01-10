@@ -242,6 +242,11 @@ func ensureLndgEnv(ctx context.Context, paths lndgPaths) error {
         return err
       }
     }
+    if readEnvValue(paths.EnvPath, "LNDG_CUSTOM_COOKIES") == "" {
+      if err := appendEnvLine(paths.EnvPath, "LNDG_CUSTOM_COOKIES", "1"); err != nil {
+        return err
+      }
+    }
     if !fileExists(paths.AdminPasswordPath) {
       adminPassword := readEnvValue(paths.EnvPath, "LNDG_ADMIN_PASSWORD")
       if adminPassword == "" {
@@ -324,6 +329,7 @@ func ensureLndgEnv(ctx context.Context, paths lndgPaths) error {
     "LNDG_LND_DIR=/root/.lnd",
     "LNDG_GIT_REF=" + gitRef,
     "LNDG_GIT_SHA=" + gitSha,
+    "LNDG_CUSTOM_COOKIES=1",
     "LNDG_ALLOWED_HOSTS=" + allowedHostsValue,
     "LNDG_CSRF_TRUSTED_ORIGINS=" + csrfOriginsValue,
     "",
@@ -755,7 +761,9 @@ if csrf_trusted:
     raw += ["CSRF_COOKIE_SECURE = False", "SESSION_COOKIE_SECURE = False"]
   raw += ["CSRF_COOKIE_DOMAIN = None", "SESSION_COOKIE_DOMAIN = None"]
   raw += ["CSRF_COOKIE_SAMESITE = 'Lax'", "SESSION_COOKIE_SAMESITE = 'Lax'"]
-if os.environ.get("LNDG_CUSTOM_COOKIES") == "1":
+if os.environ.get("LNDG_CUSTOM_COOKIES") == "0":
+  raw += ["CSRF_COOKIE_NAME = 'csrftoken'", "SESSION_COOKIE_NAME = 'sessionid'"]
+else:
   raw += ["CSRF_COOKIE_NAME = 'lndg_csrftoken'", "SESSION_COOKIE_NAME = 'lndg_sessionid'"]
 
 debug_path = "/app/lndg/csrf_debug.py"
