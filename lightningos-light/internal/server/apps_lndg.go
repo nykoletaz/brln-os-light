@@ -765,11 +765,27 @@ if not db_password:
 
 allowed_hosts = [h.strip() for h in os.environ.get("LNDG_ALLOWED_HOSTS", "").split(",") if h.strip()]
 csrf_trusted = [o.strip() for o in os.environ.get("LNDG_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()]
+if not csrf_trusted and allowed_hosts:
+  for host in allowed_hosts:
+    for scheme in ("http", "https"):
+      csrf_trusted.append(f"{scheme}://{host}")
+      csrf_trusted.append(f"{scheme}://{host}:8889")
 
 filtered = []
 for line in raw:
   stripped = line.strip()
-  if stripped.startswith("CSRF_COOKIE_NAME") or stripped.startswith("SESSION_COOKIE_NAME"):
+  if (
+    stripped.startswith("ALLOWED_HOSTS")
+    or stripped.startswith("CSRF_TRUSTED_ORIGINS")
+    or stripped.startswith("CSRF_COOKIE_SECURE")
+    or stripped.startswith("SESSION_COOKIE_SECURE")
+    or stripped.startswith("CSRF_COOKIE_SAMESITE")
+    or stripped.startswith("SESSION_COOKIE_SAMESITE")
+    or stripped.startswith("CSRF_COOKIE_DOMAIN")
+    or stripped.startswith("SESSION_COOKIE_DOMAIN")
+    or stripped.startswith("CSRF_COOKIE_NAME")
+    or stripped.startswith("SESSION_COOKIE_NAME")
+  ):
     continue
   filtered.append(line)
 raw = filtered
@@ -792,10 +808,14 @@ if allowed_hosts:
   raw += ["", "ALLOWED_HOSTS = " + repr(allowed_hosts)]
 if csrf_trusted:
   raw += ["CSRF_TRUSTED_ORIGINS = " + repr(csrf_trusted)]
-  if any(origin.startswith("http://") for origin in csrf_trusted):
-    raw += ["CSRF_COOKIE_SECURE = False", "SESSION_COOKIE_SECURE = False"]
-  raw += ["CSRF_COOKIE_DOMAIN = None", "SESSION_COOKIE_DOMAIN = None"]
-  raw += ["CSRF_COOKIE_SAMESITE = 'Lax'", "SESSION_COOKIE_SAMESITE = 'Lax'"]
+raw += [
+  "CSRF_COOKIE_SECURE = False",
+  "SESSION_COOKIE_SECURE = False",
+  "CSRF_COOKIE_DOMAIN = None",
+  "SESSION_COOKIE_DOMAIN = None",
+  "CSRF_COOKIE_SAMESITE = 'Lax'",
+  "SESSION_COOKIE_SAMESITE = 'Lax'",
+]
 with open(path, "w", encoding="utf-8") as f:
   f.write("\n".join(raw))
 PY
