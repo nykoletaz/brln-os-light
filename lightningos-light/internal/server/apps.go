@@ -1119,6 +1119,8 @@ if allowed_hosts:
   raw += ["", "ALLOWED_HOSTS = " + repr(allowed_hosts)]
 if csrf_trusted:
   raw += ["CSRF_TRUSTED_ORIGINS = " + repr(csrf_trusted)]
+  if any(origin.startswith("http://") for origin in csrf_trusted):
+    raw += ["CSRF_COOKIE_SECURE = False", "SESSION_COOKIE_SECURE = False"]
 with open(path, "w", encoding="utf-8") as f:
   f.write("\n".join(raw))
 PY
