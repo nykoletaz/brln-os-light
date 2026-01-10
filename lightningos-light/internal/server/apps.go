@@ -224,7 +224,13 @@ func (s *Server) installLndg(ctx context.Context) error {
     return err
   }
 
-  if err := runCompose(ctx, paths.Root, paths.ComposePath, "up", "-d", "--build"); err != nil {
+  if err := runCompose(ctx, paths.Root, paths.ComposePath, "up", "-d", "lndg-db"); err != nil {
+    return err
+  }
+  if err := syncLndgDbPassword(ctx, paths); err != nil {
+    return err
+  }
+  if err := runCompose(ctx, paths.Root, paths.ComposePath, "up", "-d", "--build", "lndg"); err != nil {
     return err
   }
   return nil
@@ -264,7 +270,13 @@ func (s *Server) startLndg(ctx context.Context) error {
   if err := ensureLndgEnv(paths); err != nil {
     return err
   }
-  return runCompose(ctx, paths.Root, paths.ComposePath, "up", "-d")
+  if err := runCompose(ctx, paths.Root, paths.ComposePath, "up", "-d", "lndg-db"); err != nil {
+    return err
+  }
+  if err := syncLndgDbPassword(ctx, paths); err != nil {
+    return err
+  }
+  return runCompose(ctx, paths.Root, paths.ComposePath, "up", "-d", "lndg")
 }
 
 func (s *Server) stopLndg(ctx context.Context) error {
@@ -505,12 +517,22 @@ func runAptOnce(ctx context.Context, args ...string) (string, error) {
   return fallbackOut, fallbackErr
 }
 
+func composeBaseArgs(appRoot string, composePath string) []string {
+  envPath := filepath.Join(appRoot, ".env")
+  args := []string{}
+  if fileExists(envPath) {
+    args = append(args, "--env-file", envPath)
+  }
+  args = append(args, "--project-directory", appRoot, "-f", composePath)
+  return args
+}
+
 func runCompose(ctx context.Context, appRoot string, composePath string, args ...string) error {
   cmd, baseArgs, err := resolveCompose(ctx)
   if err != nil {
     return err
   }
-  fullArgs := append(baseArgs, "--project-directory", appRoot, "-f", composePath)
+  fullArgs := append(baseArgs, composeBaseArgs(appRoot, composePath)...)
   fullArgs = append(fullArgs, args...)
   if _, err := system.RunCommandWithSudo(ctx, cmd, fullArgs...); err != nil {
     return err
@@ -523,7 +545,8 @@ func getComposeStatus(ctx context.Context, appRoot string, composePath string, s
   if err != nil {
     return "unknown", err
   }
-  fullArgs := append(baseArgs, "--project-directory", appRoot, "-f", composePath, "ps", "--services", "--filter", "status=running")
+  fullArgs := append(baseArgs, composeBaseArgs(appRoot, composePath)...)
+  fullArgs = append(fullArgs, "ps", "--services", "--filter", "status=running")
   out, err := system.RunCommandWithSudo(ctx, cmd, fullArgs...)
   if err != nil {
     return "unknown", err
@@ -534,6 +557,52 @@ func getComposeStatus(ctx context.Context, appRoot string, composePath string, s
     }
   }
   return "stopped", nil
+}
+
+func composeContainerID(ctx context.Context, appRoot string, composePath string, service string) (string, error) {
+  cmd, baseArgs, err := resolveCompose(ctx)
+  if err != nil {
+    return "", err
+  }
+  fullArgs := append(baseArgs, composeBaseArgs(appRoot, composePath)...)
+  fullArgs = append(fullArgs, "ps", "-q", service)
+  out, err := system.RunCommandWithSudo(ctx, cmd, fullArgs...)
+  if err != nil {
+    return "", err
+  }
+  return strings.TrimSpace(out), nil
+}
+
+func syncLndgDbPassword(ctx context.Context, paths lndgPaths) error {
+  password := readEnvValue(paths.EnvPath, "LNDG_DB_PASSWORD")
+  if password == "" {
+    password = readSecretFile(paths.DbPasswordPath)
+  }
+  if password == "" {
+    return errors.New("LNDG_DB_PASSWORD missing")
+  }
+  containerID, err := composeContainerID(ctx, paths.Root, paths.ComposePath, "lndg-db")
+  if err != nil {
+    return err
+  }
+  if containerID == "" {
+    return errors.New("lndg-db container not running")
+  }
+  escaped := strings.ReplaceAll(password, "'", "''")
+  cmd := fmt.Sprintf("psql -U postgres -d postgres -c \"ALTER USER lndg WITH PASSWORD '%s';\"", escaped)
+  var lastErr error
+  for attempt := 0; attempt < 10; attempt++ {
+    if _, err := system.RunCommandWithSudo(ctx, "docker", "exec", "-i", containerID, "sh", "-c", cmd); err == nil {
+      return nil
+    } else {
+      lastErr = err
+      time.Sleep(2 * time.Second)
+    }
+  }
+  if lastErr != nil {
+    return fmt.Errorf("failed to sync lndg db password: %w", lastErr)
+  }
+  return nil
 }
 
 func resolveCompose(ctx context.Context) (string, []string, error) {
