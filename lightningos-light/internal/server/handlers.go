@@ -457,6 +457,14 @@ func readBitcoinLocalRPCConfig(ctx context.Context) (bitcoinRPCConfig, error) {
   if err != nil {
     return bitcoinRPCConfig{}, fmt.Errorf("failed to read local bitcoin.conf: %w", err)
   }
+  if gateway, gwErr := dockerGatewayIP(ctx); gwErr == nil && gateway != "" {
+    if updated, changed := ensureBitcoinCoreRPCAllow(raw, gateway); changed {
+      if err := writeBitcoinCoreConfig(ctx, paths, updated); err == nil {
+        raw = updated
+        _ = writeFile(paths.SeedConfigPath, updated, 0640)
+      }
+    }
+  }
   user, pass, zmqBlock, zmqTx := parseBitcoinCoreRPCConfig(raw)
   if user == "" || pass == "" {
     return bitcoinRPCConfig{}, errors.New("local RPC credentials missing")
@@ -1875,55 +1883,99 @@ func updateLNDConfBitcoinSource(active string, remoteCfg bitcoinRPCConfig, local
     end = len(lines)
   }
 
-  keys := []string{
-    "bitcoind.rpchost",
-    "bitcoind.rpcuser",
-    "bitcoind.rpcpass",
-    "bitcoind.zmqpubrawblock",
-    "bitcoind.zmqpubrawtx",
+  remoteUpdates := map[string]string{
+    "bitcoind.rpchost": remoteCfg.Host,
+    "bitcoind.rpcuser": remoteCfg.User,
+    "bitcoind.rpcpass": remoteCfg.Pass,
+    "bitcoind.zmqpubrawblock": remoteCfg.ZMQBlock,
+    "bitcoind.zmqpubrawtx": remoteCfg.ZMQTx,
+  }
+  localUpdates := map[string]string{
+    "bitcoind.rpchost": localCfg.Host,
+    "bitcoind.rpcuser": localCfg.User,
+    "bitcoind.rpcpass": localCfg.Pass,
+    "bitcoind.zmqpubrawblock": localCfg.ZMQBlock,
+    "bitcoind.zmqpubrawtx": localCfg.ZMQTx,
   }
 
+  currentGroup := ""
+  foundRemote := false
+  foundLocal := false
   for i := start + 1; i < end; i++ {
-    trimmed := strings.TrimSpace(lines[i])
+    rawLine := lines[i]
+    trimmed := strings.TrimSpace(rawLine)
     if trimmed == "" {
       continue
     }
-    for strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
-      trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "#;"))
+
+    marker := strings.TrimSpace(strings.TrimLeft(trimmed, "#;"))
+    if strings.EqualFold(marker, "LightningOS Bitcoin Remote") {
+      lines[i] = "# LightningOS Bitcoin Remote"
+      currentGroup = "remote"
+      foundRemote = true
+      continue
     }
-    for _, key := range keys {
-      if strings.HasPrefix(trimmed, key+"=") {
-        lines[i] = ""
-        break
-      }
+    if strings.EqualFold(marker, "LightningOS Bitcoin Local") {
+      lines[i] = "# LightningOS Bitcoin Local"
+      currentGroup = "local"
+      foundLocal = true
+      continue
     }
+
+    if currentGroup == "" {
+      continue
+    }
+
+    clean := strings.TrimSpace(strings.TrimLeft(trimmed, "#;"))
+    parts := strings.SplitN(clean, "=", 2)
+    if len(parts) != 2 {
+      continue
+    }
+    key := strings.TrimSpace(parts[0])
+
+    var value string
+    if currentGroup == "remote" {
+      value = remoteUpdates[key]
+    } else if currentGroup == "local" {
+      value = localUpdates[key]
+    }
+    if value == "" {
+      continue
+    }
+
+    prefix := ""
+    if currentGroup != active {
+      prefix = "# "
+    }
+    lines[i] = prefix + key + "=" + value
   }
 
-  remotePrefix := "# "
-  localPrefix := "# "
-  if active == "remote" {
-    remotePrefix = ""
-  } else if active == "local" {
-    localPrefix = ""
+  if !foundRemote || !foundLocal {
+    remotePrefix := "# "
+    localPrefix := "# "
+    if active == "remote" {
+      remotePrefix = ""
+    } else if active == "local" {
+      localPrefix = ""
+    }
+    block := []string{
+      "",
+      "# LightningOS Bitcoin Remote",
+      remotePrefix + "bitcoind.rpchost=" + remoteCfg.Host,
+      remotePrefix + "bitcoind.rpcuser=" + remoteCfg.User,
+      remotePrefix + "bitcoind.rpcpass=" + remoteCfg.Pass,
+      remotePrefix + "bitcoind.zmqpubrawblock=" + remoteCfg.ZMQBlock,
+      remotePrefix + "bitcoind.zmqpubrawtx=" + remoteCfg.ZMQTx,
+      "",
+      "# LightningOS Bitcoin Local",
+      localPrefix + "bitcoind.rpchost=" + localCfg.Host,
+      localPrefix + "bitcoind.rpcuser=" + localCfg.User,
+      localPrefix + "bitcoind.rpcpass=" + localCfg.Pass,
+      localPrefix + "bitcoind.zmqpubrawblock=" + localCfg.ZMQBlock,
+      localPrefix + "bitcoind.zmqpubrawtx=" + localCfg.ZMQTx,
+    }
+    lines = append(lines[:end], append(block, lines[end:]...)...)
   }
-
-  block := []string{
-    "# LightningOS Bitcoin Remote",
-    remotePrefix + "bitcoind.rpchost=" + remoteCfg.Host,
-    remotePrefix + "bitcoind.rpcuser=" + remoteCfg.User,
-    remotePrefix + "bitcoind.rpcpass=" + remoteCfg.Pass,
-    remotePrefix + "bitcoind.zmqpubrawblock=" + remoteCfg.ZMQBlock,
-    remotePrefix + "bitcoind.zmqpubrawtx=" + remoteCfg.ZMQTx,
-    "",
-    "# LightningOS Bitcoin Local",
-    localPrefix + "bitcoind.rpchost=" + localCfg.Host,
-    localPrefix + "bitcoind.rpcuser=" + localCfg.User,
-    localPrefix + "bitcoind.rpcpass=" + localCfg.Pass,
-    localPrefix + "bitcoind.zmqpubrawblock=" + localCfg.ZMQBlock,
-    localPrefix + "bitcoind.zmqpubrawtx=" + localCfg.ZMQTx,
-  }
-
-  lines = append(lines[:end], append(block, lines[end:]...)...)
 
   return os.WriteFile(lndConfPath, []byte(strings.Join(lines, "\n")), 0660)
 }

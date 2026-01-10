@@ -6,6 +6,7 @@ import (
   "errors"
   "fmt"
   "math"
+  "net"
   "net/http"
   "os"
   "path/filepath"
@@ -475,6 +476,55 @@ func looksLikeEntrypointLog(line string) bool {
   }
   if strings.Contains(line, "setting data directory") {
     return true
+  }
+  return false
+}
+
+func ensureBitcoinCoreRPCAllow(raw string, gateway string) (string, bool) {
+  trimmedGateway := strings.TrimSpace(gateway)
+  if trimmedGateway == "" {
+    return raw, false
+  }
+  normalized := sanitizeBitcoinCoreConfig(raw)
+  lines := strings.Split(strings.TrimRight(normalized, "\n"), "\n")
+  if len(lines) == 1 && lines[0] == "" {
+    lines = []string{}
+  }
+
+  if rpcAllowListHasGateway(lines, trimmedGateway) {
+    return normalized, false
+  }
+
+  updated := append(lines, "rpcallowip="+trimmedGateway)
+  return ensureTrailingNewline(strings.Join(updated, "\n")), true
+}
+
+func rpcAllowListHasGateway(lines []string, gateway string) bool {
+  ip := net.ParseIP(gateway)
+  if ip == nil {
+    return false
+  }
+  for _, line := range lines {
+    trimmed := strings.TrimSpace(line)
+    if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
+      continue
+    }
+    if !strings.HasPrefix(trimmed, "rpcallowip=") {
+      continue
+    }
+    value := strings.TrimSpace(strings.TrimPrefix(trimmed, "rpcallowip="))
+    if value == "" {
+      continue
+    }
+    if strings.Contains(value, "/") {
+      if _, cidr, err := net.ParseCIDR(value); err == nil && cidr.Contains(ip) {
+        return true
+      }
+      continue
+    }
+    if net.ParseIP(value) != nil && value == gateway {
+      return true
+    }
   }
   return false
 }
