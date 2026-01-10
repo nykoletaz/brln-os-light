@@ -699,6 +699,21 @@ start = None
 depth = 0
 end = None
 
+strip_keys = (
+  "ALLOWED_HOSTS =",
+  "CSRF_TRUSTED_ORIGINS =",
+  "CSRF_COOKIE_SECURE =",
+  "SESSION_COOKIE_SECURE =",
+  "CSRF_COOKIE_DOMAIN =",
+  "SESSION_COOKIE_DOMAIN =",
+  "CSRF_COOKIE_SAMESITE =",
+  "SESSION_COOKIE_SAMESITE =",
+  "CSRF_COOKIE_NAME =",
+  "SESSION_COOKIE_NAME =",
+  "CSRF_FAILURE_VIEW =",
+)
+raw = [line for line in raw if not any(line.strip().startswith(key) for key in strip_keys)]
+
 for i, line in enumerate(raw):
   if start is None and line.strip().startswith("DATABASES"):
     start = i
@@ -740,7 +755,8 @@ if csrf_trusted:
     raw += ["CSRF_COOKIE_SECURE = False", "SESSION_COOKIE_SECURE = False"]
   raw += ["CSRF_COOKIE_DOMAIN = None", "SESSION_COOKIE_DOMAIN = None"]
   raw += ["CSRF_COOKIE_SAMESITE = 'Lax'", "SESSION_COOKIE_SAMESITE = 'Lax'"]
-raw += ["CSRF_COOKIE_NAME = 'lndg_csrftoken'", "SESSION_COOKIE_NAME = 'lndg_sessionid'"]
+if os.environ.get("LNDG_CUSTOM_COOKIES") == "1":
+  raw += ["CSRF_COOKIE_NAME = 'lndg_csrftoken'", "SESSION_COOKIE_NAME = 'lndg_sessionid'"]
 
 debug_path = "/app/lndg/csrf_debug.py"
 debug_contents = """from django.views.csrf import csrf_failure as default_csrf_failure
