@@ -589,17 +589,22 @@ func syncLndgDbPassword(ctx context.Context, paths lndgPaths) error {
     return errors.New("lndg-db container not running")
   }
   escaped := strings.ReplaceAll(password, "'", "''")
-  cmd := fmt.Sprintf("psql -U postgres -d postgres -c \"ALTER USER lndg WITH PASSWORD '%s';\"", escaped)
+  cmd := fmt.Sprintf("export PGPASSWORD=\"$POSTGRES_PASSWORD\"; psql -U postgres -h 127.0.0.1 -d postgres -v ON_ERROR_STOP=1 -c \"ALTER USER lndg WITH PASSWORD '%s';\" || psql -U postgres -h 127.0.0.1 -d postgres -v ON_ERROR_STOP=1 -c \"CREATE USER lndg WITH PASSWORD '%s';\"", escaped, escaped)
   var lastErr error
+  var lastOut string
   for attempt := 0; attempt < 10; attempt++ {
-    if _, err := system.RunCommandWithSudo(ctx, "docker", "exec", "-i", containerID, "sh", "-c", cmd); err == nil {
+    out, err := system.RunCommandWithSudo(ctx, "docker", "exec", "-i", containerID, "sh", "-c", cmd)
+    if err == nil {
       return nil
-    } else {
-      lastErr = err
-      time.Sleep(2 * time.Second)
     }
+    lastErr = err
+    lastOut = strings.TrimSpace(out)
+    time.Sleep(2 * time.Second)
   }
   if lastErr != nil {
+    if lastOut != "" {
+      return fmt.Errorf("failed to sync lndg db password: %s", lastOut)
+    }
     return fmt.Errorf("failed to sync lndg db password: %w", lastErr)
   }
   return nil

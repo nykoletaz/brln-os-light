@@ -920,6 +920,7 @@ main() {
   ensure_user lightningos /var/lib/lightningos
   ensure_group_member lightningos lnd
   ensure_group_member lightningos systemd-journal
+  ensure_group_member lightningos docker
   install_i2pd
   install_go
   install_node
