@@ -167,6 +167,24 @@ func lndStatusMessage(err error) string {
   return "LND not reachable"
 }
 
+func lndRPCErrorMessage(err error) string {
+  if err == nil {
+    return ""
+  }
+  msg := strings.TrimSpace(err.Error())
+  if msg == "" {
+    return "LND error"
+  }
+  lower := strings.ToLower(msg)
+  if idx := strings.Index(lower, "desc ="); idx != -1 {
+    detail := strings.TrimSpace(msg[idx+len("desc ="):])
+    if detail != "" {
+      return detail
+    }
+  }
+  return msg
+}
+
 func (s *Server) handleSystem(w http.ResponseWriter, r *http.Request) {
   ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
   defer cancel()
@@ -1278,7 +1296,7 @@ func (s *Server) handleLNUpdateFees(w http.ResponseWriter, r *http.Request) {
       })
       return
     }
-    writeError(w, http.StatusInternalServerError, lndStatusMessage(err))
+    writeError(w, http.StatusInternalServerError, lndRPCErrorMessage(err))
     return
   }
 
