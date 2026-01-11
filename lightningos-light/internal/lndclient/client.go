@@ -578,7 +578,7 @@ func (c *Client) DisconnectPeer(ctx context.Context, pubkey string) error {
   return err
 }
 
-func (c *Client) OpenChannel(ctx context.Context, pubkeyHex string, localFundingSat int64, pushSat int64, private bool) (string, error) {
+func (c *Client) OpenChannel(ctx context.Context, pubkeyHex string, localFundingSat int64, closeAddress string, private bool) (string, error) {
   pubkeyHex = strings.TrimSpace(pubkeyHex)
   if pubkeyHex == "" {
     return "", errors.New("pubkey required")
@@ -595,12 +595,15 @@ func (c *Client) OpenChannel(ctx context.Context, pubkeyHex string, localFunding
   defer conn.Close()
 
   client := lnrpc.NewLightningClient(conn)
-  resp, err := client.OpenChannelSync(ctx, &lnrpc.OpenChannelRequest{
+  req := &lnrpc.OpenChannelRequest{
     NodePubkey: pubkey,
     LocalFundingAmount: localFundingSat,
-    PushSat: pushSat,
     Private: private,
-  })
+  }
+  if strings.TrimSpace(closeAddress) != "" {
+    req.CloseAddress = strings.TrimSpace(closeAddress)
+  }
+  resp, err := client.OpenChannelSync(ctx, req)
   if err != nil {
     return "", err
   }

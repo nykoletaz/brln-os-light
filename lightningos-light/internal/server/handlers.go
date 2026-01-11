@@ -1194,32 +1194,48 @@ func isAlreadyConnected(err error) bool {
 
 func (s *Server) handleLNOpenChannel(w http.ResponseWriter, r *http.Request) {
   var req struct {
+    PeerAddress string `json:"peer_address"`
     Pubkey string `json:"pubkey"`
     LocalFundingSat int64 `json:"local_funding_sat"`
-    PushSat int64 `json:"push_sat"`
+    CloseAddress string `json:"close_address"`
     Private bool `json:"private"`
   }
   if err := readJSON(r, &req); err != nil {
     writeError(w, http.StatusBadRequest, "invalid json")
     return
   }
-  if strings.TrimSpace(req.Pubkey) == "" {
-    writeError(w, http.StatusBadRequest, "pubkey required")
+  peerAddress := strings.TrimSpace(req.PeerAddress)
+  if peerAddress == "" {
+    peerAddress = strings.TrimSpace(req.Pubkey)
+  }
+  if peerAddress == "" {
+    writeError(w, http.StatusBadRequest, "peer_address required")
     return
   }
   if req.LocalFundingSat <= 0 {
     writeError(w, http.StatusBadRequest, "local_funding_sat must be positive")
     return
   }
-  if req.PushSat < 0 {
-    writeError(w, http.StatusBadRequest, "push_sat must be zero or positive")
+
+  pubkey, host, err := parsePeerAddress(peerAddress)
+  if err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
+  if !strings.Contains(host, ":") {
+    writeError(w, http.StatusBadRequest, "peer host must include host:port")
     return
   }
 
   ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
   defer cancel()
 
-  channelPoint, err := s.lnd.OpenChannel(ctx, req.Pubkey, req.LocalFundingSat, req.PushSat, req.Private)
+  if err := s.lnd.ConnectPeer(ctx, pubkey, host, false); err != nil && !isAlreadyConnected(err) {
+    writeError(w, http.StatusInternalServerError, lndRPCErrorMessage(err))
+    return
+  }
+
+  channelPoint, err := s.lnd.OpenChannel(ctx, pubkey, req.LocalFundingSat, req.CloseAddress, req.Private)
   if err != nil {
     writeError(w, http.StatusInternalServerError, lndStatusMessage(err))
     return

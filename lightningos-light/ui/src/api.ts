@@ -95,9 +95,9 @@ export const disconnectPeer = (payload: { pubkey: string }) =>
 export const boostPeers = (payload?: { limit?: number }) =>
   request('/api/lnops/peers/boost', { method: 'POST', body: JSON.stringify(payload ?? {}) })
 export const openChannel = (payload: {
-  pubkey: string
+  peer_address: string
   local_funding_sat: number
-  push_sat?: number
+  close_address?: string
   private?: boolean
 }) => request('/api/lnops/channel/open', { method: 'POST', body: JSON.stringify(payload) })
 export const closeChannel = (payload: { channel_point: string; force?: boolean }) =>

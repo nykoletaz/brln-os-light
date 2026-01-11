@@ -55,9 +55,9 @@ export default function LightningOps() {
   const [peerListStatus, setPeerListStatus] = useState('')
   const [peerActionStatus, setPeerActionStatus] = useState('')
 
-  const [openPubkey, setOpenPubkey] = useState('')
+  const [openPeer, setOpenPeer] = useState('')
   const [openAmount, setOpenAmount] = useState('')
-  const [openPush, setOpenPush] = useState('')
+  const [openCloseAddress, setOpenCloseAddress] = useState('')
   const [openPrivate, setOpenPrivate] = useState(false)
   const [openStatus, setOpenStatus] = useState('')
 
@@ -247,9 +247,8 @@ export default function LightningOps() {
   const handleOpenChannel = async () => {
     setOpenStatus('Opening channel...')
     const localFunding = Number(openAmount || 0)
-    const push = Number(openPush || 0)
-    if (!openPubkey.trim()) {
-      setOpenStatus('Pubkey required.')
+    if (!openPeer.trim()) {
+      setOpenStatus('Peer address required.')
       return
     }
     if (localFunding < 20000) {
@@ -258,14 +257,14 @@ export default function LightningOps() {
     }
     try {
       const res = await openChannel({
-        pubkey: openPubkey.trim(),
+        peer_address: openPeer.trim(),
         local_funding_sat: localFunding,
-        push_sat: push > 0 ? push : 0,
+        close_address: openCloseAddress.trim() || undefined,
         private: openPrivate
       })
       setOpenStatus(`Channel opening: ${res?.channel_point || 'submitted'}`)
       setOpenAmount('')
-      setOpenPush('')
+      setOpenCloseAddress('')
       load()
     } catch (err: any) {
       setOpenStatus(err?.message || 'Channel open failed.')
@@ -388,9 +387,9 @@ export default function LightningOps() {
           <h3 className="text-lg font-semibold">Open channel</h3>
           <input
             className="input-field"
-            placeholder="Peer pubkey (hex)"
-            value={openPubkey}
-            onChange={(e) => setOpenPubkey(e.target.value)}
+            placeholder="pubkey@host:port"
+            value={openPeer}
+            onChange={(e) => setOpenPeer(e.target.value)}
           />
           <div className="grid gap-4 lg:grid-cols-2">
             <input
@@ -403,11 +402,10 @@ export default function LightningOps() {
             />
             <input
               className="input-field"
-              placeholder="Push amount (sat, optional)"
-              type="number"
-              min={0}
-              value={openPush}
-              onChange={(e) => setOpenPush(e.target.value)}
+              placeholder="Close address (optional)"
+              type="text"
+              value={openCloseAddress}
+              onChange={(e) => setOpenCloseAddress(e.target.value)}
             />
           </div>
           <label className="flex items-center gap-2 text-sm text-fog/70">
