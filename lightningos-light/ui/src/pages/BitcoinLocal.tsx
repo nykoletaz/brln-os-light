@@ -57,33 +57,99 @@ export default function BitcoinLocal() {
   const [blockFlash, setBlockFlash] = useState(false)
   const lastBlockRef = useRef<number | null>(null)
   const flashTimerRef = useRef<number | null>(null)
+  const rpcFailureTimesRef = useRef<number[]>([])
+  const rpcLastSuccessRef = useRef<number | null>(null)
+  const [rpcFailCount, setRpcFailCount] = useState(0)
+  const [rpcStale, setRpcStale] = useState(false)
 
   const mergeStatus = (prev: BitcoinLocalStatus | null, next: BitcoinLocalStatus) => {
     if (!prev) return next
     if (!next.installed || next.status !== 'running') return next
+    const hasRpcPayload =
+      typeof next.connections === 'number' ||
+      typeof next.blocks === 'number' ||
+      typeof next.headers === 'number' ||
+      typeof next.verification_progress === 'number' ||
+      typeof next.initial_block_download === 'boolean' ||
+      typeof next.version === 'number' ||
+      typeof next.pruned === 'boolean' ||
+      typeof next.prune_target_size === 'number' ||
+      typeof next.size_on_disk === 'number' ||
+      Boolean(next.chain) ||
+      Boolean(next.subversion)
+    const keepRpcSnapshot = !hasRpcPayload && next.rpc_ok === false
     return {
       ...prev,
       ...next,
-      rpc_ok: next.rpc_ok ?? prev.rpc_ok,
-      connections: next.connections ?? prev.connections,
-      chain: next.chain ?? prev.chain,
-      blocks: next.blocks ?? prev.blocks,
-      headers: next.headers ?? prev.headers,
-      verification_progress: next.verification_progress ?? prev.verification_progress,
-      initial_block_download: next.initial_block_download ?? prev.initial_block_download,
-      version: next.version ?? prev.version,
-      subversion: next.subversion ?? prev.subversion,
-      pruned: next.pruned ?? prev.pruned,
-      prune_height: next.prune_height ?? prev.prune_height,
-      prune_target_size: next.prune_target_size ?? prev.prune_target_size,
-      size_on_disk: next.size_on_disk ?? prev.size_on_disk
+      rpc_ok: keepRpcSnapshot ? prev.rpc_ok : next.rpc_ok ?? prev.rpc_ok,
+      connections: keepRpcSnapshot ? prev.connections : next.connections ?? prev.connections,
+      chain: keepRpcSnapshot ? prev.chain : next.chain ?? prev.chain,
+      blocks: keepRpcSnapshot ? prev.blocks : next.blocks ?? prev.blocks,
+      headers: keepRpcSnapshot ? prev.headers : next.headers ?? prev.headers,
+      verification_progress: keepRpcSnapshot ? prev.verification_progress : next.verification_progress ?? prev.verification_progress,
+      initial_block_download: keepRpcSnapshot ? prev.initial_block_download : next.initial_block_download ?? prev.initial_block_download,
+      version: keepRpcSnapshot ? prev.version : next.version ?? prev.version,
+      subversion: keepRpcSnapshot ? prev.subversion : next.subversion ?? prev.subversion,
+      pruned: keepRpcSnapshot ? prev.pruned : next.pruned ?? prev.pruned,
+      prune_height: keepRpcSnapshot ? prev.prune_height : next.prune_height ?? prev.prune_height,
+      prune_target_size: keepRpcSnapshot ? prev.prune_target_size : next.prune_target_size ?? prev.prune_target_size,
+      size_on_disk: keepRpcSnapshot ? prev.size_on_disk : next.size_on_disk ?? prev.size_on_disk
+    }
+  }
+
+  const recordRpcFailure = () => {
+    const now = Date.now()
+    const times = rpcFailureTimesRef.current
+    if (times.length === 0 || now - times[times.length - 1] >= 60000) {
+      const next = [...times, now].slice(-5)
+      rpcFailureTimesRef.current = next
+      setRpcFailCount(next.length)
+      setRpcStale(next.length >= 5)
+    } else {
+      setRpcFailCount(times.length)
+    }
+  }
+
+  const recordRpcSuccess = (updateTimestamp: boolean) => {
+    rpcFailureTimesRef.current = []
+    setRpcFailCount(0)
+    setRpcStale(false)
+    if (updateTimestamp) {
+      rpcLastSuccessRef.current = Date.now()
     }
   }
 
   const loadStatus = () => {
     getBitcoinLocalStatus()
-      .then((data: BitcoinLocalStatus) => setStatus((prev) => mergeStatus(prev, data)))
-      .catch(() => null)
+      .then((data: BitcoinLocalStatus) => {
+        const hasRpcPayload =
+          typeof data.connections === 'number' ||
+          typeof data.blocks === 'number' ||
+          typeof data.headers === 'number' ||
+          typeof data.verification_progress === 'number' ||
+          typeof data.initial_block_download === 'boolean' ||
+          typeof data.version === 'number' ||
+          typeof data.pruned === 'boolean' ||
+          typeof data.prune_target_size === 'number' ||
+          typeof data.size_on_disk === 'number' ||
+          Boolean(data.chain) ||
+          Boolean(data.subversion)
+        if (data.installed && data.status === 'running') {
+          if (data.rpc_ok === false && !hasRpcPayload) {
+            recordRpcFailure()
+          } else {
+            recordRpcSuccess(hasRpcPayload)
+          }
+        } else {
+          recordRpcSuccess(false)
+        }
+        setStatus((prev) => mergeStatus(prev, data))
+      })
+      .catch(() => {
+        if (status?.status === 'running') {
+          recordRpcFailure()
+        }
+      })
   }
 
   const loadConfig = () => {
@@ -159,6 +225,28 @@ export default function BitcoinLocal() {
     ? Array(blockCount - recentPeers.length).fill(recentPeers[0] ?? currentPeers).concat(recentPeers)
     : recentPeers
   const maxPeers = Math.max(1, ...peerBars)
+  const rpcStatusLabel = ready
+    ? 'OK'
+    : status?.status !== 'running'
+      ? 'Offline'
+      : rpcStale
+        ? `Stale (${rpcFailCount}/5)`
+        : rpcFailCount > 0
+          ? `Retrying (${rpcFailCount}/5)`
+          : 'Connecting...'
+  const rpcBadgeClass = ready
+    ? 'bg-emerald-500/15 text-emerald-200 border border-emerald-400/30 px-2 py-0.5 rounded-full text-[11px] uppercase tracking-wide'
+    : 'text-fog'
+
+  const formatAge = (timestamp?: number | null) => {
+    if (!timestamp) return ''
+    const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
+    if (seconds < 60) return `${seconds}s`
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return `${minutes}m`
+    const hours = Math.floor(minutes / 60)
+    return `${hours}h`
+  }
 
   const handleSave = async () => {
     setMessage('')
@@ -260,7 +348,7 @@ export default function BitcoinLocal() {
               <div className="grid gap-3 text-sm text-fog/70">
                 <div className="flex items-center justify-between">
                   <span>RPC status</span>
-                  <span className="text-fog">{ready ? 'OK' : 'Unavailable'}</span>
+                  <span className={rpcBadgeClass}>{rpcStatusLabel}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span>Network</span>
@@ -288,9 +376,15 @@ export default function BitcoinLocal() {
                 </div>
               </div>
               <div className="glow-divider" />
-              <p className="text-xs text-fog/60">
-                {syncing ? 'The node is syncing the blockchain. This may take hours or days.' : 'Node is ready for local use.'}
-              </p>
+              {rpcStale ? (
+                <p className="text-xs text-brass">
+                  RPC reconnecting. Showing last captured data{rpcLastSuccessRef.current ? ` (${formatAge(rpcLastSuccessRef.current)} ago)` : ''}. Retrying every 6s.
+                </p>
+              ) : (
+                <p className="text-xs text-fog/60">
+                  {syncing ? 'The node is syncing the blockchain. This may take hours or days.' : 'Node is ready for local use.'}
+                </p>
+              )}
             </div>
           </div>
 
