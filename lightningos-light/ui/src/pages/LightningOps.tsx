@@ -412,7 +412,7 @@ export default function LightningOps() {
   const channelOptions = useMemo(() => {
     return channels.map((ch) => ({
       value: ch.channel_point,
-      label: `${ch.peer_alias || ch.remote_pubkey.slice(0, 12)} • ${ch.channel_point}`
+      label: `${ch.peer_alias || ch.remote_pubkey.slice(0, 12)} - ${ch.channel_point}`
     }))
   }, [channels])
 
@@ -459,12 +459,15 @@ export default function LightningOps() {
           <div className="rounded-2xl border border-brass/30 bg-brass/10 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h4 className="text-sm font-semibold text-brass">Pending channels</h4>
-              <p className="text-xs text-brass">Opening: {pendingOpen.length} | Closing: {pendingClose.length}</p>
+              <p className="text-xs text-brass">
+                Opening: <span className="text-glow">{pendingOpen.length}</span> | Closing:{' '}
+                <span className="text-ember">{pendingClose.length}</span>
+              </p>
             </div>
             <div className="mt-3 grid gap-3 lg:grid-cols-2">
               <div className="rounded-2xl border border-white/10 bg-ink/60 p-4">
                 <div className="flex items-center justify-between gap-2">
-                  <h5 className="text-xs font-semibold text-fog/70 uppercase tracking-wide">Opening</h5>
+                  <h5 className="text-xs font-semibold text-glow uppercase tracking-wide">Opening</h5>
                   <span className="rounded-full px-2 py-1 text-[11px] bg-glow/20 text-glow">{pendingOpen.length}</span>
                 </div>
                 {pendingOpen.length ? (
@@ -511,7 +514,7 @@ export default function LightningOps() {
               </div>
               <div className="rounded-2xl border border-white/10 bg-ink/60 p-4">
                 <div className="flex items-center justify-between gap-2">
-                  <h5 className="text-xs font-semibold text-fog/70 uppercase tracking-wide">Closing</h5>
+                  <h5 className="text-xs font-semibold text-ember uppercase tracking-wide">Closing</h5>
                   <span className="rounded-full px-2 py-1 text-[11px] bg-ember/20 text-ember">{pendingClose.length}</span>
                 </div>
                 {pendingClose.length ? (
@@ -522,7 +525,7 @@ export default function LightningOps() {
                           <div>
                             {ch.remote_pubkey ? (
                               <a
-                                className="text-xs text-fog/70 hover:text-fog"
+                                className="text-xs text-fog/70 hover:text-fog break-all"
                                 href={ambossURL(ch.remote_pubkey)}
                                 target="_blank"
                                 rel="noopener noreferrer"
@@ -532,7 +535,7 @@ export default function LightningOps() {
                             ) : (
                               <p className="text-xs text-fog/70">{ch.peer_alias || 'Unknown peer'}</p>
                             )}
-                            <p className="text-[11px] text-fog/50">Point: {ch.channel_point}</p>
+                            <p className="text-[11px] text-fog/50 break-all">Point: {ch.channel_point}</p>
                           </div>
                           <span className="rounded-full px-2 py-1 text-[11px] bg-ember/20 text-ember">
                             {pendingStatusLabel(ch.status)}
@@ -689,20 +692,20 @@ export default function LightningOps() {
           <label className="text-sm text-fog/70">
             Fee rate (sat/vB)
             <span className="ml-2 text-xs text-fog/50">
-              Fastest: {openFeeHint?.fastest ?? '-'} · 1h: {openFeeHint?.hour ?? '-'}
+              Fastest: {openFeeHint?.fastest ?? '-'} | 1h: {openFeeHint?.hour ?? '-'}
             </span>
+          </label>
+          <div className="flex flex-wrap items-center gap-3">
             <input
-              className="input-field mt-2"
+              className="input-field flex-1 min-w-[140px]"
               placeholder="Auto"
               type="number"
               min={1}
               value={openFeeRate}
               onChange={(e) => setOpenFeeRate(e.target.value)}
             />
-          </label>
-          <div className="flex flex-wrap items-center gap-3">
             <button
-              className="btn-secondary text-xs px-3 py-1.5"
+              className="btn-secondary text-xs px-3 py-2"
               type="button"
               onClick={() => {
                 if (openFeeHint?.fastest) {
@@ -907,3 +910,5 @@ export default function LightningOps() {
     </section>
   )
 }
+
+
