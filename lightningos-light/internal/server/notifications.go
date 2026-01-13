@@ -20,6 +20,7 @@ import (
   "lightningos-light/lnrpc"
 
   "github.com/jackc/pgx/v5"
+  "github.com/jackc/pgx/v5/pgtype"
   "github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -53,6 +54,10 @@ type Notification struct {
   Txid string `json:"txid,omitempty"`
   PaymentHash string `json:"payment_hash,omitempty"`
   Memo string `json:"memo,omitempty"`
+}
+
+type notificationRowScanner interface {
+  Scan(dest ...any) error
 }
 
 type Notifier struct {
@@ -407,23 +412,7 @@ returning id, occurred_at, type, action, direction, status, amount_sat, fee_sat,
   )
 
   var stored Notification
-  err := row.Scan(
-    &stored.ID,
-    &stored.OccurredAt,
-    &stored.Type,
-    &stored.Action,
-    &stored.Direction,
-    &stored.Status,
-    &stored.AmountSat,
-    &stored.FeeSat,
-    &stored.PeerPubkey,
-    &stored.PeerAlias,
-    &stored.ChannelID,
-    &stored.ChannelPoint,
-    &stored.Txid,
-    &stored.PaymentHash,
-    &stored.Memo,
-  )
+  stored, err := scanNotification(row)
   if err != nil {
     return Notification{}, err
   }
@@ -457,24 +446,8 @@ limit $1`, limit)
 
   var items []Notification
   for rows.Next() {
-    var evt Notification
-    if err := rows.Scan(
-      &evt.ID,
-      &evt.OccurredAt,
-      &evt.Type,
-      &evt.Action,
-      &evt.Direction,
-      &evt.Status,
-      &evt.AmountSat,
-      &evt.FeeSat,
-      &evt.PeerPubkey,
-      &evt.PeerAlias,
-      &evt.ChannelID,
-      &evt.ChannelPoint,
-      &evt.Txid,
-      &evt.PaymentHash,
-      &evt.Memo,
-    ); err != nil {
+    evt, err := scanNotification(rows)
+    if err != nil {
       return nil, err
     }
     items = append(items, evt)
@@ -523,7 +496,7 @@ order by occurred_at desc limit 1`, paymentHash).Scan(&payID, &payFee)
 
   var invID int64
   var invAmount int64
-  var invMemo string
+  var invMemo pgtype.Text
   var invAt time.Time
   err = tx.QueryRow(ctx, `
 select id, amount_sat, memo, occurred_at from notifications
@@ -533,8 +506,12 @@ order by occurred_at desc limit 1`, paymentHash).Scan(&invID, &invAmount, &invMe
     return
   }
 
-  var updated Notification
-  err = tx.QueryRow(ctx, `
+  memoValue := nullableString(invMemo.String)
+  if !invMemo.Valid {
+    memoValue = nil
+  }
+
+  row := tx.QueryRow(ctx, `
 update notifications
 set type='rebalance',
   action='rebalanced',
@@ -547,23 +524,8 @@ set type='rebalance',
 where id=$1
 returning id, occurred_at, type, action, direction, status, amount_sat, fee_sat,
   peer_pubkey, peer_alias, channel_id, channel_point, txid, payment_hash, memo
-`, payID, invAmount, payFee, invMemo, invAt).Scan(
-    &updated.ID,
-    &updated.OccurredAt,
-    &updated.Type,
-    &updated.Action,
-    &updated.Direction,
-    &updated.Status,
-    &updated.AmountSat,
-    &updated.FeeSat,
-    &updated.PeerPubkey,
-    &updated.PeerAlias,
-    &updated.ChannelID,
-    &updated.ChannelPoint,
-    &updated.Txid,
-    &updated.PaymentHash,
-    &updated.Memo,
-  )
+`, payID, invAmount, payFee, memoValue, invAt)
+  updated, err := scanNotification(row)
   if err != nil {
     return
   }
@@ -1034,6 +996,59 @@ func nullableInt(value int64) any {
     return nil
   }
   return value
+}
+
+func scanNotification(scanner notificationRowScanner) (Notification, error) {
+  var evt Notification
+  var peerPubkey pgtype.Text
+  var peerAlias pgtype.Text
+  var channelPoint pgtype.Text
+  var txid pgtype.Text
+  var paymentHash pgtype.Text
+  var memo pgtype.Text
+  var channelID pgtype.Int8
+  err := scanner.Scan(
+    &evt.ID,
+    &evt.OccurredAt,
+    &evt.Type,
+    &evt.Action,
+    &evt.Direction,
+    &evt.Status,
+    &evt.AmountSat,
+    &evt.FeeSat,
+    &peerPubkey,
+    &peerAlias,
+    &channelID,
+    &channelPoint,
+    &txid,
+    &paymentHash,
+    &memo,
+  )
+  if err != nil {
+    return Notification{}, err
+  }
+  if peerPubkey.Valid {
+    evt.PeerPubkey = peerPubkey.String
+  }
+  if peerAlias.Valid {
+    evt.PeerAlias = peerAlias.String
+  }
+  if channelID.Valid {
+    evt.ChannelID = channelID.Int64
+  }
+  if channelPoint.Valid {
+    evt.ChannelPoint = channelPoint.String
+  }
+  if txid.Valid {
+    evt.Txid = txid.String
+  }
+  if paymentHash.Valid {
+    evt.PaymentHash = paymentHash.String
+  }
+  if memo.Valid {
+    evt.Memo = memo.String
+  }
+  return evt, nil
 }
 
 func (s *Server) handleNotificationsList(w http.ResponseWriter, r *http.Request) {
