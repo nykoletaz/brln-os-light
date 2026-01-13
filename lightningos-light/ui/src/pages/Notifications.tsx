@@ -93,8 +93,9 @@ const arrowForDirection = (value: string) => {
 }
 
 const formatFeeRate = (amount: number, fee: number) => {
-  if (!amount || amount <= 0 || !fee || fee <= 0) return ''
-  const ratio = fee / amount
+  if (!amount || amount <= 0) return ''
+  const safeFee = fee > 0 ? fee : 0
+  const ratio = safeFee / amount
   const percentRaw = ratio * 100
   const percent = percentRaw.toFixed(3).replace(/\.?0+$/, '')
   const ppm = Math.round(ratio * 1_000_000)
