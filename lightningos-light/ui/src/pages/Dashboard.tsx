@@ -178,7 +178,7 @@ export default function Dashboard() {
                   <Badge label={`${lnd.channels.inactive} inactive`} tone={lnd.channels.inactive > 0 ? 'warn' : 'muted'} />
                 </div>
               </div>
-              <div className="flex justify-between"><span>Balances</span><span>{lnd.balances.onchain_sat} sat on-chain / {lnd.balances.lightning_sat} sat LN</span></div>
+              <div className="flex justify-between"><span>Balances</span><span>{lnd.balances.onchain_sat} sats on-chain / {lnd.balances.lightning_sat} sats LN</span></div>
             </div>
           ) : (
             <p className="text-fog/60 mt-4">Loading LND status...</p>

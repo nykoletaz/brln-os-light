@@ -364,7 +364,7 @@ func (c *Client) UnlockWallet(ctx context.Context, walletPassword string) error 
   return err
 }
 
-func (c *Client) CreateInvoice(ctx context.Context, amountSat int64, memo string) (string, error) {
+func (c *Client) CreateInvoice(ctx context.Context, amountSat int64, memo string, expirySeconds int64) (string, error) {
   conn, err := c.dial(ctx, true)
   if err != nil {
     return "", err
@@ -373,9 +373,14 @@ func (c *Client) CreateInvoice(ctx context.Context, amountSat int64, memo string
 
   client := lnrpc.NewLightningClient(conn)
 
+  if expirySeconds <= 0 {
+    expirySeconds = 3600
+  }
+
   resp, err := client.AddInvoice(ctx, &lnrpc.Invoice{
     Memo: memo,
     Value: amountSat,
+    Expiry: expirySeconds,
   })
   if err != nil {
     return "", err

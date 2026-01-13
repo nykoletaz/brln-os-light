@@ -335,7 +335,7 @@ export default function LightningOps() {
       return
     }
     if (localFunding < 20000) {
-      setOpenStatus('Minimum channel size is 20000 sat.')
+      setOpenStatus('Minimum channel size is 20000 sats.')
       return
     }
     try {
@@ -498,7 +498,7 @@ export default function LightningOps() {
                           </span>
                         </div>
                         <div className="mt-2 grid gap-2 lg:grid-cols-2 text-[11px] text-fog/60">
-                          <div>Capacity: <span className="text-fog">{ch.capacity_sat} sat</span></div>
+                          <div>Capacity: <span className="text-fog">{ch.capacity_sat} sats</span></div>
                           {typeof ch.confirmations_until_active === 'number' && (
                             <div>Confirmations: <span className="text-fog">{ch.confirmations_until_active}</span></div>
                           )}
@@ -545,7 +545,7 @@ export default function LightningOps() {
                           </span>
                         </div>
                         <div className="mt-2 grid gap-2 lg:grid-cols-2 text-[11px] text-fog/60">
-                          <div>Capacity: <span className="text-fog">{ch.capacity_sat} sat</span></div>
+                          <div>Capacity: <span className="text-fog">{ch.capacity_sat} sats</span></div>
                           {typeof ch.blocks_til_maturity === 'number' && (
                             <div>Blocks to maturity: <span className="text-fog">{ch.blocks_til_maturity}</span></div>
                           )}
@@ -573,7 +573,7 @@ export default function LightningOps() {
           />
           <input
             className="input-field"
-            placeholder="Min capacity (sat)"
+            placeholder="Min capacity (sats)"
             type="number"
             min={0}
             value={minCapacity}
@@ -614,7 +614,7 @@ export default function LightningOps() {
                       <p className="text-sm text-fog/60">{ch.peer_alias || 'Unknown peer'}</p>
                     )}
                     <p className="text-xs text-fog/50 break-all">
-                      Point: {ch.channel_point} | Capacity: {ch.capacity_sat} sat
+                      Point: {ch.channel_point} | Capacity: {ch.capacity_sat} sats
                     </p>
                   </div>
                   <span className={`rounded-full px-3 py-1 text-xs ${ch.active ? 'bg-glow/20 text-glow' : 'bg-ember/20 text-ember'}`}>
@@ -622,12 +622,12 @@ export default function LightningOps() {
                   </span>
                 </div>
                 <div className="mt-3 grid gap-3 lg:grid-cols-5 text-xs text-fog/70">
-                  <div>Local: <span className="text-fog">{ch.local_balance_sat} sat</span></div>
-                  <div>Remote: <span className="text-fog">{ch.remote_balance_sat} sat</span></div>
+                  <div>Local: <span className="text-fog">{ch.local_balance_sat} sats</span></div>
+                  <div>Remote: <span className="text-fog">{ch.remote_balance_sat} sats</span></div>
                   <div>
                     Out base:{' '}
                     <span className="text-fog">
-                      {typeof ch.base_fee_msat === 'number' ? `${ch.base_fee_msat} msat` : '-'}
+                      {typeof ch.base_fee_msat === 'number' ? `${ch.base_fee_msat} msats` : '-'}
                     </span>
                   </div>
                   <div>
@@ -697,7 +697,7 @@ export default function LightningOps() {
           <div className="grid gap-4 lg:grid-cols-2">
             <input
               className="input-field"
-              placeholder="Funding amount (sat)"
+              placeholder="Funding amount (sats)"
               type="number"
               min={20000}
               value={openAmount}
@@ -745,7 +745,7 @@ export default function LightningOps() {
             Private channel
           </label>
           <button className="btn-primary" onClick={handleOpenChannel}>Open channel</button>
-          <p className="text-xs text-fog/50">Minimum funding is 20000 sat. Opening a channel can take a few blocks.</p>
+          <p className="text-xs text-fog/50">Minimum funding is 20000 sats. Opening a channel can take a few blocks.</p>
           {openStatus && (
             <div className="text-sm text-brass break-words">
               <p>{openStatus}</p>
@@ -811,7 +811,7 @@ export default function LightningOps() {
           <div className="grid gap-4 lg:grid-cols-3">
             <input
               className="input-field"
-              placeholder="Base fee (msat)"
+              placeholder="Base fee (msats)"
               type="number"
               min={0}
               value={baseFeeMsat}
@@ -846,7 +846,7 @@ export default function LightningOps() {
             <div className="grid gap-4 lg:grid-cols-2">
               <input
                 className="input-field"
-                placeholder="Inbound base (msat)"
+                placeholder="Inbound base (msats)"
                 type="number"
                 value={inboundBaseMsat}
                 onChange={(e) => setInboundBaseMsat(e.target.value)}

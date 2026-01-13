@@ -180,8 +180,8 @@ export default function Wallet() {
     try {
       await payInvoice({ payment_request: paymentRequest })
       setStatus('Payment sent.')
-    } catch {
-      setStatus('Payment failed.')
+    } catch (err: any) {
+      setStatus(err?.message || 'Payment failed.')
     }
   }
 

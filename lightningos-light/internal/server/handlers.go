@@ -1706,7 +1706,7 @@ func (s *Server) handleWalletInvoice(w http.ResponseWriter, r *http.Request) {
   ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
   defer cancel()
 
-  invoice, err := s.lnd.CreateInvoice(ctx, req.AmountSat, req.Memo)
+  invoice, err := s.lnd.CreateInvoice(ctx, req.AmountSat, req.Memo, 3600)
   if err != nil {
     writeError(w, http.StatusInternalServerError, "invoice failed")
     return
@@ -1768,11 +1768,18 @@ func (s *Server) handleWalletPay(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+  ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
   defer cancel()
 
   if err := s.lnd.PayInvoice(ctx, req.PaymentRequest); err != nil {
-    writeError(w, http.StatusInternalServerError, "payment failed")
+    msg := lndRPCErrorMessage(err)
+    if isTimeoutError(err) {
+      msg = lndStatusMessage(err)
+    }
+    if msg == "" || msg == "LND error" {
+      msg = "Payment failed"
+    }
+    writeError(w, http.StatusInternalServerError, msg)
     return
   }
 
