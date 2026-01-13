@@ -265,28 +265,33 @@ func (c *Client) getStatusUncached(ctx context.Context) (Status, error) {
 
   client := lnrpc.NewLightningClient(conn)
 
-  info, err := client.GetInfo(ctx, &lnrpc.GetInfoRequest{})
+  status := Status{WalletState: "unknown"}
+  var primaryErr error
+
+  infoCtx, infoCancel := context.WithTimeout(ctx, 5*time.Second)
+  info, err := client.GetInfo(infoCtx, &lnrpc.GetInfoRequest{})
+  infoCancel()
   if err != nil {
     if isWalletLocked(err) {
       return Status{WalletState: "locked"}, nil
     }
-    return Status{WalletState: "unknown"}, err
+    primaryErr = err
+  } else {
+    status.ServiceActive = true
+    status.WalletState = "unlocked"
+    status.SyncedToChain = info.SyncedToChain
+    status.SyncedToGraph = info.SyncedToGraph
+    status.BlockHeight = int64(info.BlockHeight)
+    status.Version = info.Version
+    status.Pubkey = info.IdentityPubkey
+    if len(info.Uris) > 0 {
+      status.URI = info.Uris[0]
+    }
   }
 
-  status := Status{
-    ServiceActive: true,
-    WalletState: "unlocked",
-    SyncedToChain: info.SyncedToChain,
-    SyncedToGraph: info.SyncedToGraph,
-    BlockHeight: int64(info.BlockHeight),
-    Version: info.Version,
-    Pubkey: info.IdentityPubkey,
-  }
-  if len(info.Uris) > 0 {
-    status.URI = info.Uris[0]
-  }
-
-  channels, err := client.ListChannels(ctx, &lnrpc.ListChannelsRequest{})
+  channelsCtx, channelsCancel := context.WithTimeout(ctx, 5*time.Second)
+  channels, err := client.ListChannels(channelsCtx, &lnrpc.ListChannelsRequest{})
+  channelsCancel()
   if err == nil {
     active := 0
     inactive := 0
@@ -299,19 +304,32 @@ func (c *Client) getStatusUncached(ctx context.Context) (Status, error) {
     }
     status.ChannelsActive = active
     status.ChannelsInactive = inactive
+    if status.WalletState == "unknown" {
+      status.WalletState = "unlocked"
+    }
   }
 
-  wallet, err := client.WalletBalance(ctx, &lnrpc.WalletBalanceRequest{})
+  walletCtx, walletCancel := context.WithTimeout(ctx, 5*time.Second)
+  wallet, err := client.WalletBalance(walletCtx, &lnrpc.WalletBalanceRequest{})
+  walletCancel()
   if err == nil {
     status.OnchainSat = wallet.TotalBalance
+    if status.WalletState == "unknown" {
+      status.WalletState = "unlocked"
+    }
   }
 
-  channelBal, err := client.ChannelBalance(ctx, &lnrpc.ChannelBalanceRequest{})
+  channelBalCtx, channelBalCancel := context.WithTimeout(ctx, 5*time.Second)
+  channelBal, err := client.ChannelBalance(channelBalCtx, &lnrpc.ChannelBalanceRequest{})
+  channelBalCancel()
   if err == nil {
     status.LightningSat = channelBal.Balance
+    if status.WalletState == "unknown" {
+      status.WalletState = "unlocked"
+    }
   }
 
-  return status, nil
+  return status, primaryErr
 }
 
 func (c *Client) GenSeed(ctx context.Context, seedPassphrase string) ([]string, error) {

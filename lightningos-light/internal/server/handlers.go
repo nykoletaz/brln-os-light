@@ -596,21 +596,18 @@ func (s *Server) handleLNDStatus(w http.ResponseWriter, r *http.Request) {
   resp.ServiceActive = system.SystemctlIsActive(ctx, "lnd")
 
   status, err := s.lnd.GetStatus(ctx)
-  if err == nil {
-    resp.WalletState = status.WalletState
-    resp.SyncedToChain = status.SyncedToChain
-    resp.SyncedToGraph = status.SyncedToGraph
-    resp.BlockHeight = status.BlockHeight
-    resp.Version = status.Version
-    resp.Pubkey = status.Pubkey
-    resp.URI = status.URI
-    resp.Channels.Active = status.ChannelsActive
-    resp.Channels.Inactive = status.ChannelsInactive
-    resp.Balances.OnchainSat = status.OnchainSat
-    resp.Balances.LightningSat = status.LightningSat
-  } else {
-    resp.WalletState = status.WalletState
-  }
+  _ = err
+  resp.WalletState = status.WalletState
+  resp.SyncedToChain = status.SyncedToChain
+  resp.SyncedToGraph = status.SyncedToGraph
+  resp.BlockHeight = status.BlockHeight
+  resp.Version = status.Version
+  resp.Pubkey = status.Pubkey
+  resp.URI = status.URI
+  resp.Channels.Active = status.ChannelsActive
+  resp.Channels.Inactive = status.ChannelsInactive
+  resp.Balances.OnchainSat = status.OnchainSat
+  resp.Balances.LightningSat = status.LightningSat
 
   writeJSON(w, http.StatusOK, resp)
 }
