@@ -220,6 +220,28 @@ func (c *Client) DecodeInvoice(ctx context.Context, payReq string) (DecodedInvoi
   }, nil
 }
 
+func (c *Client) ExportAllChannelBackups(ctx context.Context) ([]byte, error) {
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return nil, err
+  }
+  defer conn.Close()
+
+  client := lnrpc.NewLightningClient(conn)
+  resp, err := client.ExportAllChannelBackups(ctx, &lnrpc.ChanBackupExportRequest{})
+  if err != nil {
+    return nil, err
+  }
+  if resp == nil || resp.MultiChanBackup == nil {
+    return nil, errors.New("channel backup unavailable")
+  }
+  data := resp.MultiChanBackup.MultiChanBackup
+  if len(data) == 0 {
+    return nil, errors.New("channel backup empty")
+  }
+  return data, nil
+}
+
 func (c *Client) GetChannelPolicy(ctx context.Context, channelPoint string) (ChannelPolicy, error) {
   conn, err := c.dial(ctx, true)
   if err != nil {

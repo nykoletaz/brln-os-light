@@ -43,6 +43,8 @@ func (s *Server) routes() http.Handler {
   r.Post("/api/apps/{id}/stop", s.handleAppStop)
   r.Get("/api/notifications", s.handleNotificationsList)
   r.Get("/api/notifications/stream", s.handleNotificationsStream)
+  r.Get("/api/notifications/backup/telegram", s.handleTelegramBackupGet)
+  r.Post("/api/notifications/backup/telegram", s.handleTelegramBackupPost)
 
   r.Route("/api/wallet", func(r chi.Router) {
     r.Get("/summary", s.handleWalletSummary)

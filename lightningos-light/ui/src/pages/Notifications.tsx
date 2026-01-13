@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { getNotifications } from '../api'
+import { getNotifications, getTelegramBackupConfig, updateTelegramBackupConfig } from '../api'
 
 type Notification = {
   id: number
@@ -17,6 +17,11 @@ type Notification = {
   txid?: string
   payment_hash?: string
   memo?: string
+}
+
+type TelegramBackupConfig = {
+  chat_id?: string
+  bot_token_set?: boolean
 }
 
 const formatTimestamp = (value: string) => {
@@ -93,6 +98,11 @@ export default function Notifications() {
   const [streamState, setStreamState] = useState<'idle' | 'waiting' | 'reconnecting' | 'error'>('idle')
   const streamErrors = useRef(0)
   const [filter, setFilter] = useState<'all' | 'onchain' | 'lightning' | 'channel' | 'forward' | 'rebalance'>('all')
+  const [telegramConfig, setTelegramConfig] = useState<TelegramBackupConfig | null>(null)
+  const [telegramToken, setTelegramToken] = useState('')
+  const [telegramChatId, setTelegramChatId] = useState('')
+  const [telegramStatus, setTelegramStatus] = useState('')
+  const [telegramSaving, setTelegramSaving] = useState(false)
 
   useEffect(() => {
     let mounted = true
@@ -109,6 +119,21 @@ export default function Notifications() {
       }
     }
     load()
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+    getTelegramBackupConfig()
+      .then((data: TelegramBackupConfig) => {
+        if (!mounted) return
+        setTelegramConfig(data)
+        setTelegramChatId(data?.chat_id || '')
+        setTelegramToken('')
+      })
+      .catch(() => null)
     return () => {
       mounted = false
     }
@@ -166,6 +191,33 @@ export default function Notifications() {
     })
   }, [filter, items, rebalanceHashes])
 
+  const telegramEnabled = Boolean(telegramConfig?.bot_token_set && telegramChatId.trim())
+
+  const handleSaveTelegram = async () => {
+    if (telegramSaving) return
+    setTelegramSaving(true)
+    setTelegramStatus('Saving...')
+    try {
+      await updateTelegramBackupConfig({
+        bot_token: telegramToken,
+        chat_id: telegramChatId
+      })
+      const data: TelegramBackupConfig = await getTelegramBackupConfig()
+      setTelegramConfig(data)
+      setTelegramChatId(data?.chat_id || '')
+      setTelegramToken('')
+      if (!data?.bot_token_set && !data?.chat_id) {
+        setTelegramStatus('Telegram backup disabled.')
+      } else {
+        setTelegramStatus('Telegram backup saved.')
+      }
+    } catch (err: any) {
+      setTelegramStatus(err?.message || 'Failed to save Telegram backup.')
+    } finally {
+      setTelegramSaving(false)
+    }
+  }
+
   return (
     <section className="space-y-6">
       <div className="section-card">
@@ -183,6 +235,48 @@ export default function Notifications() {
             <button className={filter === 'rebalance' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('rebalance')}>Rebalance</button>
           </div>
         </div>
+      </div>
+
+      <div className="section-card space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold">Telegram SCB backup</h3>
+            <p className="text-fog/60">Send a static channel backup on every channel open or close.</p>
+          </div>
+          <span className={`text-xs ${telegramEnabled ? 'text-glow' : 'text-fog/60'}`}>
+            {telegramEnabled ? 'Enabled' : 'Optional'}
+          </span>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="space-y-2">
+            <label className="text-sm text-fog/70">Bot token</label>
+            <input
+              className="input-field"
+              type="password"
+              placeholder={telegramConfig?.bot_token_set ? 'Token saved' : '123456:ABC...'}
+              value={telegramToken}
+              onChange={(e) => setTelegramToken(e.target.value)}
+            />
+            <p className="text-xs text-fog/50">Get the bot token from @BotFather.</p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-fog/70">Chat ID</label>
+            <input
+              className="input-field"
+              placeholder="123456789"
+              value={telegramChatId}
+              onChange={(e) => setTelegramChatId(e.target.value)}
+            />
+            <p className="text-xs text-fog/50">Find your chat id via @userinfobot. Start a chat with your bot first.</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button className="btn-primary" onClick={handleSaveTelegram} disabled={telegramSaving}>
+            {telegramSaving ? 'Saving...' : 'Save Telegram backup'}
+          </button>
+          {telegramStatus && <span className="text-sm text-brass">{telegramStatus}</span>}
+        </div>
+        <p className="text-xs text-fog/50">Direct chat only. Leave both fields empty to disable Telegram backup.</p>
       </div>
 
       <div className="section-card">
