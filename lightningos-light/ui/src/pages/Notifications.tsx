@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { getNotifications } from '../api'
 
 type Notification = {
@@ -90,7 +90,8 @@ const arrowForDirection = (value: string) => {
 export default function Notifications() {
   const [items, setItems] = useState<Notification[]>([])
   const [status, setStatus] = useState('Loading notifications...')
-  const [streamState, setStreamState] = useState<'idle' | 'waiting' | 'error'>('idle')
+  const [streamState, setStreamState] = useState<'idle' | 'waiting' | 'reconnecting' | 'error'>('idle')
+  const streamErrors = useRef(0)
   const [filter, setFilter] = useState<'all' | 'onchain' | 'lightning' | 'channel' | 'forward' | 'rebalance'>('all')
 
   useEffect(() => {
@@ -115,13 +116,20 @@ export default function Notifications() {
 
   useEffect(() => {
     const stream = new EventSource('/api/notifications/stream')
-    const markWaiting = () => setStreamState('waiting')
+    const markWaiting = () => {
+      streamErrors.current = 0
+      setStreamState('waiting')
+    }
     stream.onopen = markWaiting
     stream.addEventListener('ready', markWaiting)
+    stream.addEventListener('heartbeat', () => {
+      setStreamState((prev) => (prev === 'idle' ? prev : 'waiting'))
+    })
     stream.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data)
         if (!payload || !payload.id) return
+        streamErrors.current = 0
         setStreamState('idle')
         setItems((prev) => {
           const next = [payload, ...prev.filter((item) => item.id !== payload.id)]
@@ -133,7 +141,12 @@ export default function Notifications() {
       }
     }
     stream.onerror = () => {
-      setStreamState('error')
+      streamErrors.current += 1
+      if (streamErrors.current >= 5) {
+        setStreamState('error')
+      } else {
+        setStreamState('reconnecting')
+      }
     }
     return () => {
       stream.close()
@@ -175,6 +188,9 @@ export default function Notifications() {
       <div className="section-card">
         <h3 className="text-lg font-semibold">Recent activity</h3>
         {status && <p className="mt-4 text-sm text-fog/60">{status}</p>}
+        {!status && streamState === 'reconnecting' && (
+          <p className="mt-2 text-sm text-brass">Reconnecting live updates...</p>
+        )}
         {!status && streamState === 'error' && (
           <p className="mt-2 text-sm text-brass">Live updates unavailable.</p>
         )}

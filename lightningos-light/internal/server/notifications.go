@@ -1107,6 +1107,9 @@ func (s *Server) handleNotificationsStream(w http.ResponseWriter, r *http.Reques
   _, _ = w.Write([]byte("event: ready\ndata: {}\n\n"))
   flusher.Flush()
 
+  ticker := time.NewTicker(25 * time.Second)
+  defer ticker.Stop()
+
   for {
     select {
     case <-r.Context().Done():
@@ -1117,6 +1120,9 @@ func (s *Server) handleNotificationsStream(w http.ResponseWriter, r *http.Reques
         continue
       }
       _, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+      flusher.Flush()
+    case <-ticker.C:
+      _, _ = w.Write([]byte("event: heartbeat\ndata: {}\n\n"))
       flusher.Flush()
     }
   }
