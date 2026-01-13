@@ -120,6 +120,35 @@ func (s *Server) handleTelegramBackupPost(w http.ResponseWriter, r *http.Request
   writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+func (s *Server) handleTelegramBackupTest(w http.ResponseWriter, r *http.Request) {
+  cfg := readTelegramBackupConfig()
+  if !cfg.configured() {
+    writeError(w, http.StatusBadRequest, "telegram backup not configured")
+    return
+  }
+
+  ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+  defer cancel()
+
+  data, err := s.lnd.ExportAllChannelBackups(ctx)
+  if err != nil {
+    msg := lndRPCErrorMessage(err)
+    if msg == "" {
+      msg = "failed to export channel backup"
+    }
+    writeError(w, http.StatusInternalServerError, msg)
+    return
+  }
+
+  filename, caption := telegramBackupPayload("test", "", time.Now().UTC())
+  if err := sendTelegramDocument(ctx, cfg.BotToken, cfg.ChatID, filename, data, caption); err != nil {
+    writeError(w, http.StatusInternalServerError, err.Error())
+    return
+  }
+
+  writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func (n *Notifier) maybeSendTelegramBackup(update *lnrpc.ChannelEventUpdate) {
   if n == nil || n.lnd == nil || update == nil {
     return
@@ -168,14 +197,22 @@ func (n *Notifier) sendTelegramBackup(ctx context.Context, cfg telegramBackupCon
     return errors.New("empty channel backup")
   }
 
-  now := time.Now().UTC()
-  filename := fmt.Sprintf("scb-%s.scb", now.Format("20060102-150405"))
-  caption := fmt.Sprintf("LightningOS SCB backup (%s) %s", reason, now.Format("2006-01-02 15:04:05 UTC"))
+  filename, caption := telegramBackupPayload(reason, channelPoint, time.Now().UTC())
+
+  return sendTelegramDocument(ctx, cfg.BotToken, cfg.ChatID, filename, data, caption)
+}
+
+func telegramBackupPayload(reason, channelPoint string, when time.Time) (string, string) {
+  tag := strings.TrimSpace(reason)
+  if tag == "" {
+    tag = "update"
+  }
+  filename := fmt.Sprintf("scb-%s-%s.scb", tag, when.Format("20060102-150405"))
+  caption := fmt.Sprintf("LightningOS SCB backup (%s) %s", tag, when.Format("2006-01-02 15:04:05 UTC"))
   if strings.TrimSpace(channelPoint) != "" {
     caption = fmt.Sprintf("%s channel %s", caption, strings.TrimSpace(channelPoint))
   }
-
-  return sendTelegramDocument(ctx, cfg.BotToken, cfg.ChatID, filename, data, caption)
+  return filename, caption
 }
 
 func sendTelegramDocument(ctx context.Context, token, chatID, filename string, data []byte, caption string) error {

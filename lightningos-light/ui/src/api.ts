@@ -125,6 +125,9 @@ export const getTelegramBackupConfig = () =>
 export const updateTelegramBackupConfig = (payload: { bot_token?: string; chat_id?: string }) =>
   request('/api/notifications/backup/telegram', { method: 'POST', body: JSON.stringify(payload) })
 
+export const testTelegramBackup = () =>
+  request('/api/notifications/backup/telegram/test', { method: 'POST' })
+
 export const getApps = () => request('/api/apps')
 export const installApp = (id: string) => request(`/api/apps/${id}/install`, { method: 'POST' })
 export const uninstallApp = (id: string) => request(`/api/apps/${id}/uninstall`, { method: 'POST' })

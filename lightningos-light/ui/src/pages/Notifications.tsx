@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { getNotifications, getTelegramBackupConfig, updateTelegramBackupConfig } from '../api'
+import { getNotifications, getTelegramBackupConfig, testTelegramBackup, updateTelegramBackupConfig } from '../api'
 
 type Notification = {
   id: number
@@ -103,6 +103,8 @@ export default function Notifications() {
   const [telegramChatId, setTelegramChatId] = useState('')
   const [telegramStatus, setTelegramStatus] = useState('')
   const [telegramSaving, setTelegramSaving] = useState(false)
+  const [telegramTesting, setTelegramTesting] = useState(false)
+  const [telegramOpen, setTelegramOpen] = useState(false)
 
   useEffect(() => {
     let mounted = true
@@ -191,7 +193,29 @@ export default function Notifications() {
     })
   }, [filter, items, rebalanceHashes])
 
-  const telegramEnabled = Boolean(telegramConfig?.bot_token_set && telegramChatId.trim())
+  const telegramEnabled = Boolean(telegramConfig?.bot_token_set && telegramConfig?.chat_id)
+
+  const triggerTelegramTest = async (startingMessage?: string, force?: boolean) => {
+    if (telegramTesting) return
+    if (!force && !telegramEnabled) {
+      setTelegramStatus('Configure Telegram first.')
+      return
+    }
+    if (startingMessage) {
+      setTelegramStatus(startingMessage)
+    } else {
+      setTelegramStatus('Sending test message...')
+    }
+    setTelegramTesting(true)
+    try {
+      await testTelegramBackup()
+      setTelegramStatus('Telegram test sent.')
+    } catch (err: any) {
+      setTelegramStatus(err?.message || 'Failed to send Telegram test.')
+    } finally {
+      setTelegramTesting(false)
+    }
+  }
 
   const handleSaveTelegram = async () => {
     if (telegramSaving) return
@@ -209,7 +233,12 @@ export default function Notifications() {
       if (!data?.bot_token_set && !data?.chat_id) {
         setTelegramStatus('Telegram backup disabled.')
       } else {
-        setTelegramStatus('Telegram backup saved.')
+        const nextEnabled = Boolean(data?.bot_token_set && data?.chat_id)
+        if (nextEnabled) {
+          await triggerTelegramTest('Telegram backup saved. Sending test...', true)
+        } else {
+          setTelegramStatus('Telegram backup saved.')
+        }
       }
     } catch (err: any) {
       setTelegramStatus(err?.message || 'Failed to save Telegram backup.')
@@ -237,46 +266,62 @@ export default function Notifications() {
         </div>
       </div>
 
-      <div className="section-card space-y-4">
+      <div className="section-card">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="text-lg font-semibold">Telegram SCB backup</h3>
             <p className="text-fog/60">Send a static channel backup on every channel open or close.</p>
           </div>
-          <span className={`text-xs ${telegramEnabled ? 'text-glow' : 'text-fog/60'}`}>
-            {telegramEnabled ? 'Enabled' : 'Optional'}
-          </span>
-        </div>
-        <div className="grid gap-4 lg:grid-cols-2">
-          <div className="space-y-2">
-            <label className="text-sm text-fog/70">Bot token</label>
-            <input
-              className="input-field"
-              type="password"
-              placeholder={telegramConfig?.bot_token_set ? 'Token saved' : '123456:ABC...'}
-              value={telegramToken}
-              onChange={(e) => setTelegramToken(e.target.value)}
-            />
-            <p className="text-xs text-fog/50">Get the bot token from @BotFather.</p>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm text-fog/70">Chat ID</label>
-            <input
-              className="input-field"
-              placeholder="123456789"
-              value={telegramChatId}
-              onChange={(e) => setTelegramChatId(e.target.value)}
-            />
-            <p className="text-xs text-fog/50">Find your chat id via @userinfobot. Start a chat with your bot first.</p>
+          <div className="flex items-center gap-3">
+            <span className={`text-xs ${telegramEnabled ? 'text-glow' : 'text-fog/60'}`}>
+              {telegramEnabled ? 'Enabled' : 'Disabled'}
+            </span>
+            <button className="btn-secondary" type="button" onClick={() => setTelegramOpen((prev) => !prev)}>
+              {telegramOpen ? 'Hide' : 'Configure'}
+            </button>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <button className="btn-primary" onClick={handleSaveTelegram} disabled={telegramSaving}>
-            {telegramSaving ? 'Saving...' : 'Save Telegram backup'}
-          </button>
-          {telegramStatus && <span className="text-sm text-brass">{telegramStatus}</span>}
-        </div>
-        <p className="text-xs text-fog/50">Direct chat only. Leave both fields empty to disable Telegram backup.</p>
+        {telegramOpen && (
+          <div className="mt-4 space-y-4">
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-sm text-fog/70">Bot token</label>
+                <input
+                  className="input-field"
+                  type="password"
+                  placeholder={telegramConfig?.bot_token_set ? 'Token saved' : '123456:ABC...'}
+                  value={telegramToken}
+                  onChange={(e) => setTelegramToken(e.target.value)}
+                />
+                <p className="text-xs text-fog/50">Get the bot token from @BotFather.</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-fog/70">Chat ID</label>
+                <input
+                  className="input-field"
+                  placeholder="123456789"
+                  value={telegramChatId}
+                  onChange={(e) => setTelegramChatId(e.target.value)}
+                />
+                <p className="text-xs text-fog/50">Find your chat id via @userinfobot. Start a chat with your bot first.</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button className="btn-primary" onClick={handleSaveTelegram} disabled={telegramSaving}>
+                {telegramSaving ? 'Saving...' : 'Save Telegram backup'}
+              </button>
+              <button
+                className="btn-secondary"
+                onClick={() => triggerTelegramTest()}
+                disabled={telegramTesting || !telegramEnabled}
+              >
+                {telegramTesting ? 'Sending test...' : 'Send test'}
+              </button>
+              {telegramStatus && <span className="text-sm text-brass">{telegramStatus}</span>}
+            </div>
+            <p className="text-xs text-fog/50">Direct chat only. Leave both fields empty to disable Telegram backup.</p>
+          </div>
+        )}
       </div>
 
       <div className="section-card">
