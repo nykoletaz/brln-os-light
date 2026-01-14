@@ -843,20 +843,22 @@ password = os.environ.get("LNDG_ADMIN_PASSWORD", "")
 if not password:
   raise SystemExit("LNDG_ADMIN_PASSWORD is required")
 
-User = get_user_model()
-user, created = User.objects.get_or_create(username=username, defaults={"email": "admin@lndg.local"})
-if created:
-  user.set_password(password)
-  user.is_staff = True
-  user.is_superuser = True
-  user.save()
-else:
+  User = get_user_model()
+  user, created = User.objects.get_or_create(username=username, defaults={"email": "admin@lndg.local"})
   updated = False
-  if not user.is_staff:
+  if created:
     user.is_staff = True
-    updated = True
-  if not user.is_superuser:
     user.is_superuser = True
+    updated = True
+  else:
+    if not user.is_staff:
+      user.is_staff = True
+      updated = True
+    if not user.is_superuser:
+      user.is_superuser = True
+      updated = True
+  if not user.check_password(password):
+    user.set_password(password)
     updated = True
   if updated:
     user.save()
