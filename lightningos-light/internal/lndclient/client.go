@@ -544,8 +544,8 @@ func (c *Client) ListRecent(ctx context.Context, limit int) ([]RecentActivity, e
   var items []RecentActivity
   if invErr == nil {
     for _, inv := range invoices.Invoices {
-      hash := strings.ToLower(inv.RHashStr)
-      if hash == "" && len(inv.RHash) > 0 {
+      hash := ""
+      if len(inv.RHash) > 0 {
         hash = hex.EncodeToString(inv.RHash)
       }
       items = append(items, RecentActivity{
