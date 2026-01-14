@@ -92,7 +92,7 @@ const arrowForDirection = (value: string) => {
   return { label: '.', tone: 'text-fog/50' }
 }
 
-const formatFeeRate = (amount: number, fee: number) => {
+  const formatFeeRate = (amount: number, fee: number) => {
   if (!amount || amount <= 0) return ''
   const safeFee = fee > 0 ? fee : 0
   const ratio = safeFee / amount
@@ -100,9 +100,14 @@ const formatFeeRate = (amount: number, fee: number) => {
   const percent = percentRaw.toFixed(3).replace(/\.?0+$/, '')
   const ppm = Math.round(ratio * 1_000_000)
   return `${percent}% ${ppm}ppm`
-}
+  }
 
-export default function Notifications() {
+  const mempoolTxLink = (txid?: string) => {
+    if (!txid) return ''
+    return `https://mempool.space/tx/${txid}`
+  }
+
+  export default function Notifications() {
   const [items, setItems] = useState<Notification[]>([])
   const [status, setStatus] = useState('Loading notifications...')
   const [streamState, setStreamState] = useState<'idle' | 'waiting' | 'reconnecting' | 'error'>('idle')
@@ -366,18 +371,50 @@ export default function Notifications() {
                     feeDetail = `Fee ${item.fee_sat} sats (${feeRate})`
                   }
                 }
-                const detail = [
+                const detailParts: Array<string | JSX.Element> = [
                   peer ? `Peer ${peer}` : '',
                   item.channel_point ? `Channel ${item.channel_point.slice(0, 16)}...` : '',
-                  item.txid ? `Tx ${item.txid.slice(0, 16)}...` : '',
-                  feeDetail,
-                ].filter(Boolean).join(' - ')
+                ].filter(Boolean)
+                if (item.txid) {
+                  if (item.type === 'channel') {
+                    const link = mempoolTxLink(item.txid)
+                    detailParts.push(
+                      <a
+                        key={`${item.id}-tx`}
+                        className="text-emerald-200 hover:text-emerald-100"
+                        href={link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Tx {item.txid.slice(0, 16)}...
+                      </a>
+                    )
+                  } else {
+                    detailParts.push(`Tx ${item.txid.slice(0, 16)}...`)
+                  }
+                }
+                if (feeDetail) {
+                  detailParts.push(feeDetail)
+                }
                 return (
                   <div key={item.id} className="grid items-center gap-3 border-b border-white/10 pb-3 sm:grid-cols-[160px_1fr_auto_auto]">
                     <span className="text-xs text-fog/50">{formatTimestamp(item.occurred_at)}</span>
                     <div className="min-w-0">
                       <div className="text-sm text-fog">{title}</div>
-                      <div className="text-xs text-fog/50">{statusLabel}{detail ? ` - ${detail}` : ''}</div>
+                      <div className="text-xs text-fog/50">
+                        {statusLabel}
+                        {detailParts.length > 0 && (
+                          <>
+                            {' - '}
+                            {detailParts.map((part, idx) => (
+                              <span key={`${item.id}-detail-${idx}`}>
+                                {idx > 0 ? ' - ' : ''}
+                                {part}
+                              </span>
+                            ))}
+                          </>
+                        )}
+                      </div>
                     </div>
                     <span className={`text-xs font-mono ${arrow.tone}`}>{arrow.label}</span>
                     <div className="text-right">

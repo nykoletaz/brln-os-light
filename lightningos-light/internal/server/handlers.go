@@ -991,7 +991,7 @@ func (s *Server) handleLNConnectPeer(w http.ResponseWriter, r *http.Request) {
   defer cancel()
 
   if err := s.lnd.ConnectPeer(ctx, pubkey, host, perm); err != nil {
-    writeError(w, http.StatusInternalServerError, lndStatusMessage(err))
+    writeError(w, http.StatusInternalServerError, peerConnectErrorMessage(err))
     return
   }
 
@@ -1233,6 +1233,23 @@ func isAlreadyConnected(err error) bool {
   return strings.Contains(msg, "already connected") ||
     strings.Contains(msg, "already have a connection") ||
     strings.Contains(msg, "already connected to peer")
+}
+
+func peerConnectErrorMessage(err error) string {
+  if err == nil {
+    return ""
+  }
+  if isTimeoutError(err) {
+    return "Peer connection timed out"
+  }
+  msg := lndRPCErrorMessage(err)
+  if msg == "" || msg == "LND error" {
+    msg = lndStatusMessage(err)
+  }
+  if msg == "" {
+    msg = "Peer connection failed"
+  }
+  return msg
 }
 
 func (s *Server) handleLNOpenChannel(w http.ResponseWriter, r *http.Request) {

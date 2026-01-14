@@ -866,6 +866,9 @@ func (n *Notifier) channelEventToNotification(update *lnrpc.ChannelEventUpdate) 
       ChannelID: int64(ch.ChanId),
       ChannelPoint: ch.ChannelPoint,
     }
+    if evt.PeerAlias == "" && evt.PeerPubkey != "" {
+      evt.PeerAlias = n.lookupNodeAlias(evt.PeerPubkey)
+    }
     return evt, fmt.Sprintf("channel:open:%s", ch.ChannelPoint)
   case lnrpc.ChannelEventUpdate_CLOSED_CHANNEL:
     ch := update.GetClosedChannel()
@@ -883,6 +886,9 @@ func (n *Notifier) channelEventToNotification(update *lnrpc.ChannelEventUpdate) 
       ChannelID: int64(ch.ChanId),
       ChannelPoint: ch.ChannelPoint,
       Txid: ch.ClosingTxHash,
+    }
+    if evt.PeerAlias == "" && evt.PeerPubkey != "" {
+      evt.PeerAlias = n.lookupNodeAlias(evt.PeerPubkey)
     }
     return evt, fmt.Sprintf("channel:close:%s", ch.ChannelPoint)
   case lnrpc.ChannelEventUpdate_PENDING_OPEN_CHANNEL:
@@ -905,6 +911,23 @@ func (n *Notifier) channelEventToNotification(update *lnrpc.ChannelEventUpdate) 
       ChannelPoint: channelPoint,
       Txid: txid,
     }
+    if info := n.lookupPendingChannel(channelPoint, txid); info != nil {
+      if info.CapacitySat > 0 {
+        evt.AmountSat = info.CapacitySat
+      }
+      if info.RemotePubkey != "" {
+        evt.PeerPubkey = info.RemotePubkey
+      }
+      if info.PeerAlias != "" {
+        evt.PeerAlias = info.PeerAlias
+      }
+      if evt.PeerAlias == "" && evt.PeerPubkey != "" {
+        evt.PeerAlias = n.lookupNodeAlias(evt.PeerPubkey)
+      }
+      if evt.ChannelPoint == "" && info.ChannelPoint != "" {
+        evt.ChannelPoint = info.ChannelPoint
+      }
+    }
     if channelPoint == "" {
       return evt, fmt.Sprintf("channel:opening:%d", time.Now().UnixNano())
     }
@@ -912,6 +935,57 @@ func (n *Notifier) channelEventToNotification(update *lnrpc.ChannelEventUpdate) 
   default:
     return Notification{}, ""
   }
+}
+
+func (n *Notifier) lookupPendingChannel(channelPoint string, txid string) *lndclient.PendingChannelInfo {
+  ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+  defer cancel()
+
+  pending, err := n.lnd.ListPendingChannels(ctx)
+  if err != nil {
+    return nil
+  }
+
+  pointLower := strings.ToLower(strings.TrimSpace(channelPoint))
+  txidLower := strings.ToLower(strings.TrimSpace(txid))
+  for i := range pending {
+    item := pending[i]
+    if item.Status != "opening" {
+      continue
+    }
+    itemPoint := strings.ToLower(strings.TrimSpace(item.ChannelPoint))
+    if pointLower != "" && itemPoint == pointLower {
+      return &pending[i]
+    }
+    if pointLower == "" && txidLower != "" && strings.HasPrefix(itemPoint, txidLower+":") {
+      return &pending[i]
+    }
+  }
+
+  return nil
+}
+
+func (n *Notifier) lookupNodeAlias(pubkey string) string {
+  trimmed := strings.TrimSpace(pubkey)
+  if trimmed == "" {
+    return ""
+  }
+
+  ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+  defer cancel()
+
+  conn, err := n.lnd.DialLightning(ctx)
+  if err != nil {
+    return ""
+  }
+  defer conn.Close()
+
+  client := lnrpc.NewLightningClient(conn)
+  info, err := client.GetNodeInfo(ctx, &lnrpc.NodeInfoRequest{PubKey: trimmed, IncludeChannels: false})
+  if err != nil || info.GetNode() == nil {
+    return ""
+  }
+  return info.GetNode().Alias
 }
 
 func (n *Notifier) runForwards() {
