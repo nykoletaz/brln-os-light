@@ -1670,7 +1670,22 @@ func (s *Server) handleWalletSummary(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  activity, _ := s.lnd.ListRecent(ctx, 20)
+  activity, _ := s.lnd.ListRecent(ctx, walletActivityFetchLimit)
+  hashes := s.walletActivitySet()
+  if len(hashes) == 0 {
+    activity = activity[:0]
+  } else {
+    filtered := activity[:0]
+    for _, item := range activity {
+      if item.PaymentHash == "" {
+        continue
+      }
+      if _, ok := hashes[item.PaymentHash]; ok {
+        filtered = append(filtered, item)
+      }
+    }
+    activity = filtered
+  }
 
   resp := map[string]any{
     "balances": map[string]int64{
@@ -1724,7 +1739,11 @@ func (s *Server) handleWalletInvoice(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  writeJSON(w, http.StatusOK, map[string]string{"payment_request": invoice})
+  if invoice.PaymentHash != "" {
+    s.recordWalletActivity(invoice.PaymentHash)
+  }
+
+  writeJSON(w, http.StatusOK, map[string]string{"payment_request": invoice.PaymentRequest})
 }
 
 func (s *Server) handleWalletDecode(w http.ResponseWriter, r *http.Request) {
@@ -1783,7 +1802,15 @@ func (s *Server) handleWalletPay(w http.ResponseWriter, r *http.Request) {
   ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
   defer cancel()
 
+  paymentHash := ""
+  if decoded, err := s.lnd.DecodeInvoice(ctx, req.PaymentRequest); err == nil {
+    paymentHash = decoded.PaymentHash
+  }
+
   if err := s.lnd.PayInvoice(ctx, req.PaymentRequest); err != nil {
+    if paymentHash != "" {
+      s.recordWalletActivity(paymentHash)
+    }
     msg := lndRPCErrorMessage(err)
     if isTimeoutError(err) {
       msg = lndStatusMessage(err)
@@ -1793,6 +1820,10 @@ func (s *Server) handleWalletPay(w http.ResponseWriter, r *http.Request) {
     }
     writeError(w, http.StatusInternalServerError, msg)
     return
+  }
+
+  if paymentHash != "" {
+    s.recordWalletActivity(paymentHash)
   }
 
   writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

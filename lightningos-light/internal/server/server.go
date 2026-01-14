@@ -26,6 +26,7 @@ type Server struct {
   notifierErr string
   lndRestartMu sync.RWMutex
   lastLNDRestart time.Time
+  walletActivityMu sync.Mutex
 }
 
 func New(cfg *config.Config, logger *log.Logger) *Server {

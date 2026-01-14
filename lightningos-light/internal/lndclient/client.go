@@ -78,8 +78,14 @@ type DecodedInvoice struct {
   AmountMsat int64
   Memo string
   Destination string
+  PaymentHash string
   Expiry int64
   Timestamp int64
+}
+
+type CreatedInvoice struct {
+  PaymentRequest string
+  PaymentHash string
 }
 
 func (m macaroonCredential) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
@@ -215,6 +221,7 @@ func (c *Client) DecodeInvoice(ctx context.Context, payReq string) (DecodedInvoi
     AmountMsat: resp.NumMsat,
     Memo: resp.Description,
     Destination: resp.Destination,
+    PaymentHash: strings.ToLower(resp.PaymentHash),
     Expiry: resp.Expiry,
     Timestamp: resp.Timestamp,
   }, nil
@@ -458,10 +465,10 @@ func (c *Client) UnlockWallet(ctx context.Context, walletPassword string) error 
   return err
 }
 
-func (c *Client) CreateInvoice(ctx context.Context, amountSat int64, memo string, expirySeconds int64) (string, error) {
+func (c *Client) CreateInvoice(ctx context.Context, amountSat int64, memo string, expirySeconds int64) (CreatedInvoice, error) {
   conn, err := c.dial(ctx, true)
   if err != nil {
-    return "", err
+    return CreatedInvoice{}, err
   }
   defer conn.Close()
 
@@ -477,10 +484,13 @@ func (c *Client) CreateInvoice(ctx context.Context, amountSat int64, memo string
     Expiry: expirySeconds,
   })
   if err != nil {
-    return "", err
+    return CreatedInvoice{}, err
   }
 
-  return resp.PaymentRequest, nil
+  return CreatedInvoice{
+    PaymentRequest: resp.PaymentRequest,
+    PaymentHash: strings.ToLower(hex.EncodeToString(resp.RHash)),
+  }, nil
 }
 
 func (c *Client) NewAddress(ctx context.Context) (string, error) {
@@ -534,12 +544,17 @@ func (c *Client) ListRecent(ctx context.Context, limit int) ([]RecentActivity, e
   var items []RecentActivity
   if invErr == nil {
     for _, inv := range invoices.Invoices {
+      hash := strings.ToLower(inv.RHashStr)
+      if hash == "" && len(inv.RHash) > 0 {
+        hash = hex.EncodeToString(inv.RHash)
+      }
       items = append(items, RecentActivity{
         Type: "invoice",
         AmountSat: inv.Value,
         Memo: inv.Memo,
         Timestamp: time.Unix(inv.CreationDate, 0).UTC(),
         Status: inv.State.String(),
+        PaymentHash: hash,
       })
     }
   }
@@ -551,6 +566,7 @@ func (c *Client) ListRecent(ctx context.Context, limit int) ([]RecentActivity, e
         Memo: pay.PaymentRequest,
         Timestamp: time.Unix(pay.CreationDate, 0).UTC(),
         Status: pay.Status.String(),
+        PaymentHash: strings.ToLower(pay.PaymentHash),
       })
     }
   }
@@ -1048,4 +1064,5 @@ type RecentActivity struct {
   Memo string `json:"memo"`
   Timestamp time.Time `json:"timestamp"`
   Status string `json:"status"`
+  PaymentHash string `json:"-"`
 }
