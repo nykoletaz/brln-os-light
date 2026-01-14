@@ -771,28 +771,9 @@ if not csrf_trusted and allowed_hosts:
       csrf_trusted.append(f"{scheme}://{host}")
       csrf_trusted.append(f"{scheme}://{host}:8889")
 
-filtered = []
-for line in raw:
-  stripped = line.strip()
-  if (
-    stripped.startswith("ALLOWED_HOSTS")
-    or stripped.startswith("CSRF_TRUSTED_ORIGINS")
-    or stripped.startswith("CSRF_COOKIE_SECURE")
-    or stripped.startswith("SESSION_COOKIE_SECURE")
-    or stripped.startswith("CSRF_COOKIE_SAMESITE")
-    or stripped.startswith("SESSION_COOKIE_SAMESITE")
-    or stripped.startswith("CSRF_COOKIE_DOMAIN")
-    or stripped.startswith("SESSION_COOKIE_DOMAIN")
-    or stripped.startswith("CSRF_COOKIE_NAME")
-    or stripped.startswith("SESSION_COOKIE_NAME")
-  ):
-    continue
-  filtered.append(line)
-raw = filtered
-
-replacement = [
-  "DATABASES = {",
-  "    'default': {",
+  replacement = [
+    "DATABASES = {",
+    "    'default': {",
   "        'ENGINE': 'django.db.backends.postgresql_psycopg2',",
   "        'NAME': 'lndg',",
   "        'USER': 'lndg',",
@@ -801,9 +782,27 @@ replacement = [
   "        'PORT': '5432',",
   "    }",
   "}",
-]
+  ]
 
-raw = raw[:start] + replacement + raw[end+1:]
+  raw = raw[:start] + replacement + raw[end+1:]
+  filtered = []
+  for line in raw:
+    stripped = line.strip()
+    if (
+      stripped.startswith("ALLOWED_HOSTS")
+      or stripped.startswith("CSRF_TRUSTED_ORIGINS")
+      or stripped.startswith("CSRF_COOKIE_SECURE")
+      or stripped.startswith("SESSION_COOKIE_SECURE")
+      or stripped.startswith("CSRF_COOKIE_SAMESITE")
+      or stripped.startswith("SESSION_COOKIE_SAMESITE")
+      or stripped.startswith("CSRF_COOKIE_DOMAIN")
+      or stripped.startswith("SESSION_COOKIE_DOMAIN")
+      or stripped.startswith("CSRF_COOKIE_NAME")
+      or stripped.startswith("SESSION_COOKIE_NAME")
+    ):
+      continue
+    filtered.append(line)
+  raw = filtered
 if allowed_hosts:
   raw += ["", "ALLOWED_HOSTS = " + repr(allowed_hosts)]
 if csrf_trusted:

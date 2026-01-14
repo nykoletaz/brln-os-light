@@ -12,6 +12,7 @@ import BitcoinLocal from './pages/BitcoinLocal'
 import Notifications from './pages/Notifications'
 import LndConfig from './pages/LndConfig'
 import AppStore from './pages/AppStore'
+import { getWizardStatus } from './api'
 
 const routes = [
   { key: 'dashboard', label: 'Dashboard', element: <Dashboard /> },
@@ -28,10 +29,10 @@ const routes = [
 ]
 
 function useHashRoute() {
-  const [hash, setHash] = useState(window.location.hash.replace('#', '') || 'wizard')
+  const [hash, setHash] = useState(window.location.hash.replace('#', ''))
 
   useEffect(() => {
-    const handler = () => setHash(window.location.hash.replace('#', '') || 'wizard')
+    const handler = () => setHash(window.location.hash.replace('#', ''))
     window.addEventListener('hashchange', handler)
     return () => window.removeEventListener('hashchange', handler)
   }, [])
@@ -41,7 +42,34 @@ function useHashRoute() {
 
 export default function App() {
   const route = useHashRoute()
-  const current = useMemo(() => routes.find((item) => item.key === route) || routes[0], [route])
+  const [wizardRequired, setWizardRequired] = useState(true)
+
+  useEffect(() => {
+    let active = true
+    getWizardStatus()
+      .then((data: any) => {
+        if (!active) return
+        setWizardRequired(!data?.wallet_exists)
+      })
+      .catch(() => {
+        if (!active) return
+        setWizardRequired(true)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  const current = useMemo(() => {
+    const matched = routes.find((item) => item.key === route)
+    if (wizardRequired) {
+      return routes.find((item) => item.key === 'wizard') || matched || routes[0]
+    }
+    if (matched) {
+      return matched
+    }
+    return routes.find((item) => item.key === 'dashboard') || routes[0]
+  }, [route, wizardRequired])
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row text-fog">

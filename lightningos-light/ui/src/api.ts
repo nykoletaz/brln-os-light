@@ -45,6 +45,7 @@ export const updateBitcoinLocalConfig = (payload: {
 }) => request('/api/bitcoin-local/config', { method: 'POST', body: JSON.stringify(payload) })
 export const getLndStatus = () => request('/api/lnd/status')
 export const getLndConfig = () => request('/api/lnd/config')
+export const getWizardStatus = () => request('/api/wizard/status')
 
 export const postBitcoinRemote = (payload: { rpcuser: string; rpcpass: string }) =>
   request('/api/wizard/bitcoin-remote', { method: 'POST', body: JSON.stringify(payload) })

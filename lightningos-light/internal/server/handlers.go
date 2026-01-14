@@ -618,6 +618,12 @@ func (s *Server) handleLNDStatus(w http.ResponseWriter, r *http.Request) {
   writeJSON(w, http.StatusOK, resp)
 }
 
+func (s *Server) handleWizardStatus(w http.ResponseWriter, r *http.Request) {
+  writeJSON(w, http.StatusOK, map[string]any{
+    "wallet_exists": walletExists(),
+  })
+}
+
 type wizardBitcoinReq struct {
   RPCUser string `json:"rpcuser"`
   RPCPass string `json:"rpcpass"`
@@ -703,6 +709,9 @@ func (s *Server) handleCreateWallet(w http.ResponseWriter, r *http.Request) {
 }
 
 func walletExists() bool {
+  if walletPasswordAvailable() {
+    return true
+  }
   info, err := os.Stat(lndWalletDBPath)
   if err != nil {
     return false

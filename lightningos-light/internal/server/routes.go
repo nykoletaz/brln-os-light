@@ -28,6 +28,7 @@ func (s *Server) routes() http.Handler {
   r.Post("/api/bitcoin-local/config", s.handleBitcoinLocalConfigPost)
   r.Get("/api/lnd/status", s.handleLNDStatus)
   r.Get("/api/lnd/config", s.handleLNDConfigGet)
+  r.Get("/api/wizard/status", s.handleWizardStatus)
   r.Post("/api/wizard/bitcoin-remote", s.handleWizardBitcoinRemote)
   r.Post("/api/wizard/lnd/create-wallet", s.handleCreateWallet)
   r.Post("/api/wizard/lnd/init-wallet", s.handleInitWallet)
