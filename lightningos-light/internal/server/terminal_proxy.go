@@ -1,6 +1,7 @@
 package server
 
 import (
+  "encoding/base64"
   "net/http"
   "net/http/httputil"
   "net/url"
@@ -19,6 +20,22 @@ func terminalProxyTarget() *url.URL {
   return target
 }
 
+func terminalCredential() string {
+  return strings.TrimSpace(os.Getenv("TERMINAL_CREDENTIAL"))
+}
+
+func basicAuthHeader(credential string) string {
+  if credential == "" {
+    return ""
+  }
+  parts := strings.SplitN(credential, ":", 2)
+  if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+    return ""
+  }
+  token := base64.StdEncoding.EncodeToString([]byte(credential))
+  return "Basic " + token
+}
+
 func (s *Server) handleTerminalProxy(w http.ResponseWriter, r *http.Request) {
   if strings.TrimSpace(os.Getenv("TERMINAL_ENABLED")) != "1" {
     http.NotFound(w, r)
@@ -26,6 +43,7 @@ func (s *Server) handleTerminalProxy(w http.ResponseWriter, r *http.Request) {
   }
 
   target := terminalProxyTarget()
+  authHeader := basicAuthHeader(terminalCredential())
   proxy := httputil.NewSingleHostReverseProxy(target)
   proxy.Director = func(req *http.Request) {
     req.URL.Scheme = target.Scheme
@@ -35,6 +53,9 @@ func (s *Server) handleTerminalProxy(w http.ResponseWriter, r *http.Request) {
       req.URL.Path = "/"
     }
     req.Host = target.Host
+    if authHeader != "" && req.Header.Get("Authorization") == "" {
+      req.Header.Set("Authorization", authHeader)
+    }
     if req.Header.Get("X-Forwarded-Host") == "" && r.Host != "" {
       req.Header.Set("X-Forwarded-Host", r.Host)
     }

@@ -74,7 +74,7 @@ ensure_secrets_env_defaults() {
     echo "TERMINAL_CREDENTIAL=" >> "$file"
   fi
   if ! grep -q '^TERMINAL_ALLOW_WRITE=' "$file"; then
-    echo "TERMINAL_ALLOW_WRITE=0" >> "$file"
+    echo "TERMINAL_ALLOW_WRITE=1" >> "$file"
   fi
   if ! grep -q '^TERMINAL_PORT=' "$file"; then
     echo "TERMINAL_PORT=7681" >> "$file"

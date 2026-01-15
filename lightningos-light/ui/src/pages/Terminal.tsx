@@ -21,6 +21,17 @@ export default function Terminal() {
     }
   }
 
+  const parseCredential = (raw?: string) => {
+    if (!raw) return { user: '', pass: '' }
+    const parts = raw.split(':')
+    if (parts.length < 2) return { user: raw, pass: '' }
+    const user = parts.shift() || ''
+    const pass = parts.join(':')
+    return { user, pass }
+  }
+
+  const credential = parseCredential(status?.credential)
+
   useEffect(() => {
     let mounted = true
     getTerminalStatus()
@@ -70,13 +81,19 @@ export default function Terminal() {
                 )}
                 {status.credential && (
                   <div className="flex items-center gap-2">
-                    <span className="text-fog/50">Credential</span>
-                    <span className="font-mono text-fog/80">{status.credential}</span>
+                    <span className="text-fog/50">User</span>
+                    <span className="font-mono text-fog/80">{credential.user || 'terminal'}</span>
+                  </div>
+                )}
+                {credential.pass && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-fog/50">Password</span>
+                    <span className="font-mono text-fog/80">{credential.pass}</span>
                     <button
                       className="text-fog/50 hover:text-fog"
-                      onClick={() => copyToClipboard(status.credential || '')}
-                      title="Copy credential"
-                      aria-label="Copy credential"
+                      onClick={() => copyToClipboard(credential.pass)}
+                      title="Copy password"
+                      aria-label="Copy password"
                     >
                       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
                         <rect x="9" y="9" width="11" height="11" rx="2" />

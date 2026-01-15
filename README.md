@@ -110,7 +110,7 @@ Start (or restart) the service:
 ```bash
 sudo systemctl enable --now lightningos-terminal
 ```
-The Terminal page shows the current credential and a copy button.
+The Terminal page shows the current password and a copy button.
 
 ## Security notes
 - The seed phrase is never stored. It is displayed once in the wizard.
