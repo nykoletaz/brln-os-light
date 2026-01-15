@@ -17,7 +17,7 @@ if [[ -z "${TERMINAL_CREDENTIAL:-}" ]]; then
 fi
 
 port="${TERMINAL_PORT:-7681}"
-ws_origin="${TERMINAL_WS_ORIGIN:-}"
+ws_origin="${TERMINAL_WS_ORIGIN:-.*}"
 
 args=(/usr/local/bin/gotty --address 127.0.0.1 --port "$port" --credential "$TERMINAL_CREDENTIAL" --reconnect)
 
@@ -25,7 +25,7 @@ if [[ "${TERMINAL_ALLOW_WRITE:-0}" == "1" ]]; then
   args+=(--permit-write)
 fi
 
-if [[ -n "$ws_origin" ]] && /usr/local/bin/gotty --help 2>&1 | grep -q -- '--ws-origin'; then
+if /usr/local/bin/gotty --help 2>&1 | grep -q -- '--ws-origin'; then
   args+=(--ws-origin "$ws_origin")
 fi
 

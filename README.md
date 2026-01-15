@@ -104,7 +104,7 @@ You can review or override in `/etc/lightningos/secrets.env`:
 - `TERMINAL_CREDENTIAL=user:pass`
 - `TERMINAL_ALLOW_WRITE=0` (set `1` to allow input)
 - `TERMINAL_PORT=7681` (optional)
-- `TERMINAL_WS_ORIGIN=^https://.*:8443$` (optional)
+- `TERMINAL_WS_ORIGIN=^https://.*:8443$` (optional, default allows all origins)
 
 Start (or restart) the service:
 ```bash
