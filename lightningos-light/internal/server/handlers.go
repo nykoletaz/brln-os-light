@@ -1775,7 +1775,7 @@ func (s *Server) handleWalletDecode(w http.ResponseWriter, r *http.Request) {
     writeError(w, http.StatusBadRequest, "invalid json")
     return
   }
-  paymentRequest := strings.TrimSpace(req.PaymentRequest)
+  paymentRequest := normalizePaymentRequest(req.PaymentRequest)
   if paymentRequest == "" {
     writeError(w, http.StatusBadRequest, "payment_request required")
     return
@@ -1815,7 +1815,8 @@ func (s *Server) handleWalletPay(w http.ResponseWriter, r *http.Request) {
     writeError(w, http.StatusBadRequest, "invalid json")
     return
   }
-  if strings.TrimSpace(req.PaymentRequest) == "" {
+  paymentRequest := normalizePaymentRequest(req.PaymentRequest)
+  if paymentRequest == "" {
     writeError(w, http.StatusBadRequest, "payment_request required")
     return
   }
@@ -1824,11 +1825,11 @@ func (s *Server) handleWalletPay(w http.ResponseWriter, r *http.Request) {
   defer cancel()
 
   paymentHash := ""
-  if decoded, err := s.lnd.DecodeInvoice(ctx, req.PaymentRequest); err == nil {
+  if decoded, err := s.lnd.DecodeInvoice(ctx, paymentRequest); err == nil {
     paymentHash = decoded.PaymentHash
   }
 
-  if err := s.lnd.PayInvoice(ctx, req.PaymentRequest); err != nil {
+  if err := s.lnd.PayInvoice(ctx, paymentRequest); err != nil {
     if paymentHash != "" {
       s.recordWalletActivity(paymentHash)
     }

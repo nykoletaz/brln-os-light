@@ -3,6 +3,7 @@ package server
 import (
   "encoding/json"
   "net/http"
+  "strings"
 )
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -17,6 +18,13 @@ func readJSON(r *http.Request, dst any) error {
   dec := json.NewDecoder(r.Body)
   dec.DisallowUnknownFields()
   return dec.Decode(dst)
+}
+
+func normalizePaymentRequest(value string) string {
+  if value == "" {
+    return ""
+  }
+  return strings.Join(strings.Fields(value), "")
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
