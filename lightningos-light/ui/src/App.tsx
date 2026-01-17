@@ -14,23 +14,7 @@ import Notifications from './pages/Notifications'
 import LndConfig from './pages/LndConfig'
 import AppStore from './pages/AppStore'
 import Terminal from './pages/Terminal'
-import { getWizardStatus } from './api'
-
-const routes = [
-  { key: 'dashboard', label: 'Dashboard', element: <Dashboard /> },
-  { key: 'reports', label: 'Reports', element: <Reports /> },
-  { key: 'wizard', label: 'Wizard', element: <Wizard /> },
-  { key: 'wallet', label: 'Wallet', element: <Wallet /> },
-  { key: 'lightning-ops', label: 'Lightning Ops', element: <LightningOps /> },
-  { key: 'bitcoin', label: 'Bitcoin Remote', element: <BitcoinRemote /> },
-  { key: 'lnd', label: 'LND Config', element: <LndConfig /> },
-  { key: 'disks', label: 'Disks', element: <Disks /> },
-  { key: 'logs', label: 'Logs', element: <Logs /> },
-  { key: 'apps', label: 'Apps', element: <AppStore /> },
-  { key: 'bitcoin-local', label: 'Bitcoin Local', element: <BitcoinLocal /> },
-  { key: 'notifications', label: 'Notifications', element: <Notifications /> },
-  { key: 'terminal', label: 'Terminal', element: <Terminal /> }
-]
+import { getLndStatus, getWizardStatus } from './api'
 
 function useHashRoute() {
   const [hash, setHash] = useState(window.location.hash.replace('#', ''))
@@ -44,26 +28,70 @@ function useHashRoute() {
   return hash
 }
 
+type RouteItem = {
+  key: string
+  label: string
+  element: JSX.Element
+}
+
 export default function App() {
   const route = useHashRoute()
-  const [wizardRequired, setWizardRequired] = useState(true)
+  const [walletUnlocked, setWalletUnlocked] = useState<boolean | null>(null)
+  const [walletExists, setWalletExists] = useState<boolean | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
 
   useEffect(() => {
     let active = true
-    getWizardStatus()
-      .then((data: any) => {
+    const load = async () => {
+      try {
+        const data: any = await getWizardStatus()
         if (!active) return
-        setWizardRequired(!data?.wallet_exists)
-      })
-      .catch(() => {
+        setWalletExists(Boolean(data?.wallet_exists))
+      } catch {
         if (!active) return
-        setWizardRequired(true)
-      })
+      }
+      try {
+        const status: any = await getLndStatus()
+        if (!active) return
+        if (typeof status?.wallet_state === 'string') {
+          setWalletUnlocked(status.wallet_state === 'unlocked')
+        }
+      } catch {
+        if (!active) return
+      }
+    }
+    load()
+    const timer = window.setInterval(load, 30000)
     return () => {
       active = false
+      window.clearInterval(timer)
     }
   }, [])
+
+  const wizardHidden = walletUnlocked === true
+  const wizardRequired = walletExists === false && !wizardHidden
+
+  const routes = useMemo(() => {
+    const list: RouteItem[] = []
+    if (!wizardHidden) {
+      list.push({ key: 'wizard', label: 'Wizard', element: <Wizard /> })
+    }
+    list.push(
+      { key: 'dashboard', label: 'Dashboard', element: <Dashboard /> },
+      { key: 'reports', label: 'Reports', element: <Reports /> },
+      { key: 'wallet', label: 'Wallet', element: <Wallet /> },
+      { key: 'lightning-ops', label: 'Lightning Ops', element: <LightningOps /> },
+      { key: 'lnd', label: 'LND Config', element: <LndConfig /> },
+      { key: 'apps', label: 'Apps', element: <AppStore /> },
+      { key: 'bitcoin', label: 'Bitcoin Remote', element: <BitcoinRemote /> },
+      { key: 'bitcoin-local', label: 'Bitcoin Local', element: <BitcoinLocal /> },
+      { key: 'notifications', label: 'Notifications', element: <Notifications /> },
+      { key: 'disks', label: 'Disks', element: <Disks /> },
+      { key: 'terminal', label: 'Terminal', element: <Terminal /> },
+      { key: 'logs', label: 'Logs', element: <Logs /> }
+    )
+    return list
+  }, [wizardHidden])
 
   useEffect(() => {
     setMenuOpen(false)
@@ -95,7 +123,7 @@ export default function App() {
       return matched
     }
     return routes.find((item) => item.key === 'dashboard') || routes[0]
-  }, [route, wizardRequired])
+  }, [route, routes, wizardRequired])
 
   return (
     <>
