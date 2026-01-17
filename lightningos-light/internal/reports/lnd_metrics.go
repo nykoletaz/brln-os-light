@@ -196,10 +196,6 @@ func extractDestinationAndDescription(ctx context.Context, lnd *lndclient.Client
     }
   }
 
-  if dest == "" && len(pay.Path) > 0 {
-    dest = pay.Path[len(pay.Path)-1]
-  }
-
   payreq := strings.TrimSpace(pay.PaymentRequest)
   if payreq == "" {
     return dest, description
