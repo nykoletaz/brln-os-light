@@ -49,6 +49,10 @@ func (s *Server) routes() http.Handler {
   r.Get("/api/notifications/backup/telegram", s.handleTelegramBackupGet)
   r.Post("/api/notifications/backup/telegram", s.handleTelegramBackupPost)
   r.Post("/api/notifications/backup/telegram/test", s.handleTelegramBackupTest)
+  r.Get("/api/reports/range", s.handleReportsRange)
+  r.Get("/api/reports/custom", s.handleReportsCustom)
+  r.Get("/api/reports/summary", s.handleReportsSummary)
+  r.Get("/api/reports/live", s.handleReportsLive)
   r.Get("/api/terminal/status", s.handleTerminalStatus)
 
   r.Route("/api/wallet", func(r chi.Router) {

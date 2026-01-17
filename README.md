@@ -95,6 +95,32 @@ Environment keys:
 - `NOTIFICATIONS_TG_BOT_TOKEN`
 - `NOTIFICATIONS_TG_CHAT_ID`
 
+## Reports
+Daily routing reports are computed at midnight local time and stored in Postgres (same DB/user as notifications).
+
+Schedule:
+- `lightningos-reports.timer` runs `lightningos-reports.service` at `00:00` local time.
+- Manual run: `lightningos-manager reports-run --date YYYY-MM-DD` (defaults to yesterday).
+
+Stored table: `reports_daily`
+- `report_date` (DATE, local day)
+- `forward_fee_revenue_sats`
+- `rebalance_fee_cost_sats`
+- `net_routing_profit_sats`
+- `forward_count`
+- `rebalance_count`
+- `routed_volume_sats`
+- `onchain_balance_sats`
+- `lightning_balance_sats`
+- `total_balance_sats`
+- `created_at`, `updated_at`
+
+API endpoints:
+- `GET /api/reports/range?range=d-1|month|3m|6m|12m|all` (month = last 30 days)
+- `GET /api/reports/custom?from=YYYY-MM-DD&to=YYYY-MM-DD` (max 730 days)
+- `GET /api/reports/summary?range=...`
+- `GET /api/reports/live` (today 00:00 local → now, cached ~60s)
+
 ## Web terminal (optional)
 LightningOS Light can expose a protected web terminal using GoTTY.
 

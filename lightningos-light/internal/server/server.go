@@ -6,13 +6,12 @@ import (
   "fmt"
   "log"
   "net/http"
-  "os"
-  "strings"
   "sync"
   "time"
 
   "lightningos-light/internal/config"
   "lightningos-light/internal/lndclient"
+  "lightningos-light/internal/reports"
 
   "github.com/jackc/pgx/v5/pgxpool"
 )
@@ -24,6 +23,9 @@ type Server struct {
   db     *pgxpool.Pool
   notifier *Notifier
   notifierErr string
+  reports *reports.Service
+  reportsErr string
+  reportsOnce sync.Once
   lndRestartMu sync.RWMutex
   lastLNDRestart time.Time
   walletActivityMu sync.Mutex
@@ -39,6 +41,7 @@ func New(cfg *config.Config, logger *log.Logger) *Server {
 
 func (s *Server) Run() error {
   s.initNotifications()
+  s.initReports()
 
   addr := fmt.Sprintf("%s:%d", s.cfg.Server.Host, s.cfg.Server.Port)
 
@@ -58,21 +61,9 @@ func (s *Server) Run() error {
 }
 
 func (s *Server) initNotifications() {
-  dsn := os.Getenv("NOTIFICATIONS_PG_DSN")
-  if isPlaceholderDSN(dsn) {
-    dsn = ""
-  }
-  if strings.TrimSpace(dsn) == "" {
-    if bootstrapped, err := bootstrapNotificationsDSN(s.logger); err == nil && bootstrapped != "" {
-      dsn = bootstrapped
-    } else if err != nil {
-      s.notifierErr = fmt.Sprintf("notifications unavailable: %v", err)
-    }
-  }
-  if strings.TrimSpace(dsn) == "" {
-    if s.notifierErr == "" {
-      s.notifierErr = "notifications unavailable: NOTIFICATIONS_PG_DSN not set"
-    }
+  dsn, err := ResolveNotificationsDSN(s.logger)
+  if err != nil {
+    s.notifierErr = fmt.Sprintf("notifications unavailable: %v", err)
     s.logger.Printf("%s", s.notifierErr)
     return
   }

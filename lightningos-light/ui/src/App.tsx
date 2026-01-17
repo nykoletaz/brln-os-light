@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Sidebar from './components/Sidebar'
 import Topbar from './components/Topbar'
 import Dashboard from './pages/Dashboard'
+import Reports from './pages/Reports'
 import Wizard from './pages/Wizard'
 import Wallet from './pages/Wallet'
 import LightningOps from './pages/LightningOps'
@@ -17,6 +18,7 @@ import { getWizardStatus } from './api'
 
 const routes = [
   { key: 'dashboard', label: 'Dashboard', element: <Dashboard /> },
+  { key: 'reports', label: 'Reports', element: <Reports /> },
   { key: 'wizard', label: 'Wizard', element: <Wizard /> },
   { key: 'wallet', label: 'Wallet', element: <Wallet /> },
   { key: 'lightning-ops', label: 'Lightning Ops', element: <LightningOps /> },

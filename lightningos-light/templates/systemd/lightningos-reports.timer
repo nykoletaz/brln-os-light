@@ -1,0 +1,10 @@
+[Unit]
+Description=LightningOS Reports Timer
+
+[Timer]
+OnCalendar=*-*-* 00:00:00
+Persistent=true
+Unit=lightningos-reports.service
+
+[Install]
+WantedBy=timers.target

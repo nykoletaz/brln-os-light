@@ -133,6 +133,14 @@ export const testTelegramBackup = () =>
 
 export const getTerminalStatus = () => request('/api/terminal/status')
 
+export const getReportsRange = (range: string) =>
+  request(`/api/reports/range?range=${encodeURIComponent(range)}`)
+export const getReportsCustom = (from: string, to: string) =>
+  request(`/api/reports/custom?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+export const getReportsSummary = (range: string) =>
+  request(`/api/reports/summary?range=${encodeURIComponent(range)}`)
+export const getReportsLive = () => request('/api/reports/live')
+
 export const getApps = () => request('/api/apps')
 export const getAppAdminPassword = (id: string) => request(`/api/apps/${id}/admin-password`)
 export const installApp = (id: string) => request(`/api/apps/${id}/install`, { method: 'POST' })

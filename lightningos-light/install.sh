@@ -1042,9 +1042,13 @@ install_systemd() {
   cp "$REPO_ROOT/templates/systemd/lnd.service" /etc/systemd/system/lnd.service
   cp "$REPO_ROOT/templates/systemd/lightningos-manager.service" /etc/systemd/system/lightningos-manager.service
   cp "$REPO_ROOT/templates/systemd/lightningos-terminal.service" /etc/systemd/system/lightningos-terminal.service
+  cp "$REPO_ROOT/templates/systemd/lightningos-reports.service" /etc/systemd/system/lightningos-reports.service
+  cp "$REPO_ROOT/templates/systemd/lightningos-reports.timer" /etc/systemd/system/lightningos-reports.timer
   strip_crlf /etc/systemd/system/lnd.service
   strip_crlf /etc/systemd/system/lightningos-manager.service
   strip_crlf /etc/systemd/system/lightningos-terminal.service
+  strip_crlf /etc/systemd/system/lightningos-reports.service
+  strip_crlf /etc/systemd/system/lightningos-reports.timer
   systemctl daemon-reload
   systemctl enable --now postgresql
   start_tor_service
@@ -1053,6 +1057,7 @@ install_systemd() {
   fi
   systemctl enable --now lnd
   systemctl enable --now lightningos-manager
+  systemctl enable --now lightningos-reports.timer
   systemctl restart lnd >/dev/null 2>&1 || true
   systemctl restart lightningos-manager >/dev/null 2>&1 || true
   if [[ -f /etc/lightningos/secrets.env ]]; then
