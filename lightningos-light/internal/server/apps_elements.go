@@ -197,10 +197,21 @@ func (s *Server) uninstallElements(ctx context.Context) error {
 }
 
 func ensureElementsDataDir(ctx context.Context, paths elementsPaths) error {
-  script := fmt.Sprintf("mkdir -p %[1]s && chown %[2]s:%[2]s %[1]s && chmod 750 %[1]s", paths.DataDir, elementsUser)
-  if _, err := runSystemd(ctx, "/bin/sh", "-c", script); err != nil {
-    return fmt.Errorf("failed to prepare %s: %w", paths.DataDir, err)
-  }
+	script := fmt.Sprintf(`set -e
+if [ -d /data ]; then
+  if command -v setfacl >/dev/null 2>&1; then
+    setfacl -m u:%[2]s:rx /data
+  else
+    chmod o+x /data
+  fi
+fi
+mkdir -p "%[1]s"
+chown %[2]s:%[2]s "%[1]s"
+chmod 750 "%[1]s"
+`, paths.DataDir, elementsUser)
+	if _, err := runSystemd(ctx, "/bin/sh", "-c", script); err != nil {
+		return fmt.Errorf("failed to prepare %s: %w", paths.DataDir, err)
+	}
   link := fmt.Sprintf(`
 if [ -d "/home/%[1]s" ]; then
   if [ -L "/home/%[1]s/.elements" ]; then
