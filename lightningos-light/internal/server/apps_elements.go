@@ -520,6 +520,7 @@ ReadWritePaths=%s
 
 [Install]
 WantedBy=multi-user.target
+Alias=elementsd.service
 `, elementsUser, elementsUser, paths.ElementsdPath, paths.DataDir, paths.ConfigPath, paths.DataDir)
 }
 
@@ -568,6 +569,9 @@ func elementsServiceStatus(ctx context.Context) (string, error) {
   out, err := runSystemd(ctx, "systemctl", "is-active", elementsServiceName)
   if err != nil {
     state := strings.TrimSpace(out)
+    if state == "activating" {
+      return "running", nil
+    }
     if state == "inactive" || state == "failed" || state == "deactivating" {
       return "stopped", nil
     }

@@ -827,6 +827,8 @@ func mapService(name string) string {
     return "lnd"
   case "lightningos-manager":
     return "lightningos-manager"
+  case "lightningos-elements", "elementsd":
+    return elementsServiceName
   case "postgresql":
     return "postgresql"
   default:
