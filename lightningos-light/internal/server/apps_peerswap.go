@@ -268,11 +268,9 @@ func ensurePeerswapAssetStaging(ctx context.Context, dest string) error {
     fileExists(filepath.Join(dest, "psweb")) {
     return nil
   }
-  source := peerswapRepoAssetsPath()
-  if !fileExists(filepath.Join(source, "peerswapd")) ||
-    !fileExists(filepath.Join(source, "pscli")) ||
-    !fileExists(filepath.Join(source, "psweb")) {
-    return fmt.Errorf("peerswap binaries not found at %s", source)
+  source, err := peerswapRepoAssetsPath()
+  if err != nil {
+    return err
   }
   script := fmt.Sprintf(`set -e
 if [ ! -f "%s" ] || [ ! -f "%s" ] || [ ! -f "%s" ]; then
@@ -301,8 +299,41 @@ install -m 0755 "%s" "%s"
   return fmt.Errorf("peerswap binaries missing in %s", dest)
 }
 
-func peerswapRepoAssetsPath() string {
-  return filepath.Join("lightningos-light", "assets", "binaries", "peerswap", peerswapVersion, peerswapAssetsArch)
+func peerswapRepoAssetsPath() (string, error) {
+  candidates := []string{
+    filepath.Join("/root", "brln-os-light", "lightningos-light", "assets", "binaries", "peerswap", peerswapVersion, peerswapAssetsArch),
+    filepath.Join("/root", "lightningos-light", "assets", "binaries", "peerswap", peerswapVersion, peerswapAssetsArch),
+  }
+  patterns := []string{
+    filepath.Join("/home", "*", "brln-os-light", "lightningos-light", "assets", "binaries", "peerswap", peerswapVersion, peerswapAssetsArch),
+    filepath.Join("/home", "*", "lightningos-light", "assets", "binaries", "peerswap", peerswapVersion, peerswapAssetsArch),
+  }
+  for _, candidate := range candidates {
+    if peerswapAssetsPresent(candidate) {
+      return candidate, nil
+    }
+  }
+  for _, pattern := range patterns {
+    matches, err := filepath.Glob(pattern)
+    if err != nil {
+      continue
+    }
+    for _, match := range matches {
+      if peerswapAssetsPresent(match) {
+        return match, nil
+      }
+    }
+  }
+  return "", fmt.Errorf("peerswap binaries not found under /home/* or /root; expected %s", filepath.Join("brln-os-light", "lightningos-light", "assets", "binaries", "peerswap", peerswapVersion, peerswapAssetsArch))
+}
+
+func peerswapAssetsPresent(root string) bool {
+  if root == "" {
+    return false
+  }
+  return fileExists(filepath.Join(root, "peerswapd")) &&
+    fileExists(filepath.Join(root, "pscli")) &&
+    fileExists(filepath.Join(root, "psweb"))
 }
 
 func ensurePeerswapConfig(ctx context.Context, paths peerswapPaths) error {
