@@ -268,26 +268,27 @@ func ensurePeerswapAssetStaging(ctx context.Context, dest string) error {
     fileExists(filepath.Join(dest, "psweb")) {
     return nil
   }
-  source, err := peerswapRepoAssetsPath()
-  if err != nil {
-    return err
-  }
   script := fmt.Sprintf(`set -e
-if [ ! -f "%s" ] || [ ! -f "%s" ] || [ ! -f "%s" ]; then
-  echo "peerswap binaries missing in %s"
+source=""
+for candidate in \
+  /home/*/brln-os-light/lightningos-light/assets/binaries/peerswap/%[2]s/%[3]s \
+  /home/*/lightningos-light/assets/binaries/peerswap/%[2]s/%[3]s \
+  /root/brln-os-light/lightningos-light/assets/binaries/peerswap/%[2]s/%[3]s \
+  /root/lightningos-light/assets/binaries/peerswap/%[2]s/%[3]s; do
+  if [ -f "$candidate/peerswapd" ] && [ -f "$candidate/pscli" ] && [ -f "$candidate/psweb" ]; then
+    source="$candidate"
+    break
+  fi
+done
+if [ -z "$source" ]; then
+  echo "peerswap binaries not found under /home/* or /root"
   exit 1
 fi
-mkdir -p "%s"
-install -m 0755 "%s" "%s"
-install -m 0755 "%s" "%s"
-install -m 0755 "%s" "%s"
-`,
-    filepath.Join(source, "peerswapd"), filepath.Join(source, "pscli"), filepath.Join(source, "psweb"),
-    source,
-    dest,
-    filepath.Join(source, "peerswapd"), filepath.Join(dest, "peerswapd"),
-    filepath.Join(source, "pscli"), filepath.Join(dest, "pscli"),
-    filepath.Join(source, "psweb"), filepath.Join(dest, "psweb"))
+mkdir -p "%[1]s"
+install -m 0755 "$source/peerswapd" "%[1]s/peerswapd"
+install -m 0755 "$source/pscli" "%[1]s/pscli"
+install -m 0755 "$source/psweb" "%[1]s/psweb"
+`, dest, peerswapVersion, peerswapAssetsArch)
   if _, err := runSystemd(ctx, "/bin/sh", "-c", script); err != nil {
     return err
   }
@@ -297,43 +298,6 @@ install -m 0755 "%s" "%s"
     return nil
   }
   return fmt.Errorf("peerswap binaries missing in %s", dest)
-}
-
-func peerswapRepoAssetsPath() (string, error) {
-  candidates := []string{
-    filepath.Join("/root", "brln-os-light", "lightningos-light", "assets", "binaries", "peerswap", peerswapVersion, peerswapAssetsArch),
-    filepath.Join("/root", "lightningos-light", "assets", "binaries", "peerswap", peerswapVersion, peerswapAssetsArch),
-  }
-  patterns := []string{
-    filepath.Join("/home", "*", "brln-os-light", "lightningos-light", "assets", "binaries", "peerswap", peerswapVersion, peerswapAssetsArch),
-    filepath.Join("/home", "*", "lightningos-light", "assets", "binaries", "peerswap", peerswapVersion, peerswapAssetsArch),
-  }
-  for _, candidate := range candidates {
-    if peerswapAssetsPresent(candidate) {
-      return candidate, nil
-    }
-  }
-  for _, pattern := range patterns {
-    matches, err := filepath.Glob(pattern)
-    if err != nil {
-      continue
-    }
-    for _, match := range matches {
-      if peerswapAssetsPresent(match) {
-        return match, nil
-      }
-    }
-  }
-  return "", fmt.Errorf("peerswap binaries not found under /home/* or /root; expected %s", filepath.Join("brln-os-light", "lightningos-light", "assets", "binaries", "peerswap", peerswapVersion, peerswapAssetsArch))
-}
-
-func peerswapAssetsPresent(root string) bool {
-  if root == "" {
-    return false
-  }
-  return fileExists(filepath.Join(root, "peerswapd")) &&
-    fileExists(filepath.Join(root, "pscli")) &&
-    fileExists(filepath.Join(root, "psweb"))
 }
 
 func ensurePeerswapConfig(ctx context.Context, paths peerswapPaths) error {
