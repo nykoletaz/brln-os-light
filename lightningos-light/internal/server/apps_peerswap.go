@@ -536,6 +536,7 @@ Wants=network-online.target
 Type=simple
 User=%s
 Group=%s
+SupplementaryGroups=lnd
 Environment=HOME=/home/%s
 WorkingDirectory=/home/%s
 ExecStart=%s
@@ -557,6 +558,7 @@ Wants=network-online.target
 Type=simple
 User=%s
 Group=%s
+SupplementaryGroups=lnd
 Environment=HOME=/home/%s
 WorkingDirectory=/home/%s
 ExecStart=%s
