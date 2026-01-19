@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getHealth } from '../api'
+import { getHealth, getLndConfig, getLndStatus } from '../api'
 
 const statusColors: Record<string, string> = {
   OK: 'bg-glow/20 text-glow border-glow/40',
@@ -15,6 +15,8 @@ type TopbarProps = {
 export default function Topbar({ onMenuToggle, menuOpen }: TopbarProps) {
   const [status, setStatus] = useState('...')
   const [issues, setIssues] = useState<Array<{ component?: string; level?: string; message?: string }>>([])
+  const [nodeAlias, setNodeAlias] = useState('')
+  const [nodePubkey, setNodePubkey] = useState('')
 
   useEffect(() => {
     let mounted = true
@@ -38,6 +40,35 @@ export default function Topbar({ onMenuToggle, menuOpen }: TopbarProps) {
       clearInterval(timer)
     }
   }, [])
+
+  useEffect(() => {
+    let mounted = true
+    const load = async () => {
+      const [statusRes, configRes] = await Promise.allSettled([getLndStatus(), getLndConfig()])
+      if (!mounted) return
+      if (statusRes.status === 'fulfilled') {
+        const pubkey = typeof statusRes.value?.pubkey === 'string' ? statusRes.value.pubkey.trim() : ''
+        setNodePubkey(pubkey)
+      }
+      if (configRes.status === 'fulfilled') {
+        const alias = typeof configRes.value?.current?.alias === 'string' ? configRes.value.current.alias.trim() : ''
+        setNodeAlias(alias)
+      }
+    }
+
+    load()
+    const timer = setInterval(load, 30000)
+    return () => {
+      mounted = false
+      clearInterval(timer)
+    }
+  }, [])
+
+  const resolvedNodeLabel = nodeAlias || nodePubkey
+  const compactPubkey = nodePubkey.length > 20
+    ? `${nodePubkey.slice(0, 12)}...${nodePubkey.slice(-6)}`
+    : nodePubkey
+  const displayNodeLabel = nodeAlias || compactPubkey
 
   return (
     <header className="px-6 lg:px-12 pt-8">
@@ -72,6 +103,11 @@ export default function Topbar({ onMenuToggle, menuOpen }: TopbarProps) {
         <div>
           <p className="text-sm uppercase tracking-[0.3em] text-fog/50">Status overview</p>
           <h1 className="text-3xl lg:text-4xl font-semibold">LightningOS Control Center</h1>
+          {displayNodeLabel && (
+            <p className="mt-2 text-sm text-fog/60" title={resolvedNodeLabel}>
+              Node: {displayNodeLabel}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-4">
           <div className={`px-4 py-2 rounded-full border text-sm ${statusColors[status] || 'bg-white/10 border-white/20'}`}>
