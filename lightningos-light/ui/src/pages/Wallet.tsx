@@ -559,7 +559,8 @@ export default function Wallet() {
 
       <div className="section-card">
         <h3 className="text-lg font-semibold">Recent activity</h3>
-        <div className="mt-4 space-y-2 text-sm">
+        <div className="mt-4 max-h-[360px] overflow-y-auto pr-2">
+          <div className="space-y-2 text-sm">
           {summaryError ? (
             <p className="text-fog/60">Activity unavailable until LND is reachable.</p>
           ) : orderedActivity.length ? orderedActivity.map((item: any, idx: number) => {
@@ -586,6 +587,7 @@ export default function Wallet() {
           }) : (
             <p className="text-fog/60">No recent activity yet.</p>
           )}
+          </div>
         </div>
       </div>
     </section>
