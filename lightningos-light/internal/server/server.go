@@ -23,6 +23,7 @@ type Server struct {
   db     *pgxpool.Pool
   notifier *Notifier
   notifierErr string
+  chat *ChatService
   reports *reports.Service
   reportsErr string
   reportsOnce sync.Once
@@ -32,16 +33,21 @@ type Server struct {
 }
 
 func New(cfg *config.Config, logger *log.Logger) *Server {
-  return &Server{
+  srv := &Server{
     cfg:    cfg,
     logger: logger,
     lnd:    lndclient.New(cfg, logger),
   }
+  srv.chat = NewChatService(srv.lnd, logger)
+  return srv
 }
 
 func (s *Server) Run() error {
   s.initNotifications()
   s.initReports()
+  if s.chat != nil {
+    s.chat.Start()
+  }
 
   addr := fmt.Sprintf("%s:%d", s.cfg.Server.Host, s.cfg.Server.Port)
 

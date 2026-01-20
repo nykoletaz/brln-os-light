@@ -6,6 +6,7 @@ import Reports from './pages/Reports'
 import Wizard from './pages/Wizard'
 import Wallet from './pages/Wallet'
 import LightningOps from './pages/LightningOps'
+import Chat from './pages/Chat'
 import Disks from './pages/Disks'
 import Logs from './pages/Logs'
 import BitcoinRemote from './pages/BitcoinRemote'
@@ -82,6 +83,7 @@ export default function App() {
       { key: 'reports', label: 'Reports', element: <Reports /> },
       { key: 'wallet', label: 'Wallet', element: <Wallet /> },
       { key: 'lightning-ops', label: 'Lightning Ops', element: <LightningOps /> },
+      { key: 'chat', label: 'Chat', element: <Chat /> },
       { key: 'lnd', label: 'LND Config', element: <LndConfig /> },
       { key: 'apps', label: 'Apps', element: <AppStore /> },
       { key: 'bitcoin', label: 'Bitcoin Remote', element: <BitcoinRemote /> },

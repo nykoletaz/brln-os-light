@@ -123,6 +123,12 @@ export const updateChannelFees = (payload: {
   inbound_fee_rate_ppm?: number
 }) => request('/api/lnops/channel/fees', { method: 'POST', body: JSON.stringify(payload) })
 
+export const getChatMessages = (peerPubkey: string, limit = 200) =>
+  request(`/api/chat/messages?peer_pubkey=${encodeURIComponent(peerPubkey)}&limit=${limit}`)
+
+export const sendChatMessage = (payload: { peer_pubkey: string; message: string }) =>
+  request('/api/chat/send', { method: 'POST', body: JSON.stringify(payload) })
+
 export const getNotifications = (limit = 200) =>
   request(`/api/notifications?limit=${limit}`)
 

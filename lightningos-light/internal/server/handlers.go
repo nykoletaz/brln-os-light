@@ -1445,6 +1445,80 @@ func (s *Server) handleLNChannelFees(w http.ResponseWriter, r *http.Request) {
   })
 }
 
+func (s *Server) handleChatMessages(w http.ResponseWriter, r *http.Request) {
+  if s.chat == nil {
+    writeError(w, http.StatusServiceUnavailable, "chat unavailable")
+    return
+  }
+  peerPubkey := strings.TrimSpace(r.URL.Query().Get("peer_pubkey"))
+  if peerPubkey == "" {
+    writeError(w, http.StatusBadRequest, "peer_pubkey required")
+    return
+  }
+  if !isValidPubkeyHex(peerPubkey) {
+    writeError(w, http.StatusBadRequest, "invalid peer_pubkey")
+    return
+  }
+  limit := chatMessageLimitDefault
+  if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+    if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+      limit = parsed
+    }
+  }
+  items, err := s.chat.Messages(peerPubkey, limit)
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, "failed to load chat messages")
+    return
+  }
+  writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
+  if s.chat == nil {
+    writeError(w, http.StatusServiceUnavailable, "chat unavailable")
+    return
+  }
+  var req struct {
+    PeerPubkey string `json:"peer_pubkey"`
+    Message string `json:"message"`
+  }
+  if err := readJSON(r, &req); err != nil {
+    writeError(w, http.StatusBadRequest, "invalid json")
+    return
+  }
+  peerPubkey := strings.TrimSpace(req.PeerPubkey)
+  if peerPubkey == "" {
+    writeError(w, http.StatusBadRequest, "peer_pubkey required")
+    return
+  }
+  if !isValidPubkeyHex(peerPubkey) {
+    writeError(w, http.StatusBadRequest, "invalid peer_pubkey")
+    return
+  }
+  message := strings.TrimSpace(req.Message)
+  if err := validateChatMessage(message); err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
+
+  ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+  defer cancel()
+
+  msg, err := s.chat.SendMessage(ctx, peerPubkey, message)
+  if err != nil {
+    detail := lndRPCErrorMessage(err)
+    if isTimeoutError(err) {
+      detail = lndStatusMessage(err)
+    }
+    if detail == "" || detail == "LND error" {
+      detail = "Keysend failed"
+    }
+    writeError(w, http.StatusInternalServerError, detail)
+    return
+  }
+  writeJSON(w, http.StatusOK, msg)
+}
+
 type lndUserConf struct {
   Alias string
   Color string

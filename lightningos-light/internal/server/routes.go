@@ -79,6 +79,11 @@ func (s *Server) routes() http.Handler {
     r.Post("/channel/fees", s.handleLNUpdateFees)
   })
 
+  r.Route("/api/chat", func(r chi.Router) {
+    r.Get("/messages", s.handleChatMessages)
+    r.Post("/send", s.handleChatSend)
+  })
+
   r.HandleFunc("/terminal", s.handleTerminalProxy)
   r.HandleFunc("/terminal/ws", s.handleTerminalProxy)
   r.HandleFunc("/terminal/*", s.handleTerminalProxy)
