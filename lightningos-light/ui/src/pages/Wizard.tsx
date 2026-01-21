@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   createWalletSeed,
   initWallet,
@@ -8,6 +9,7 @@ import {
 } from '../api'
 
 export default function Wizard() {
+  const { t } = useTranslation()
   const [step, setStep] = useState(1)
   const [rpcUser, setRpcUser] = useState('')
   const [rpcPass, setRpcPass] = useState('')
@@ -37,7 +39,7 @@ export default function Wizard() {
   const syncLabel = (info: any) => {
     const progress = info?.verification_progress ?? info?.verificationprogress
     if (typeof progress !== 'number') {
-      return 'n/a'
+      return t('common.na')
     }
     return `${(progress * 100).toFixed(2)}%`
   }
@@ -45,19 +47,19 @@ export default function Wizard() {
   const formatBitcoinInfo = (info: any, rpcOk?: boolean) => {
     const ok = rpcOk ?? info?.rpc_ok ?? false
     if (!ok) {
-      return 'RPC validation failed. Check credentials.'
+      return t('wizard.rpcValidationFailed')
     }
     if (!info) {
-      return 'RPC OK.'
+      return t('wizard.rpcOk')
     }
     if (typeof info.blocks === 'number' && info.chain) {
-      return `RPC OK. ${info.chain} @ ${info.blocks} (${syncLabel(info)})`
+      return t('wizard.rpcOkWithInfo', { chain: info.chain, blocks: info.blocks, sync: syncLabel(info) })
     }
-    return 'RPC OK.'
+    return t('wizard.rpcOk')
   }
 
   const handleBitcoin = async () => {
-    setStatus('Testing connection...')
+    setStatus(t('wizard.testingConnection'))
     setStatusTone('warn')
     try {
       const res: any = await postBitcoinRemote({ rpcuser: rpcUser, rpcpass: rpcPass })
@@ -73,55 +75,55 @@ export default function Wizard() {
         .catch(() => null)
       next()
     } catch (err: any) {
-      setStatus(err?.message || 'Failed to validate RPC. Check credentials.')
+      setStatus(err?.message || t('wizard.rpcValidationFailedRetry'))
       setStatusTone('error')
     }
   }
 
   const handleGenerateSeed = async () => {
-    setStatus('Generating seed...')
+    setStatus(t('wizard.generatingSeed'))
     setStatusTone('warn')
     try {
       const res = await createWalletSeed()
       setSeedWords(res.seed_words || [])
-      setStatus('Seed generated. Write it down.')
+      setStatus(t('wizard.seedGenerated'))
       setStatusTone('success')
     } catch (err: any) {
-      setStatus(err?.message || 'Seed generation failed.')
+      setStatus(err?.message || t('wizard.seedGenerationFailed'))
       setStatusTone('error')
     }
   }
 
   const handleInitWallet = async () => {
     if (!walletPassword || walletPassword !== walletPasswordConfirm) {
-      setStatus('Wallet password mismatch.')
+      setStatus(t('wizard.passwordMismatch'))
       setStatusTone('error')
       return
     }
 
     const words = walletMode === 'create' ? seedWords : seedInput.trim().split(/\s+/)
     if (words.length < 12) {
-      setStatus('Seed words invalid.')
+      setStatus(t('wizard.seedInvalid'))
       setStatusTone('error')
       return
     }
     if (walletMode === 'create' && !ackSeed) {
-      setStatus('Confirm that you wrote down the seed.')
+      setStatus(t('wizard.confirmSeed'))
       setStatusTone('error')
       return
     }
 
-    setStatus('Initializing wallet...')
+    setStatus(t('wizard.initializingWallet'))
     setStatusTone('warn')
     try {
       await initWallet({ wallet_password: walletPassword, seed_words: words })
-      setStatus('Wallet initialized. Auto-unlock configured.')
+      setStatus(t('wizard.walletInitialized'))
       setStatusTone('success')
       setStep(4)
     } catch (err: any) {
-      const message = err?.message || 'Wallet init failed.'
+      const message = err?.message || t('wizard.walletInitFailed')
       if (message.toLowerCase().includes('wallet already exists')) {
-        setStatus('Wallet already exists. Unlock it in the next step.')
+        setStatus(t('wizard.walletExists'))
         setStatusTone('warn')
         setStep(3)
         return
@@ -133,19 +135,19 @@ export default function Wizard() {
 
   const handleUnlock = async () => {
     if (!unlockPass) {
-      setStatus('Enter wallet password.')
+      setStatus(t('wizard.enterWalletPassword'))
       setStatusTone('error')
       return
     }
-    setStatus('Unlocking...')
+    setStatus(t('wizard.unlocking'))
     setStatusTone('warn')
     try {
       await unlockWallet({ wallet_password: unlockPass })
-      setStatus('Unlocked.')
+      setStatus(t('wizard.unlocked'))
       setStatusTone('success')
       next()
     } catch (err: any) {
-      setStatus(err?.message || 'Unlock failed.')
+      setStatus(err?.message || t('wizard.unlockFailed'))
       setStatusTone('error')
     }
   }
@@ -153,8 +155,8 @@ export default function Wizard() {
   return (
     <section className="space-y-6">
       <div className="section-card">
-        <h2 className="text-2xl font-semibold">Welcome wizard</h2>
-        <p className="text-fog/60 mt-2">Follow the guided setup for Bitcoin remote, LND wallet, and unlock.</p>
+        <h2 className="text-2xl font-semibold">{t('wizard.title')}</h2>
+        <p className="text-fog/60 mt-2">{t('wizard.subtitle')}</p>
         {status && (
           <p className={`mt-4 text-sm ${
             statusTone === 'success'
@@ -170,48 +172,48 @@ export default function Wizard() {
 
       {step === 1 && (
         <div className="section-card space-y-4">
-          <h3 className="text-lg font-semibold">Step 1: Connect to Bitcoin remote</h3>
+          <h3 className="text-lg font-semibold">{t('wizard.step1Title')}</h3>
           <div className="grid gap-4 lg:grid-cols-3 text-sm text-fog/60">
             <div>
-              <p className="uppercase text-xs">RPC Host</p>
+              <p className="uppercase text-xs">{t('wizard.rpcHost')}</p>
               <p>{bitcoinHost || 'bitcoin.br-ln.com:8085'}</p>
             </div>
             <div>
-              <p className="uppercase text-xs">ZMQ Raw Block</p>
+              <p className="uppercase text-xs">{t('wizard.zmqRawBlock')}</p>
               <p>{zmqBlock || 'tcp://bitcoin.br-ln.com:28332'}</p>
             </div>
             <div>
-              <p className="uppercase text-xs">ZMQ Raw Tx</p>
+              <p className="uppercase text-xs">{t('wizard.zmqRawTx')}</p>
               <p>{zmqTx || 'tcp://bitcoin.br-ln.com:28333'}</p>
             </div>
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
-            <input className="input-field" placeholder="RPC user" value={rpcUser} onChange={(e) => setRpcUser(e.target.value)} />
-            <input className="input-field" placeholder="RPC password" type="password" value={rpcPass} onChange={(e) => setRpcPass(e.target.value)} />
+            <input className="input-field" placeholder={t('wizard.rpcUser')} value={rpcUser} onChange={(e) => setRpcUser(e.target.value)} />
+            <input className="input-field" placeholder={t('wizard.rpcPassword')} type="password" value={rpcPass} onChange={(e) => setRpcPass(e.target.value)} />
           </div>
-          <button className="btn-primary" onClick={handleBitcoin}>Test and save</button>
+          <button className="btn-primary" onClick={handleBitcoin}>{t('wizard.testAndSave')}</button>
         </div>
       )}
 
       {step === 2 && (
         <div className="section-card space-y-4">
-          <h3 className="text-lg font-semibold">Step 2: LND wallet</h3>
+          <h3 className="text-lg font-semibold">{t('wizard.step2Title')}</h3>
           <div className="flex gap-3">
-            <button className={walletMode === 'create' ? 'btn-primary' : 'btn-secondary'} onClick={() => setWalletMode('create')}>Create new</button>
-            <button className={walletMode === 'import' ? 'btn-primary' : 'btn-secondary'} onClick={() => setWalletMode('import')}>Import existing</button>
+            <button className={walletMode === 'create' ? 'btn-primary' : 'btn-secondary'} onClick={() => setWalletMode('create')}>{t('wizard.createNew')}</button>
+            <button className={walletMode === 'import' ? 'btn-primary' : 'btn-secondary'} onClick={() => setWalletMode('import')}>{t('wizard.importExisting')}</button>
           </div>
           <div className="grid gap-4 lg:grid-cols-2">
-            <input className="input-field" placeholder="Wallet password" type="password" value={walletPassword} onChange={(e) => setWalletPassword(e.target.value)} />
-            <input className="input-field" placeholder="Confirm password" type="password" value={walletPasswordConfirm} onChange={(e) => setWalletPasswordConfirm(e.target.value)} />
+            <input className="input-field" placeholder={t('wizard.walletPassword')} type="password" value={walletPassword} onChange={(e) => setWalletPassword(e.target.value)} />
+            <input className="input-field" placeholder={t('wizard.confirmPassword')} type="password" value={walletPasswordConfirm} onChange={(e) => setWalletPasswordConfirm(e.target.value)} />
           </div>
-          <p className="text-xs text-fog/60">Password is required to initialize and unlock the wallet. Seed generation does not require it.</p>
+          <p className="text-xs text-fog/60">{t('wizard.passwordHint')}</p>
 
           {walletMode === 'create' ? (
             <div className="space-y-3">
-              <button className="btn-secondary" onClick={handleGenerateSeed}>Generate seed</button>
+              <button className="btn-secondary" onClick={handleGenerateSeed}>{t('wizard.generateSeed')}</button>
               {seedWords.length > 0 && (
                 <div className="bg-ink/50 rounded-2xl p-4 text-sm">
-                  <p className="text-brass text-xs uppercase">Seed words (write once)</p>
+                  <p className="text-brass text-xs uppercase">{t('wizard.seedWordsTitle')}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {seedWords.map((word: string, idx: number) => (
                       <span key={word + idx} className="px-2 py-1 rounded-xl bg-white/5 border border-white/10">{word}</span>
@@ -219,16 +221,16 @@ export default function Wizard() {
                   </div>
                   <label className="mt-4 flex items-center gap-2 text-xs text-fog/70">
                     <input type="checkbox" checked={ackSeed} onChange={(e) => setAckSeed(e.target.checked)} />
-                    I wrote down the 24 words and understand they cannot be recovered.
+                    {t('wizard.ackSeed')}
                   </label>
                 </div>
               )}
-              <button className="btn-primary" onClick={handleInitWallet}>Initialize wallet</button>
+              <button className="btn-primary" onClick={handleInitWallet}>{t('wizard.initializeWallet')}</button>
             </div>
           ) : (
             <div className="space-y-3">
-              <textarea className="input-field min-h-[120px]" placeholder="Paste 24 seed words" value={seedInput} onChange={(e) => setSeedInput(e.target.value)} />
-              <button className="btn-primary" onClick={handleInitWallet}>Import and initialize</button>
+              <textarea className="input-field min-h-[120px]" placeholder={t('wizard.pasteSeedWords')} value={seedInput} onChange={(e) => setSeedInput(e.target.value)} />
+              <button className="btn-primary" onClick={handleInitWallet}>{t('wizard.importAndInitialize')}</button>
             </div>
           )}
         </div>
@@ -236,17 +238,17 @@ export default function Wizard() {
 
       {step === 3 && (
         <div className="section-card space-y-4">
-          <h3 className="text-lg font-semibold">Step 3: Unlock existing wallet</h3>
-          <input className="input-field" placeholder="Wallet password" type="password" value={unlockPass} onChange={(e) => setUnlockPass(e.target.value)} />
-          <button className="btn-primary" onClick={handleUnlock}>Unlock</button>
+          <h3 className="text-lg font-semibold">{t('wizard.step3Title')}</h3>
+          <input className="input-field" placeholder={t('wizard.walletPassword')} type="password" value={unlockPass} onChange={(e) => setUnlockPass(e.target.value)} />
+          <button className="btn-primary" onClick={handleUnlock}>{t('wizard.unlock')}</button>
         </div>
       )}
 
       {step === 4 && (
         <div className="section-card space-y-4">
-          <h3 className="text-lg font-semibold">Step 4: Finish</h3>
-          <p className="text-fog/60">Setup complete. Jump to your dashboard.</p>
-          <a className="btn-primary inline-flex" href="#dashboard">Go to Dashboard</a>
+          <h3 className="text-lg font-semibold">{t('wizard.step4Title')}</h3>
+          <p className="text-fog/60">{t('wizard.finishMessage')}</p>
+          <a className="btn-primary inline-flex" href="#dashboard">{t('wizard.goToDashboard')}</a>
         </div>
       )}
     </section>

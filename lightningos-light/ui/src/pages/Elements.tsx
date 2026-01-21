@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getElementsMainchain, getElementsStatus, setElementsMainchain } from '../api'
+import { getLocale } from '../i18n'
 
 type ElementsStatus = {
   installed: boolean
@@ -47,6 +49,8 @@ const formatPercent = (value?: number) => {
 }
 
 export default function Elements() {
+  const { t, i18n } = useTranslation()
+  const locale = getLocale(i18n.language)
   const [status, setStatus] = useState<ElementsStatus | null>(null)
   const [message, setMessage] = useState('')
   const [mainchain, setMainchain] = useState<ElementsMainchain | null>(null)
@@ -60,7 +64,7 @@ export default function Elements() {
         setMessage('')
       })
       .catch((err) => {
-        setMessage(err instanceof Error ? err.message : 'Failed to load Elements status.')
+        setMessage(err instanceof Error ? err.message : t('elements.loadStatusFailed'))
       })
     getElementsMainchain()
       .then((data: ElementsMainchain) => {
@@ -68,7 +72,7 @@ export default function Elements() {
         setMainchainMessage('')
       })
       .catch((err) => {
-        setMainchainMessage(err instanceof Error ? err.message : 'Failed to load Elements mainchain.')
+        setMainchainMessage(err instanceof Error ? err.message : t('elements.loadMainchainFailed'))
       })
   }
 
@@ -89,7 +93,7 @@ export default function Elements() {
   const rpcReady = Boolean(status?.status === 'running' && status?.rpc_ok)
   const statusClass = statusStyles[status?.status || 'unknown'] || statusStyles.unknown
   const mainchainSource = mainchain?.source || status?.mainchain_source || 'remote'
-  const mainchainSourceLabel = mainchainSource === 'local' ? 'Local' : 'Remote'
+  const mainchainSourceLabel = mainchainSource === 'local' ? t('common.local') : t('common.remote')
   const mainchainHost = mainchain?.rpchost || status?.mainchain_rpchost || ''
   const mainchainPort = mainchain?.rpcport || status?.mainchain_rpcport || 0
   const mainchainRPC = mainchainHost ? `${mainchainHost}${mainchainPort ? `:${mainchainPort}` : ''}` : '-'
@@ -99,15 +103,16 @@ export default function Elements() {
   const handleToggleMainchain = async () => {
     if (!mainchain || mainchainBusy || !canToggleMainchain) return
     const next = mainchain.source === 'remote' ? 'local' : 'remote'
+    const targetLabel = next === 'local' ? t('common.local') : t('common.remote')
     setMainchainBusy(true)
-    setMainchainMessage(`Switching to ${next} Bitcoin...`)
+    setMainchainMessage(t('elements.switchingToBitcoin', { target: targetLabel }))
     try {
       await setElementsMainchain({ source: next })
-      setMainchainMessage(`Elements is now using ${next} Bitcoin. Restarting service...`)
+      setMainchainMessage(t('elements.switchedBitcoin', { target: targetLabel }))
       const updated = await getElementsMainchain()
       setMainchain(updated)
     } catch (err) {
-      setMainchainMessage(err instanceof Error ? err.message : 'Failed to switch mainchain source.')
+      setMainchainMessage(err instanceof Error ? err.message : t('elements.switchFailed'))
     } finally {
       setMainchainBusy(false)
     }
@@ -118,12 +123,12 @@ export default function Elements() {
       <div className="section-card space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-semibold">Elements</h2>
-            <p className="text-fog/60">Liquid mainnet sync and node health.</p>
-            <p className="text-xs text-fog/50 mt-2">CLI: use the losop user to manage Elements.</p>
+            <h2 className="text-2xl font-semibold">{t('elements.title')}</h2>
+            <p className="text-fog/60">{t('elements.subtitle')}</p>
+            <p className="text-xs text-fog/50 mt-2">{t('elements.cliHint')}</p>
           </div>
           <span className={`text-xs uppercase tracking-wide px-3 py-1 rounded-full ${statusClass}`}>
-            {status?.status?.replace('_', ' ') || 'unknown'}
+            {status?.status?.replace('_', ' ') || t('common.unknown')}
           </span>
         </div>
         {message && <p className="text-sm text-brass">{message}</p>}
@@ -131,9 +136,9 @@ export default function Elements() {
 
       {!installed && (
         <div className="section-card space-y-3">
-          <h3 className="text-lg font-semibold">Elements not installed</h3>
-          <p className="text-fog/60">Install Elements in the App Store to enable local monitoring.</p>
-          <a className="btn-primary inline-flex items-center" href="#apps">Open App Store</a>
+          <h3 className="text-lg font-semibold">{t('elements.notInstalledTitle')}</h3>
+          <p className="text-fog/60">{t('elements.notInstalledBody')}</p>
+          <a className="btn-primary inline-flex items-center" href="#apps">{t('elements.openAppStore')}</a>
         </div>
       )}
 
@@ -141,13 +146,13 @@ export default function Elements() {
         <div className="grid gap-6 lg:grid-cols-2">
           <div className="section-card space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Sync</h3>
-              <span className="text-xs text-fog/60">{syncing ? 'Syncing' : 'Status'}</span>
+              <h3 className="text-lg font-semibold">{t('elements.sync')}</h3>
+              <span className="text-xs text-fog/60">{syncing ? t('elements.syncing') : t('common.status')}</span>
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-fog/60">{syncing ? 'Downloading blocks' : 'Verification progress'}</span>
+                <span className="text-fog/60">{syncing ? t('elements.downloadingBlocks') : t('elements.verificationProgress')}</span>
                 <span className="font-semibold text-fog">{progress}%</span>
               </div>
               <div className="h-3 rounded-full bg-white/10 overflow-hidden">
@@ -157,49 +162,49 @@ export default function Elements() {
 
             <div className="grid gap-3 text-sm text-fog/70">
               <div className="flex items-center justify-between">
-                <span>Blocks</span>
-                <span className="text-fog">{status?.blocks?.toLocaleString() || '-'}</span>
+                <span>{t('elements.blocks')}</span>
+                <span className="text-fog">{status?.blocks?.toLocaleString(locale) || '-'}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span>Headers</span>
-                <span className="text-fog">{status?.headers?.toLocaleString() || '-'}</span>
+                <span>{t('elements.headers')}</span>
+                <span className="text-fog">{status?.headers?.toLocaleString(locale) || '-'}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span>Disk usage</span>
+                <span>{t('elements.diskUsage')}</span>
                 <span className="text-fog">{formatGB(status?.size_on_disk)}</span>
               </div>
             </div>
           </div>
 
           <div className="section-card space-y-4">
-            <h3 className="text-lg font-semibold">Node status</h3>
+            <h3 className="text-lg font-semibold">{t('elements.nodeStatus')}</h3>
             <div className="grid gap-3 text-sm text-fog/70">
               <div className="flex items-center justify-between">
-                <span>RPC status</span>
-                <span className={rpcReady ? 'text-emerald-200' : 'text-fog'}>{rpcReady ? 'OK' : 'Offline'}</span>
+                <span>{t('elements.rpcStatus')}</span>
+                <span className={rpcReady ? 'text-emerald-200' : 'text-fog'}>{rpcReady ? t('common.ok') : t('common.offline')}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span>Network</span>
+                <span>{t('elements.network')}</span>
                 <span className="text-fog">{status?.chain || '-'}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span>Peers</span>
+                <span>{t('elements.peers')}</span>
                 <span className="text-fog">{status?.peers ?? '-'}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span>Version</span>
+                <span>{t('elements.version')}</span>
                 <span className="text-fog">{status?.subversion || status?.version || '-'}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span>Mainchain source</span>
+                <span>{t('elements.mainchainSource')}</span>
                 <span className="text-fog">{mainchainSourceLabel}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span>Mainchain RPC</span>
+                <span>{t('elements.mainchainRpc')}</span>
                 <span className="text-fog">{mainchainRPC}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span>Data dir</span>
+                <span>{t('elements.dataDir')}</span>
                 <span className="text-fog">{status?.data_dir || '-'}</span>
               </div>
             </div>
@@ -207,10 +212,10 @@ export default function Elements() {
             <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-xs text-fog/60">
-                  {syncing ? 'Syncing Liquid blocks. This may take hours or days.' : 'Node is ready for Liquid services.'}
+                  {syncing ? t('elements.syncingNote') : t('elements.readyNote')}
                 </p>
                 {!localReady && mainchainSource === 'remote' && (
-                  <p className="text-xs text-fog/50 mt-2">Local Bitcoin must be fully synced to switch.</p>
+                  <p className="text-xs text-fog/50 mt-2">{t('elements.localBitcoinRequired')}</p>
                 )}
               </div>
               <button
@@ -218,13 +223,13 @@ export default function Elements() {
                 onClick={handleToggleMainchain}
                 type="button"
                 disabled={mainchainBusy || !canToggleMainchain}
-                aria-label="Toggle mainchain source"
+                aria-label={t('elements.toggleMainchain')}
               >
                 <span
                   className={`absolute top-1 h-7 w-14 rounded-full bg-glow shadow transition-all ${mainchainSource === 'local' ? 'left-[68px]' : 'left-[6px]'}`}
                 />
-                <span className={`relative z-10 flex-1 text-center text-xs ${mainchainSource === 'remote' ? 'text-ink' : 'text-fog/60'}`}>Remote</span>
-                <span className={`relative z-10 flex-1 text-center text-xs ${mainchainSource === 'local' ? 'text-ink' : 'text-fog/60'}`}>Local</span>
+                <span className={`relative z-10 flex-1 text-center text-xs ${mainchainSource === 'remote' ? 'text-ink' : 'text-fog/60'}`}>{t('common.remote')}</span>
+                <span className={`relative z-10 flex-1 text-center text-xs ${mainchainSource === 'local' ? 'text-ink' : 'text-fog/60'}`}>{t('common.local')}</span>
               </button>
             </div>
             {mainchainMessage && <p className="text-sm text-brass">{mainchainMessage}</p>}

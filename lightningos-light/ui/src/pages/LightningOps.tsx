@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { boostPeers, closeChannel, connectPeer, disconnectPeer, getLnChannelFees, getLnChannels, getLnPeers, getMempoolFees, openChannel, updateChannelFees } from '../api'
 
 type Channel = {
@@ -46,28 +47,8 @@ type Peer = {
   last_error_time?: number
 }
 
-const formatPing = (value: number) => {
-  if (!value || value <= 0) return 'n/a'
-  const ms = value / 1000
-  if (ms < 1000) return `${ms.toFixed(1)} ms`
-  return `${(ms / 1000).toFixed(1)} s`
-}
-
-const formatAge = (timestamp?: number) => {
-  if (!timestamp) return ''
-  const ageMs = Date.now() - timestamp * 1000
-  if (ageMs <= 0) return 'just now'
-  const seconds = Math.floor(ageMs / 1000)
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
-
 export default function LightningOps() {
+  const { t } = useTranslation()
   const [channels, setChannels] = useState<Channel[]>([])
   const [activeCount, setActiveCount] = useState(0)
   const [inactiveCount, setInactiveCount] = useState(0)
@@ -120,11 +101,32 @@ export default function LightningOps() {
   const [feeLoading, setFeeLoading] = useState(false)
   const [feeStatus, setFeeStatus] = useState('')
 
+  const formatPing = (value: number) => {
+    if (!value || value <= 0) return t('common.na')
+    const ms = value / 1000
+    if (ms < 1000) return t('lightningOps.pingMs', { value: ms.toFixed(1) })
+    return t('lightningOps.pingSeconds', { value: (ms / 1000).toFixed(1) })
+  }
+
+  const formatAge = (timestamp?: number) => {
+    if (!timestamp) return ''
+    const ageMs = Date.now() - timestamp * 1000
+    if (ageMs <= 0) return t('common.justNow')
+    const seconds = Math.floor(ageMs / 1000)
+    if (seconds < 60) return t('lightningOps.ageSeconds', { count: seconds })
+    const minutes = Math.floor(seconds / 60)
+    if (minutes < 60) return t('lightningOps.ageMinutes', { count: minutes })
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return t('lightningOps.ageHours', { count: hours })
+    const days = Math.floor(hours / 24)
+    return t('lightningOps.ageDays', { count: days })
+  }
+
   const ambossURL = (pubkey: string) => `https://amboss.space/node/${pubkey}`
 
   const load = async () => {
-    setStatus('Loading channels...')
-    setPeerListStatus('Loading peers...')
+    setStatus(t('lightningOps.loadingChannels'))
+    setPeerListStatus(t('lightningOps.loadingPeers'))
     const [channelsResult, peersResult] = await Promise.allSettled([
       getLnChannels(),
       getLnPeers()
@@ -140,7 +142,7 @@ export default function LightningOps() {
       setPendingChannels(Array.isArray(res?.pending_channels) ? res.pending_channels : [])
       setStatus('')
     } else {
-      const message = (channelsResult.reason as any)?.message || 'Failed to load channels.'
+      const message = (channelsResult.reason as any)?.message || t('lightningOps.loadChannelsFailed')
       setStatus(message)
     }
     if (peersResult.status === 'fulfilled') {
@@ -148,7 +150,7 @@ export default function LightningOps() {
       setPeers(Array.isArray(res?.peers) ? res.peers : [])
       setPeerListStatus('')
     } else {
-      const message = (peersResult.reason as any)?.message || 'Failed to load peers.'
+      const message = (peersResult.reason as any)?.message || t('lightningOps.loadPeersFailed')
       setPeerListStatus(message)
     }
   }
@@ -173,8 +175,8 @@ export default function LightningOps() {
       })
       .catch(() => {
         if (!mounted) return
-        setOpenFeeStatus('Fee suggestions unavailable.')
-        setCloseFeeStatus('Fee suggestions unavailable.')
+        setOpenFeeStatus(t('lightningOps.feeSuggestionsUnavailable'))
+        setCloseFeeStatus(t('lightningOps.feeSuggestionsUnavailable'))
       })
     return () => {
       mounted = false
@@ -195,7 +197,7 @@ export default function LightningOps() {
 
     let mounted = true
     setFeeLoading(true)
-    setFeeLoadStatus('Loading current fees...')
+    setFeeLoadStatus(t('lightningOps.loadingFees'))
     getLnChannelFees(feeChannelPoint)
       .then((res) => {
         if (!mounted) return
@@ -207,11 +209,11 @@ export default function LightningOps() {
         const inboundBase = Number(res?.inbound_base_msat || 0)
         const inboundRate = Number(res?.inbound_fee_rate_ppm || 0)
         setInboundEnabled(inboundBase !== 0 || inboundRate !== 0)
-        setFeeLoadStatus('Current fees loaded.')
+        setFeeLoadStatus(t('lightningOps.feesLoaded'))
       })
       .catch((err: any) => {
         if (!mounted) return
-        setFeeLoadStatus(err?.message || 'Failed to load fees.')
+        setFeeLoadStatus(err?.message || t('lightningOps.loadFeesFailed'))
       })
       .finally(() => {
         if (!mounted) return
@@ -277,72 +279,72 @@ export default function LightningOps() {
   const pendingStatusLabel = (status: string) => {
     switch (status) {
       case 'opening':
-        return 'Opening'
+        return t('lightningOps.statusOpening')
       case 'closing':
-        return 'Closing'
+        return t('lightningOps.statusClosing')
       case 'force_closing':
-        return 'Force closing'
+        return t('lightningOps.statusForceClosing')
       case 'waiting_close':
-        return 'Waiting close'
+        return t('lightningOps.statusWaitingClose')
       default:
         return status
     }
   }
 
   const handleConnectPeer = async () => {
-    setPeerStatus('Connecting...')
+    setPeerStatus(t('lightningOps.connectingPeer'))
     try {
       await connectPeer({ address: peerAddress, perm: !peerTemporary })
-      setPeerStatus('Peer connected.')
+      setPeerStatus(t('lightningOps.peerConnected'))
       setPeerAddress('')
       setPeerTemporary(false)
       load()
     } catch (err: any) {
-      setPeerStatus(err?.message || 'Peer connection failed.')
+      setPeerStatus(err?.message || t('lightningOps.peerConnectFailed'))
     }
   }
 
   const handleDisconnect = async (pubkey: string) => {
-    const confirmed = window.confirm('Disconnect this peer?')
+    const confirmed = window.confirm(t('lightningOps.disconnectConfirm'))
     if (!confirmed) return
-    setPeerActionStatus('Disconnecting peer...')
+    setPeerActionStatus(t('lightningOps.disconnectingPeer'))
     try {
       await disconnectPeer({ pubkey })
-      setPeerActionStatus('Peer disconnected.')
+      setPeerActionStatus(t('lightningOps.peerDisconnected'))
       load()
     } catch (err: any) {
-      setPeerActionStatus(err?.message || 'Disconnect failed.')
+      setPeerActionStatus(err?.message || t('lightningOps.disconnectFailed'))
     }
   }
 
   const handleBoostPeers = async () => {
     setBoostRunning(true)
-    setBoostStatus('Boosting peers (this can take a while)...')
+    setBoostStatus(t('lightningOps.boostingPeers'))
     try {
       const res = await boostPeers({ limit: 25 })
       const connected = res?.connected ?? 0
       const skipped = res?.skipped ?? 0
       const failed = res?.failed ?? 0
-      setBoostStatus(`Boost complete. Connected ${connected}, skipped ${skipped}, failed ${failed}.`)
+      setBoostStatus(t('lightningOps.boostComplete', { connected, skipped, failed }))
       load()
     } catch (err: any) {
-      setBoostStatus(err?.message || 'Boost failed.')
+      setBoostStatus(err?.message || t('lightningOps.boostFailed'))
     } finally {
       setBoostRunning(false)
     }
   }
 
   const handleOpenChannel = async () => {
-    setOpenStatus('Opening channel...')
+    setOpenStatus(t('lightningOps.openingChannel'))
     setOpenChannelPoint('')
     const localFunding = Number(openAmount || 0)
     const feeRate = Number(openFeeRate || 0)
     if (!openPeer.trim()) {
-      setOpenStatus('Peer address required.')
+      setOpenStatus(t('lightningOps.peerAddressRequired'))
       return
     }
     if (localFunding < 20000) {
-      setOpenStatus('Minimum channel size is 20000 sats.')
+      setOpenStatus(t('lightningOps.minimumChannelSize'))
       return
     }
     try {
@@ -353,13 +355,13 @@ export default function LightningOps() {
         sat_per_vbyte: feeRate > 0 ? feeRate : undefined,
         private: openPrivate
       })
-      setOpenStatus('Channel opening submitted.')
+      setOpenStatus(t('lightningOps.channelOpeningSubmitted'))
       setOpenChannelPoint(res?.channel_point || '')
       setOpenAmount('')
       setOpenCloseAddress('')
       load()
     } catch (err: any) {
-      setOpenStatus(err?.message || 'Channel open failed.')
+      setOpenStatus(err?.message || t('lightningOps.channelOpenFailed'))
     }
   }
 
@@ -370,36 +372,36 @@ export default function LightningOps() {
   }
 
   const handleCloseChannel = async () => {
-    setCloseStatus('Closing channel...')
+    setCloseStatus(t('lightningOps.closingChannel'))
     if (!closePoint) {
-      setCloseStatus('Select a channel to close.')
+      setCloseStatus(t('lightningOps.selectChannelToClose'))
       return
     }
     try {
       const feeRate = Number(closeFeeRate || 0)
       await closeChannel({ channel_point: closePoint, force: closeForce, sat_per_vbyte: feeRate > 0 ? feeRate : undefined })
-      setCloseStatus('Close initiated.')
+      setCloseStatus(t('lightningOps.closeInitiated'))
       load()
     } catch (err: any) {
-      setCloseStatus(err?.message || 'Close failed.')
+      setCloseStatus(err?.message || t('lightningOps.closeFailed'))
     }
   }
 
   const handleUpdateFees = async () => {
-    setFeeStatus('Updating fees...')
+    setFeeStatus(t('lightningOps.updatingFees'))
     const base = Number(baseFeeMsat || 0)
     const ppm = Number(feeRatePpm || 0)
     const delta = Number(timeLockDelta || 0)
     const inboundBase = Number(inboundBaseMsat || 0)
     const inboundRate = Number(inboundFeeRatePpm || 0)
     if (!feeScopeAll && !feeChannelPoint) {
-      setFeeStatus('Select a channel or apply to all.')
+      setFeeStatus(t('lightningOps.selectChannelOrAll'))
       return
     }
     const hasOutbound = base !== 0 || ppm !== 0 || delta !== 0
     const hasInbound = inboundEnabled && (inboundBase !== 0 || inboundRate !== 0)
     if (!hasOutbound && !hasInbound) {
-      setFeeStatus('Set at least one fee value.')
+      setFeeStatus(t('lightningOps.setAtLeastOneFee'))
       return
     }
     try {
@@ -413,10 +415,10 @@ export default function LightningOps() {
         inbound_base_msat: inboundBase,
         inbound_fee_rate_ppm: inboundRate
       })
-      setFeeStatus(res?.warning || 'Fees updated.')
+      setFeeStatus(res?.warning || t('lightningOps.feesUpdated'))
       load()
     } catch (err: any) {
-      setFeeStatus(err?.message || 'Fee update failed.')
+      setFeeStatus(err?.message || t('lightningOps.feeUpdateFailed'))
     }
   }
 
@@ -432,24 +434,24 @@ export default function LightningOps() {
       <div className="section-card">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-semibold">Lightning Ops</h2>
-            <p className="text-fog/60">Manage peers, channels, and routing fees.</p>
+            <h2 className="text-2xl font-semibold">{t('lightningOps.title')}</h2>
+            <p className="text-fog/60">{t('lightningOps.subtitle')}</p>
           </div>
           <div className="flex items-center gap-3">
             <div className="rounded-full border border-white/10 bg-ink/60 px-4 py-2 text-xs text-fog/70">
-              Active: <span className="text-fog">{activeCount}</span>
+              {t('lightningOps.active')}: <span className="text-fog">{activeCount}</span>
             </div>
             <div className="rounded-full border border-white/10 bg-ink/60 px-4 py-2 text-xs text-fog/70">
-              Inactive: <span className="text-fog">{inactiveCount}</span>
+              {t('lightningOps.inactive')}: <span className="text-fog">{inactiveCount}</span>
             </div>
             <div className="rounded-full border border-glow/30 bg-glow/10 px-4 py-2 text-xs text-glow">
-              Opening: <span className="text-fog">{pendingOpenCount}</span>
+              {t('lightningOps.opening')}: <span className="text-fog">{pendingOpenCount}</span>
             </div>
             <div className="rounded-full border border-ember/30 bg-ember/10 px-4 py-2 text-xs text-ember">
-              Closing: <span className="text-fog">{pendingCloseCount}</span>
+              {t('lightningOps.closing')}: <span className="text-fog">{pendingCloseCount}</span>
             </div>
             <button className="btn-secondary text-xs px-3 py-2" onClick={load}>
-              Refresh
+              {t('common.refresh')}
             </button>
           </div>
         </div>
@@ -458,27 +460,27 @@ export default function LightningOps() {
 
       <div className="section-card space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-lg font-semibold">Channels</h3>
+          <h3 className="text-lg font-semibold">{t('lightningOps.channels')}</h3>
           <div className="flex flex-wrap gap-2 text-xs">
-            <button className={filter === 'all' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('all')}>All</button>
-            <button className={filter === 'active' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('active')}>Active</button>
-            <button className={filter === 'inactive' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('inactive')}>Inactive</button>
+            <button className={filter === 'all' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('all')}>{t('common.all')}</button>
+            <button className={filter === 'active' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('active')}>{t('common.active')}</button>
+            <button className={filter === 'inactive' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('inactive')}>{t('common.inactive')}</button>
           </div>
         </div>
 
         {(pendingOpen.length > 0 || pendingClose.length > 0) && (
           <div className="rounded-2xl border border-brass/30 bg-brass/10 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h4 className="text-sm font-semibold text-brass">Pending channels</h4>
+              <h4 className="text-sm font-semibold text-brass">{t('lightningOps.pendingChannels')}</h4>
               <p className="text-xs text-brass">
-                Opening: <span className="text-glow">{pendingOpen.length}</span> | Closing:{' '}
+                {t('lightningOps.opening')}: <span className="text-glow">{pendingOpen.length}</span> | {t('lightningOps.closing')}{' '}
                 <span className="text-ember">{pendingClose.length}</span>
               </p>
             </div>
             <div className="mt-3 grid gap-3 lg:grid-cols-2">
               <div className="rounded-2xl border border-white/10 bg-ink/60 p-4">
                 <div className="flex items-center justify-between gap-2">
-                  <h5 className="text-xs font-semibold text-glow uppercase tracking-wide">Opening</h5>
+                  <h5 className="text-xs font-semibold text-glow uppercase tracking-wide">{t('lightningOps.opening')}</h5>
                   <span className="rounded-full px-2 py-1 text-[11px] bg-glow/20 text-glow">{pendingOpen.length}</span>
                 </div>
                 {pendingOpen.length ? (
@@ -497,35 +499,35 @@ export default function LightningOps() {
                                 {ch.peer_alias || ch.remote_pubkey}
                               </a>
                             ) : (
-                              <p className="text-xs text-fog/70">{ch.peer_alias || 'Unknown peer'}</p>
+                              <p className="text-xs text-fog/70">{ch.peer_alias || t('lightningOps.unknownPeer')}</p>
                             )}
-                            <p className="text-[11px] text-fog/50 break-all">Point: {ch.channel_point}</p>
+                            <p className="text-[11px] text-fog/50 break-all">{t('lightningOps.pointLabel', { point: ch.channel_point })}</p>
                           </div>
                           <span className="rounded-full px-2 py-1 text-[11px] bg-glow/20 text-glow">
                             {pendingStatusLabel(ch.status)}
                           </span>
                         </div>
                         <div className="mt-2 grid gap-2 lg:grid-cols-2 text-[11px] text-fog/60">
-                          <div>Capacity: <span className="text-fog">{ch.capacity_sat} sats</span></div>
+                          <div>{t('lightningOps.capacityLabel', { value: ch.capacity_sat })}</div>
                           {typeof ch.confirmations_until_active === 'number' && (
-                            <div>Confirmations: <span className="text-fog">{ch.confirmations_until_active}</span></div>
+                            <div>{t('lightningOps.confirmationsLabel', { count: ch.confirmations_until_active })}</div>
                           )}
                         </div>
                         {ch.private !== undefined && (
                           <p className="mt-2 text-[11px] text-fog/50">
-                            {ch.private ? 'Private channel' : 'Public channel'}
+                            {ch.private ? t('lightningOps.privateChannel') : t('lightningOps.publicChannel')}
                           </p>
                         )}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="mt-3 text-xs text-fog/60">No channels opening.</p>
+                  <p className="mt-3 text-xs text-fog/60">{t('lightningOps.noChannelsOpening')}</p>
                 )}
               </div>
               <div className="rounded-2xl border border-white/10 bg-ink/60 p-4">
                 <div className="flex items-center justify-between gap-2">
-                  <h5 className="text-xs font-semibold text-ember uppercase tracking-wide">Closing</h5>
+                  <h5 className="text-xs font-semibold text-ember uppercase tracking-wide">{t('lightningOps.closing')}</h5>
                   <span className="rounded-full px-2 py-1 text-[11px] bg-ember/20 text-ember">{pendingClose.length}</span>
                 </div>
                 {pendingClose.length ? (
@@ -544,28 +546,28 @@ export default function LightningOps() {
                                 {ch.peer_alias || ch.remote_pubkey}
                               </a>
                             ) : (
-                              <p className="text-xs text-fog/70">{ch.peer_alias || 'Unknown peer'}</p>
+                              <p className="text-xs text-fog/70">{ch.peer_alias || t('lightningOps.unknownPeer')}</p>
                             )}
-                            <p className="text-[11px] text-fog/50 break-all">Point: {ch.channel_point}</p>
+                            <p className="text-[11px] text-fog/50 break-all">{t('lightningOps.pointLabel', { point: ch.channel_point })}</p>
                           </div>
                           <span className="rounded-full px-2 py-1 text-[11px] bg-ember/20 text-ember">
                             {pendingStatusLabel(ch.status)}
                           </span>
                         </div>
                         <div className="mt-2 grid gap-2 lg:grid-cols-2 text-[11px] text-fog/60">
-                          <div>Capacity: <span className="text-fog">{ch.capacity_sat} sats</span></div>
+                          <div>{t('lightningOps.capacityLabel', { value: ch.capacity_sat })}</div>
                           {typeof ch.blocks_til_maturity === 'number' && (
-                            <div>Blocks to maturity: <span className="text-fog">{ch.blocks_til_maturity}</span></div>
+                            <div>{t('lightningOps.blocksToMaturity', { count: ch.blocks_til_maturity })}</div>
                           )}
                         </div>
                         {ch.closing_txid && (
-                          <p className="mt-2 text-[11px] text-fog/50 break-all">Closing tx: {ch.closing_txid}</p>
+                          <p className="mt-2 text-[11px] text-fog/50 break-all">{t('lightningOps.closingTx', { txid: ch.closing_txid })}</p>
                         )}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <p className="mt-3 text-xs text-fog/60">No channels closing.</p>
+                  <p className="mt-3 text-xs text-fog/60">{t('lightningOps.noChannelsClosing')}</p>
                 )}
               </div>
             </div>
@@ -573,36 +575,36 @@ export default function LightningOps() {
         )}
 
         <div className="grid gap-3 lg:grid-cols-4">
-          <input
-            className="input-field"
-            placeholder="Search alias, pubkey, or channel point"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <input
-            className="input-field"
-            placeholder="Min capacity (sats)"
-            type="number"
-            min={0}
-            value={minCapacity}
-            onChange={(e) => setMinCapacity(e.target.value)}
-          />
-          <select className="input-field" value={sortBy} onChange={(e) => setSortBy(e.target.value as any)}>
-            <option value="capacity">Sort by capacity</option>
-            <option value="local">Sort by local balance</option>
-            <option value="remote">Sort by remote balance</option>
-            <option value="alias">Sort by peer</option>
-          </select>
-          <div className="flex items-center gap-2">
-            <button className="btn-secondary text-xs px-3 py-2" onClick={() => setSortDir(sortDir === 'desc' ? 'asc' : 'desc')}>
-              {sortDir === 'desc' ? 'Desc' : 'Asc'}
-            </button>
-            <label className="flex items-center gap-2 text-xs text-fog/70">
-              <input type="checkbox" checked={showPrivate} onChange={(e) => setShowPrivate(e.target.checked)} />
-              Show private
-            </label>
+            <input
+              className="input-field"
+              placeholder={t('lightningOps.searchPlaceholder')}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <input
+              className="input-field"
+              placeholder={t('lightningOps.minCapacity')}
+              type="number"
+              min={0}
+              value={minCapacity}
+              onChange={(e) => setMinCapacity(e.target.value)}
+            />
+            <select className="input-field" value={sortBy} onChange={(e) => setSortBy(e.target.value as any)}>
+            <option value="capacity">{t('lightningOps.sortByCapacity')}</option>
+            <option value="local">{t('lightningOps.sortByLocal')}</option>
+            <option value="remote">{t('lightningOps.sortByRemote')}</option>
+            <option value="alias">{t('lightningOps.sortByPeer')}</option>
+            </select>
+            <div className="flex items-center gap-2">
+              <button className="btn-secondary text-xs px-3 py-2" onClick={() => setSortDir(sortDir === 'desc' ? 'asc' : 'desc')}>
+              {sortDir === 'desc' ? t('lightningOps.sortDesc') : t('lightningOps.sortAsc')}
+              </button>
+              <label className="flex items-center gap-2 text-xs text-fog/70">
+                <input type="checkbox" checked={showPrivate} onChange={(e) => setShowPrivate(e.target.checked)} />
+              {t('lightningOps.showPrivate')}
+              </label>
+            </div>
           </div>
-        </div>
         {filteredChannels.length ? (
           <div className="max-h-[520px] overflow-y-auto pr-2">
             <div className="grid gap-3">
@@ -620,56 +622,56 @@ export default function LightningOps() {
                           {ch.peer_alias || ch.remote_pubkey}
                         </a>
                       ) : (
-                        <p className="text-sm text-fog/60">{ch.peer_alias || 'Unknown peer'}</p>
+                        <p className="text-sm text-fog/60">{ch.peer_alias || t('lightningOps.unknownPeer')}</p>
                       )}
                       <p className="text-xs text-fog/50 break-all">
-                        Point: {ch.channel_point} | Capacity: {ch.capacity_sat} sats
+                        {t('lightningOps.pointCapacity', { point: ch.channel_point, capacity: ch.capacity_sat })}
                       </p>
                     </div>
                     <span className={`rounded-full px-3 py-1 text-xs ${ch.active ? 'bg-glow/20 text-glow' : 'bg-ember/20 text-ember'}`}>
-                      {ch.active ? 'Active' : 'Inactive'}
+                      {ch.active ? t('common.active') : t('common.inactive')}
                     </span>
                 </div>
                 <div className="mt-3 grid gap-3 lg:grid-cols-5 text-xs text-fog/70">
-                  <div>Local: <span className="text-fog">{ch.local_balance_sat} sats</span></div>
-                  <div>Remote: <span className="text-fog">{ch.remote_balance_sat} sats</span></div>
+                  <div>{t('lightningOps.localLabel', { value: ch.local_balance_sat })}</div>
+                  <div>{t('lightningOps.remoteLabel', { value: ch.remote_balance_sat })}</div>
                   <div>
-                    Out rate:{' '}
+                    {t('lightningOps.outRate')}:{' '}
                     <span className="text-fog">
                       {typeof ch.fee_rate_ppm === 'number' ? `${ch.fee_rate_ppm} ppm` : '-'}
                     </span>
                   </div>
                   <div>
-                    Out base:{' '}
+                    {t('lightningOps.outBase')}:{' '}
                     <span className="text-fog">
                       {typeof ch.base_fee_msat === 'number' ? `${ch.base_fee_msat} msats` : '-'}
                     </span>
                   </div>
                   <div>
-                    In rate:{' '}
+                    {t('lightningOps.inRate')}:{' '}
                     <span className="text-fog">
                       {typeof ch.inbound_fee_rate_ppm === 'number' ? `${ch.inbound_fee_rate_ppm} ppm` : '-'}
                     </span>
                     </div>
                   </div>
                   <div className="mt-2 text-xs text-fog/50">
-                    {ch.private ? 'Private channel' : 'Public channel'}
+                    {ch.private ? t('lightningOps.privateChannel') : t('lightningOps.publicChannel')}
                   </div>
                 </div>
               ))}
             </div>
           </div>
         ) : (
-          <p className="text-sm text-fog/60">No channels found.</p>
+          <p className="text-sm text-fog/60">{t('lightningOps.noChannelsFound')}</p>
         )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="section-card space-y-4">
-          <h3 className="text-lg font-semibold">Add peer</h3>
+          <h3 className="text-lg font-semibold">{t('lightningOps.addPeer')}</h3>
           <input
             className="input-field"
-            placeholder="pubkey@host:port"
+            placeholder={t('lightningOps.peerAddressPlaceholder')}
             value={peerAddress}
             onChange={(e) => setPeerAddress(e.target.value)}
           />
@@ -679,17 +681,17 @@ export default function LightningOps() {
               checked={peerTemporary}
               onChange={(e) => setPeerTemporary(e.target.checked)}
             />
-            Temporary peer (no auto-reconnect)
+            {t('lightningOps.temporaryPeer')}
           </label>
           <div className="flex flex-wrap gap-3">
-            <button className="btn-primary" onClick={handleConnectPeer}>Connect peer</button>
+            <button className="btn-primary" onClick={handleConnectPeer}>{t('lightningOps.connectPeer')}</button>
             <button
               className="btn-secondary disabled:opacity-60 disabled:cursor-not-allowed"
               onClick={handleBoostPeers}
               disabled={boostRunning}
-              title="This process can take a while."
+              title={t('lightningOps.boostHint')}
             >
-              {boostRunning ? 'Boosting...' : 'Boost peers'}
+              {boostRunning ? t('lightningOps.boosting') : t('lightningOps.boostPeers')}
             </button>
           </div>
           {peerStatus && <p className="text-sm text-brass">{peerStatus}</p>}
@@ -697,17 +699,17 @@ export default function LightningOps() {
         </div>
 
         <div className="section-card space-y-4">
-          <h3 className="text-lg font-semibold">Open channel</h3>
+          <h3 className="text-lg font-semibold">{t('lightningOps.openChannel')}</h3>
           <input
             className="input-field"
-            placeholder="pubkey@host:port"
+            placeholder={t('lightningOps.peerAddressPlaceholder')}
             value={openPeer}
             onChange={(e) => setOpenPeer(e.target.value)}
           />
           <div className="grid gap-4 lg:grid-cols-2">
             <input
               className="input-field"
-              placeholder="Funding amount (sats)"
+              placeholder={t('lightningOps.fundingAmount')}
               type="number"
               min={20000}
               value={openAmount}
@@ -715,22 +717,22 @@ export default function LightningOps() {
             />
             <input
               className="input-field"
-              placeholder="Close address (optional)"
+              placeholder={t('lightningOps.closeAddressOptional')}
               type="text"
               value={openCloseAddress}
               onChange={(e) => setOpenCloseAddress(e.target.value)}
             />
           </div>
           <label className="text-sm text-fog/70">
-            Fee rate (sat/vB)
+            {t('lightningOps.feeRate')}
             <span className="ml-2 text-xs text-fog/50">
-              Fastest: {openFeeHint?.fastest ?? '-'} | 1h: {openFeeHint?.hour ?? '-'}
+              {t('lightningOps.feeHint', { fastest: openFeeHint?.fastest ?? '-', hour: openFeeHint?.hour ?? '-' })}
             </span>
           </label>
           <div className="flex flex-wrap items-center gap-3">
             <input
               className="input-field flex-1 min-w-[140px]"
-              placeholder="Auto"
+              placeholder={t('common.auto')}
               type="number"
               min={1}
               value={openFeeRate}
@@ -746,16 +748,16 @@ export default function LightningOps() {
               }}
               disabled={!openFeeHint?.fastest}
             >
-              Use fastest
+              {t('lightningOps.useFastest')}
             </button>
             {openFeeStatus && <p className="text-xs text-fog/50">{openFeeStatus}</p>}
           </div>
           <label className="flex items-center gap-2 text-sm text-fog/70">
             <input type="checkbox" checked={openPrivate} onChange={(e) => setOpenPrivate(e.target.checked)} />
-            Private channel
+            {t('lightningOps.privateChannel')}
           </label>
-          <button className="btn-primary" onClick={handleOpenChannel}>Open channel</button>
-          <p className="text-xs text-fog/50">Minimum funding is 20000 sats. Opening a channel can take a few blocks.</p>
+          <button className="btn-primary" onClick={handleOpenChannel}>{t('lightningOps.openChannel')}</button>
+          <p className="text-xs text-fog/50">{t('lightningOps.minimumFundingNote')}</p>
           {openStatus && (
             <div className="text-sm text-brass break-words">
               <p>{openStatus}</p>
@@ -766,7 +768,7 @@ export default function LightningOps() {
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  Funding tx: {openChannelPoint}
+                  {t('lightningOps.fundingTx', { point: openChannelPoint })}
                 </a>
               )}
             </div>
@@ -776,23 +778,23 @@ export default function LightningOps() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="section-card space-y-4">
-          <h3 className="text-lg font-semibold">Close channel</h3>
+          <h3 className="text-lg font-semibold">{t('lightningOps.closeChannel')}</h3>
           <select className="input-field" value={closePoint} onChange={(e) => setClosePoint(e.target.value)}>
-            <option value="">Select channel</option>
+            <option value="">{t('lightningOps.selectChannel')}</option>
             {channelOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
           <label className="text-sm text-fog/70">
-            Fee rate (sat/vB)
+            {t('lightningOps.feeRate')}
             <span className="ml-2 text-xs text-fog/50">
-              Fastest: {closeFeeHint?.fastest ?? '-'} | 1h: {closeFeeHint?.hour ?? '-'}
+              {t('lightningOps.feeHint', { fastest: closeFeeHint?.fastest ?? '-', hour: closeFeeHint?.hour ?? '-' })}
             </span>
           </label>
           <div className="flex flex-wrap items-center gap-3">
             <input
               className="input-field flex-1 min-w-[140px]"
-              placeholder="Auto"
+              placeholder={t('common.auto')}
               type="number"
               min={1}
               value={closeFeeRate}
@@ -808,37 +810,37 @@ export default function LightningOps() {
               }}
               disabled={!closeFeeHint?.fastest}
             >
-              Use fastest
+              {t('lightningOps.useFastest')}
             </button>
             {closeFeeStatus && <p className="text-xs text-fog/50">{closeFeeStatus}</p>}
           </div>
           <label className="flex items-center gap-2 text-sm text-fog/70">
             <input type="checkbox" checked={closeForce} onChange={(e) => setCloseForce(e.target.checked)} />
-            Force close (not recommended)
+            {t('lightningOps.forceClose')}
           </label>
-          <button className="btn-secondary" onClick={handleCloseChannel}>Close channel</button>
+          <button className="btn-secondary" onClick={handleCloseChannel}>{t('lightningOps.closeChannel')}</button>
           {closeStatus && <p className="text-sm text-brass">{closeStatus}</p>}
         </div>
 
         <div className="section-card space-y-4">
-          <h3 className="text-lg font-semibold">Update channel fees</h3>
+          <h3 className="text-lg font-semibold">{t('lightningOps.updateFees')}</h3>
           <div className="flex flex-wrap gap-3 text-sm">
             <button
               className={feeScopeAll ? 'btn-primary' : 'btn-secondary'}
               onClick={() => setFeeScopeAll(true)}
             >
-              Apply to all
+              {t('lightningOps.applyToAll')}
             </button>
             <button
               className={!feeScopeAll ? 'btn-primary' : 'btn-secondary'}
               onClick={() => setFeeScopeAll(false)}
             >
-              Apply to one
+              {t('lightningOps.applyToOne')}
             </button>
           </div>
           {!feeScopeAll && (
             <select className="input-field" value={feeChannelPoint} onChange={(e) => setFeeChannelPoint(e.target.value)}>
-              <option value="">Select channel</option>
+              <option value="">{t('lightningOps.selectChannel')}</option>
               {channelOptions.map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
@@ -850,7 +852,7 @@ export default function LightningOps() {
           <div className="grid gap-4 lg:grid-cols-3">
             <input
               className="input-field"
-              placeholder="Fee rate (ppm)"
+              placeholder={t('lightningOps.feeRatePpm')}
               type="number"
               min={0}
               value={feeRatePpm}
@@ -858,7 +860,7 @@ export default function LightningOps() {
             />
             <input
               className="input-field"
-              placeholder="Base fee (msats)"
+              placeholder={t('lightningOps.baseFeeMsats')}
               type="number"
               min={0}
               value={baseFeeMsat}
@@ -866,7 +868,7 @@ export default function LightningOps() {
             />
             <input
               className="input-field"
-              placeholder="Timelock delta"
+              placeholder={t('lightningOps.timeLockDelta')}
               type="number"
               min={0}
               value={timeLockDelta}
@@ -879,36 +881,36 @@ export default function LightningOps() {
               checked={inboundEnabled}
               onChange={(e) => setInboundEnabled(e.target.checked)}
             />
-            Include inbound fees (advanced)
+            {t('lightningOps.includeInboundFees')}
           </label>
           {inboundEnabled && (
             <div className="grid gap-4 lg:grid-cols-2">
               <input
                 className="input-field"
-                placeholder="Inbound fee rate (ppm)"
+                placeholder={t('lightningOps.inboundFeeRate')}
                 type="number"
                 value={inboundFeeRatePpm}
                 onChange={(e) => setInboundFeeRatePpm(e.target.value)}
               />
               <input
                 className="input-field"
-                placeholder="Inbound base (msats)"
+                placeholder={t('lightningOps.inboundBaseFee')}
                 type="number"
                 value={inboundBaseMsat}
                 onChange={(e) => setInboundBaseMsat(e.target.value)}
               />
             </div>
           )}
-          <p className="text-xs text-fog/50">Inbound fees are usually negative to attract inbound flow.</p>
-          <button className="btn-secondary" onClick={handleUpdateFees}>Update fees</button>
+          <p className="text-xs text-fog/50">{t('lightningOps.inboundFeesNote')}</p>
+          <button className="btn-secondary" onClick={handleUpdateFees}>{t('lightningOps.updateFees')}</button>
           {feeStatus && <p className="text-sm text-brass">{feeStatus}</p>}
         </div>
       </div>
 
       <div className="section-card space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-lg font-semibold">Peers</h3>
-          <span className="text-xs text-fog/60">Connected: {peers.length}</span>
+          <h3 className="text-lg font-semibold">{t('lightningOps.peers')}</h3>
+          <span className="text-xs text-fog/60">{t('lightningOps.connectedPeers', { count: peers.length })}</span>
         </div>
         {peerActionStatus && <p className="text-sm text-brass">{peerActionStatus}</p>}
         {peerListStatus && <p className="text-sm text-brass">{peerListStatus}</p>}
@@ -929,37 +931,40 @@ export default function LightningOps() {
                           {peer.alias || peer.pub_key}
                         </a>
                       ) : (
-                        <p className="text-sm text-fog/60">{peer.alias || 'Unknown peer'}</p>
+                        <p className="text-sm text-fog/60">{peer.alias || t('lightningOps.unknownPeer')}</p>
                       )}
-                      <p className="text-xs text-fog/50">{peer.address || 'address unknown'}</p>
+                      <p className="text-xs text-fog/50">{peer.address || t('lightningOps.addressUnknown')}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="rounded-full px-3 py-1 text-xs bg-white/10 text-fog/70">
-                        {peer.inbound ? 'Inbound' : 'Outbound'}
+                        {peer.inbound ? t('lightningOps.inbound') : t('lightningOps.outbound')}
                       </span>
                       <button className="btn-secondary text-xs px-3 py-1.5" onClick={() => handleDisconnect(peer.pub_key)}>
-                        Disconnect
+                        {t('lightningOps.disconnect')}
                       </button>
                     </div>
                   </div>
                   {peer.alias && (
-                    <p className="mt-2 text-xs text-fog/50">Pubkey: {peer.pub_key}</p>
+                    <p className="mt-2 text-xs text-fog/50">{t('lightningOps.pubkeyLabel', { pubkey: peer.pub_key })}</p>
                   )}
                   <div className="mt-3 grid gap-3 lg:grid-cols-3 text-xs text-fog/70">
-                    <div>Sat sent: <span className="text-fog">{peer.sat_sent}</span></div>
-                    <div>Sat recv: <span className="text-fog">{peer.sat_recv}</span></div>
-                    <div>Ping: <span className="text-fog">{formatPing(peer.ping_time)}</span></div>
+                    <div>{t('lightningOps.satSent', { value: peer.sat_sent })}</div>
+                    <div>{t('lightningOps.satRecv', { value: peer.sat_recv })}</div>
+                    <div>{t('lightningOps.pingLabel', { value: formatPing(peer.ping_time) })}</div>
                   </div>
                   <div className="mt-2 grid gap-3 lg:grid-cols-2 text-xs text-fog/60">
-                    <div>Bytes sent: <span className="text-fog">{peer.bytes_sent}</span></div>
-                    <div>Bytes recv: <span className="text-fog">{peer.bytes_recv}</span></div>
+                    <div>{t('lightningOps.bytesSent', { value: peer.bytes_sent })}</div>
+                    <div>{t('lightningOps.bytesRecv', { value: peer.bytes_recv })}</div>
                   </div>
                   {peer.sync_type && (
-                    <p className="mt-2 text-xs text-fog/50">Sync: {peer.sync_type}</p>
+                    <p className="mt-2 text-xs text-fog/50">{t('lightningOps.syncLabel', { value: peer.sync_type })}</p>
                   )}
                   {peer.last_error && (
                     <p className="mt-2 text-xs text-ember">
-                      Last error{peer.last_error_time ? ` (${formatAge(peer.last_error_time)})` : ''}: {peer.last_error}
+                      {t('lightningOps.lastError', {
+                        age: peer.last_error_time ? ` (${formatAge(peer.last_error_time)})` : '',
+                        error: peer.last_error
+                      })}
                     </p>
                   )}
                 </div>
@@ -967,7 +972,7 @@ export default function LightningOps() {
             </div>
           </div>
         ) : (
-          <p className="text-sm text-fog/60">No connected peers found.</p>
+          <p className="text-sm text-fog/60">{t('lightningOps.noConnectedPeers')}</p>
         )}
       </div>
     </section>

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getChatInbox, getChatMessages, getLnPeers, sendChatMessage } from '../api'
+import { getLocale } from '../i18n'
 
 type Peer = {
   pub_key: string
@@ -25,11 +27,11 @@ type ChatInboxItem = {
 const messageLimit = 500
 const lastReadKey = 'chat:lastRead'
 
-const formatTimestamp = (value: string) => {
+const formatTimestamp = (value: string, locale: string) => {
   if (!value) return ''
   const parsed = new Date(value)
   if (Number.isNaN(parsed.getTime())) return ''
-  return parsed.toLocaleString('en-US', {
+  return parsed.toLocaleString(locale, {
     month: 'short',
     day: '2-digit',
     hour: '2-digit',
@@ -39,6 +41,8 @@ const formatTimestamp = (value: string) => {
 }
 
 export default function Chat() {
+  const { t, i18n } = useTranslation()
+  const locale = getLocale(i18n.language)
   const [peers, setPeers] = useState<Peer[]>([])
   const [peerStatus, setPeerStatus] = useState('')
   const [selectedPeer, setSelectedPeer] = useState<Peer | null>(null)
@@ -64,13 +68,13 @@ export default function Chat() {
   const bottomRef = useRef<HTMLDivElement | null>(null)
 
   const loadPeers = async () => {
-    setPeerStatus('Loading peers...')
+    setPeerStatus(t('chat.loadingPeers'))
     try {
       const res = await getLnPeers()
       setPeers(Array.isArray(res?.peers) ? res.peers : [])
       setPeerStatus('')
     } catch (err: any) {
-      setPeerStatus(err?.message || 'Failed to load peers.')
+      setPeerStatus(err?.message || t('chat.loadPeersFailed'))
     }
   }
 
@@ -125,7 +129,7 @@ export default function Chat() {
         setMessageStatus('')
       } catch (err: any) {
         if (!mounted) return
-        setMessageStatus(err?.message || 'Failed to load messages.')
+        setMessageStatus(err?.message || t('chat.loadMessagesFailed'))
       } finally {
         if (!mounted) return
         setLoadingMessages(false)
@@ -215,14 +219,14 @@ export default function Chat() {
     if (!selectedPeer || !canSend) return
     const trimmed = draft.trim()
     setSending(true)
-    setMessageStatus('Sending...')
+    setMessageStatus(t('chat.sending'))
     try {
       const res = await sendChatMessage({ peer_pubkey: selectedPeer.pub_key, message: trimmed })
       setDraft('')
       setMessages((prev) => [...prev, res])
       setMessageStatus('')
     } catch (err: any) {
-      setMessageStatus(err?.message || 'Failed to send message.')
+      setMessageStatus(err?.message || t('chat.sendFailed'))
     } finally {
       setSending(false)
     }
@@ -233,11 +237,11 @@ export default function Chat() {
       <div className="section-card">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-semibold">Chat</h2>
-            <p className="text-fog/60">Keysend messages to connected peers.</p>
+            <h2 className="text-2xl font-semibold">{t('chat.title')}</h2>
+            <p className="text-fog/60">{t('chat.subtitle')}</p>
           </div>
           <button className="btn-secondary text-xs px-3 py-2" onClick={loadPeers}>
-            Refresh peers
+            {t('common.refresh')}
           </button>
         </div>
         {peerStatus && <p className="mt-3 text-sm text-brass">{peerStatus}</p>}
@@ -246,7 +250,7 @@ export default function Chat() {
       <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
         <div className="section-card space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Online peers</h3>
+            <h3 className="text-lg font-semibold">{t('chat.onlinePeers')}</h3>
             <span className="text-xs text-fog/60">{peers.length}</span>
           </div>
           {sortedPeers.length ? (
@@ -277,7 +281,7 @@ export default function Chat() {
               ))}
             </div>
           ) : (
-            <p className="text-sm text-fog/60">No online peers available.</p>
+            <p className="text-sm text-fog/60">{t('chat.noOnlinePeers')}</p>
           )}
         </div>
 
@@ -285,10 +289,14 @@ export default function Chat() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-lg font-semibold">
-                {selectedPeer ? `Chat with ${selectedPeer.alias || selectedPeer.pub_key}` : 'Select a peer'}
+                {selectedPeer
+                  ? t('chat.chatWith', { peer: selectedPeer.alias || selectedPeer.pub_key })
+                  : t('chat.selectPeer')}
               </h3>
               <p className="text-xs text-fog/60">
-                {selectedPeer ? (selectedOnline ? 'Peer online' : 'Peer offline') : 'Choose an online peer to start.'}
+                {selectedPeer
+                  ? (selectedOnline ? t('chat.peerOnline') : t('chat.peerOffline'))
+                  : t('chat.choosePeer')}
               </p>
             </div>
             {selectedPeer && (
@@ -298,18 +306,21 @@ export default function Chat() {
 
           {unreadCount > 0 && (
             <div className="rounded-2xl border border-brass/30 bg-brass/10 px-4 py-2 text-xs text-brass">
-              {unreadCount === 1 ? '1 unread chat' : `${unreadCount} unread chats`} waiting. Open a highlighted peer to mark as read.
+              {unreadCount === 1
+                ? t('chat.unreadSingle')
+                : t('chat.unreadMultiple', { count: unreadCount })}{' '}
+              {t('chat.unreadHint')}
             </div>
           )}
 
           <div className="rounded-2xl border border-white/10 bg-ink/60 p-3 text-xs text-fog/70">
-            Keysend chat costs 1 sat per message + routing fees. Messages expire after 30 days.
+            {t('chat.keysendCost')}
           </div>
 
           <div className="flex-1 min-h-[280px] overflow-y-auto space-y-3 pr-2">
-            {loadingMessages && <p className="text-sm text-fog/60">Loading messages...</p>}
+            {loadingMessages && <p className="text-sm text-fog/60">{t('chat.loadingMessages')}</p>}
             {!loadingMessages && !messages.length && (
-              <p className="text-sm text-fog/60">No messages yet.</p>
+              <p className="text-sm text-fog/60">{t('chat.noMessages')}</p>
             )}
             {messages.map((msg, idx) => (
               <div key={`${msg.payment_hash || idx}`} className={`flex ${msg.direction === 'out' ? 'justify-end' : 'justify-start'}`}>
@@ -322,7 +333,7 @@ export default function Chat() {
                 >
                   <div className="whitespace-pre-wrap break-words">{msg.message}</div>
                   <div className="mt-2 flex items-center justify-between text-[11px] text-fog/50">
-                    <span>{formatTimestamp(msg.timestamp)}</span>
+                    <span>{formatTimestamp(msg.timestamp, locale)}</span>
                     {msg.direction === 'out' && <span>{msg.status}</span>}
                   </div>
                 </div>
@@ -336,7 +347,7 @@ export default function Chat() {
           <div className="space-y-3">
             <textarea
               className="input-field min-h-[96px]"
-              placeholder={selectedPeer ? 'Write a message...' : 'Select an online peer to chat.'}
+              placeholder={selectedPeer ? t('chat.writeMessage') : t('chat.selectPeerToChat')}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               disabled={!selectedPeer || !selectedOnline}
@@ -344,11 +355,11 @@ export default function Chat() {
             <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-fog/60">
               <span>{draft.trim().length}/{messageLimit}</span>
               <button className="btn-primary" onClick={handleSend} disabled={!canSend}>
-                {sending ? 'Sending...' : 'Send 1 sat'}
+                {sending ? t('chat.sending') : t('chat.sendOneSat')}
               </button>
             </div>
             {overLimit && (
-              <p className="text-xs text-ember">Message exceeds {messageLimit} characters.</p>
+              <p className="text-xs text-ember">{t('chat.messageTooLong', { count: messageLimit })}</p>
             )}
           </div>
         </div>

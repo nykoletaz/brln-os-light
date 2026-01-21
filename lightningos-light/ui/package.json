@@ -10,8 +10,10 @@
   },
   "dependencies": {
     "@fontsource/space-grotesk": "^5.0.20",
+    "i18next": "^23.12.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-i18next": "^14.1.2",
     "recharts": "^2.12.4"
   },
   "devDependencies": {

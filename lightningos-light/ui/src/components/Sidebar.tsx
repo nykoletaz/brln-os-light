@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import clsx from '../utils/clsx'
 
 type RouteItem = {
@@ -15,6 +16,7 @@ type SidebarProps = {
 }
 
 export default function Sidebar({ routes, current, open, onClose }: SidebarProps) {
+  const { t } = useTranslation()
   const [version, setVersion] = useState('')
 
   useEffect(() => {
@@ -48,14 +50,14 @@ export default function Sidebar({ routes, current, open, onClose }: SidebarProps
           Lo
         </div>
         <div className="flex-1">
-          <p className="text-lg font-semibold">LightningOS Light</p>
-          <p className="text-xs text-fog/60">Mainnet only</p>
+          <p className="text-lg font-semibold">{t('topbar.productName')}</p>
+          <p className="text-xs text-fog/60">{t('topbar.mainnetOnly')}</p>
         </div>
         <button
           type="button"
           className="lg:hidden inline-flex items-center justify-center rounded-full border border-white/15 bg-ink/60 h-9 w-9 text-fog/70 hover:text-white hover:border-white/40 transition"
           onClick={onClose}
-          aria-label="Close menu"
+          aria-label={t('sidebar.closeMenu')}
         >
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
             <path d="M6 6l12 12M18 6l-12 12" />
@@ -81,8 +83,8 @@ export default function Sidebar({ routes, current, open, onClose }: SidebarProps
       </nav>
       <div className="mt-6 border-t border-white/10 pt-4 text-xs text-fog/60">
         <p>
-          Version:{' '}
-          <span className="text-fog">{version || 'unavailable'}</span>
+          {t('sidebar.versionLabel')}{' '}
+          <span className="text-fog">{version || t('common.unavailable')}</span>
         </p>
         <a
           className="mt-2 inline-flex text-fog/70 hover:text-white transition"
@@ -90,7 +92,7 @@ export default function Sidebar({ routes, current, open, onClose }: SidebarProps
           target="_blank"
           rel="noreferrer"
         >
-          Powered By BR⚡LN
+          {t('sidebar.poweredBy')}
         </a>
       </div>
     </aside>

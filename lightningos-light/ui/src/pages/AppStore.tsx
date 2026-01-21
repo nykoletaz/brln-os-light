@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getAppAdminPassword, getApps, installApp, resetAppAdmin, startApp, stopApp, uninstallApp } from '../api'
 import lndgIcon from '../assets/apps/lndg.ico'
 import bitcoincoreIcon from '../assets/apps/bitcoincore.svg'
@@ -27,11 +28,6 @@ const internalRoutes: Record<string, string> = {
   elements: 'elements'
 }
 
-const internalRouteLabels: Record<string, string> = {
-  bitcoincore: 'Bitcoin Local',
-  elements: 'Elements'
-}
-
 const statusStyles: Record<string, string> = {
   running: 'bg-emerald-500/15 text-emerald-200 border border-emerald-400/30',
   stopped: 'bg-amber-500/15 text-amber-200 border border-amber-400/30',
@@ -40,6 +36,7 @@ const statusStyles: Record<string, string> = {
 }
 
 export default function AppStore() {
+  const { t } = useTranslation()
   const [apps, setApps] = useState<AppInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
@@ -52,7 +49,7 @@ export default function AppStore() {
       setApps(data || [])
       setLoading(false)
     }).catch((err: unknown) => {
-      setMessage(err instanceof Error ? err.message : 'Failed to load apps.')
+      setMessage(err instanceof Error ? err.message : t('appStore.loadFailed'))
       setLoading(false)
     })
   }
@@ -71,7 +68,7 @@ export default function AppStore() {
       if (action === 'uninstall') await uninstallApp(id)
       loadApps()
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Action failed.')
+      setMessage(err instanceof Error ? err.message : t('appStore.actionFailed'))
     } finally {
       setBusy((prev) => {
         const next = { ...prev }
@@ -86,10 +83,10 @@ export default function AppStore() {
     setBusy((prev) => ({ ...prev, [id]: 'reset-admin' }))
     try {
       await resetAppAdmin(id)
-      setMessage('LNDg admin password reset to the stored value.')
+      setMessage(t('appStore.resetStoredPasswordMessage'))
       loadApps()
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Reset failed.')
+      setMessage(err instanceof Error ? err.message : t('appStore.resetFailed'))
     } finally {
       setBusy((prev) => {
         const next = { ...prev }
@@ -106,13 +103,13 @@ export default function AppStore() {
       const res = await getAppAdminPassword(id)
       const password = res?.password || ''
       if (!password) {
-        setMessage('Admin password unavailable.')
+        setMessage(t('appStore.adminPasswordUnavailable'))
         return
       }
       await navigator.clipboard.writeText(password)
-      setMessage('LNDg admin password copied.')
+      setMessage(t('appStore.adminPasswordCopied'))
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Copy failed.')
+      setMessage(err instanceof Error ? err.message : t('common.copyFailed'))
     } finally {
       setCopying((prev) => {
         const next = { ...prev }
@@ -127,8 +124,8 @@ export default function AppStore() {
   return (
     <section className="space-y-6">
       <div className="section-card">
-        <h2 className="text-2xl font-semibold">App Store</h2>
-        <p className="text-fog/60">Install optional services on demand. Docker is installed automatically when required.</p>
+        <h2 className="text-2xl font-semibold">{t('appStore.title')}</h2>
+        <p className="text-fog/60">{t('appStore.subtitle')}</p>
         {message && <p className="text-sm text-brass mt-4">{message}</p>}
       </div>
 
@@ -138,9 +135,14 @@ export default function AppStore() {
           const isBusy = Boolean(busyAction)
           const isResetting = busyAction === 'reset-admin'
           const canResetAdmin = app.id === 'lndg' && app.status === 'running'
-          const resetTitle = canResetAdmin ? 'Reset to stored admin password' : 'Start LNDg to reset password'
+          const resetTitle = canResetAdmin ? t('appStore.resetStoredPassword') : t('appStore.startLndgToReset')
           const statusStyle = statusStyles[app.status] || statusStyles.unknown
           const internalRoute = internalRoutes[app.id]
+          const internalRouteLabel = app.id === 'bitcoincore'
+            ? t('nav.bitcoinLocal')
+            : app.id === 'elements'
+              ? t('nav.elements')
+              : t('appStore.internal')
           const openUrl = app.port ? `http://${host}:${app.port}` : ''
           const icon = iconMap[app.id]
           return (
@@ -151,7 +153,7 @@ export default function AppStore() {
                     {icon ? (
                       <img src={icon} alt={`${app.name} icon`} className="h-12 w-12 rounded-2xl object-cover" />
                     ) : (
-                      <span className="text-xs text-fog/50">APP</span>
+                      <span className="text-xs text-fog/50">{t('appStore.appBadge')}</span>
                     )}
                   </div>
                   <div>
@@ -166,19 +168,19 @@ export default function AppStore() {
 
               <div className="text-xs text-fog/50 space-y-1">
                 {app.port ? (
-                  <p>Default port: {app.port}</p>
+                  <p>{t('appStore.defaultPort', { port: app.port })}</p>
                 ) : internalRoute ? (
-                  <p>Default access: {internalRouteLabels[app.id] || 'Internal'}</p>
+                  <p>{t('appStore.defaultAccess', { access: internalRouteLabel })}</p>
                 ) : null}
                 {app.admin_password_path && (
                   <div className="flex flex-wrap items-center gap-2">
-                    <span>Admin password saved at {app.admin_password_path}</span>
+                    <span>{t('appStore.adminPasswordSavedAt', { path: app.admin_password_path })}</span>
                     {app.id === 'lndg' && (
                       <button
                         className="text-fog/50 hover:text-fog"
                         onClick={() => handleCopyAdminPassword(app.id)}
-                        title="Copy LNDg admin password"
-                        aria-label="Copy LNDg admin password"
+                        title={t('appStore.copyLndgPassword')}
+                        aria-label={t('appStore.copyLndgPassword')}
                         disabled={Boolean(copying[app.id])}
                       >
                         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
@@ -194,19 +196,19 @@ export default function AppStore() {
               <div className="flex flex-wrap items-center gap-3">
                 {!app.installed && (
                   <button className="btn-primary" disabled={isBusy} onClick={() => handleAction(app.id, 'install')}>
-                    {isBusy ? 'Installing...' : 'Install'}
+                    {isBusy ? t('appStore.installing') : t('appStore.install')}
                   </button>
                 )}
                 {app.installed && app.status === 'running' && (
                   <>
                     {internalRoute && (
                       <a className="btn-primary" href={`#${internalRoute}`}>
-                        Open
+                        {t('common.open')}
                       </a>
                     )}
                     {!internalRoute && app.port && openUrl && (
                       <a className="btn-primary" href={openUrl} target="_blank" rel="noreferrer">
-                        Open
+                        {t('common.open')}
                       </a>
                     )}
                     {app.id === 'lndg' && (
@@ -216,21 +218,21 @@ export default function AppStore() {
                         title={resetTitle}
                         onClick={() => handleResetAdmin(app.id)}
                       >
-                        {isResetting ? 'Resetting...' : 'Reset admin password'}
+                        {isResetting ? t('appStore.resetting') : t('appStore.resetAdminPassword')}
                       </button>
                     )}
                     <button className="btn-secondary" disabled={isBusy} onClick={() => handleAction(app.id, 'stop')}>
-                      {isBusy ? 'Stopping...' : 'Stop'}
+                      {isBusy ? t('appStore.stopping') : t('common.stop')}
                     </button>
                     <button className="btn-secondary" disabled={isBusy} onClick={() => handleAction(app.id, 'uninstall')}>
-                      Uninstall
+                      {t('appStore.uninstall')}
                     </button>
                   </>
                 )}
                 {app.installed && app.status !== 'running' && (
                   <>
                     <button className="btn-primary" disabled={isBusy} onClick={() => handleAction(app.id, 'start')}>
-                      {isBusy ? 'Starting...' : 'Start'}
+                      {isBusy ? t('appStore.starting') : t('common.start')}
                     </button>
                     {app.id === 'lndg' && (
                       <button
@@ -239,11 +241,11 @@ export default function AppStore() {
                         title={resetTitle}
                         onClick={() => handleResetAdmin(app.id)}
                       >
-                        {isResetting ? 'Resetting...' : 'Reset admin password'}
+                        {isResetting ? t('appStore.resetting') : t('appStore.resetAdminPassword')}
                       </button>
                     )}
                     <button className="btn-secondary" disabled={isBusy} onClick={() => handleAction(app.id, 'uninstall')}>
-                      Uninstall
+                      {t('appStore.uninstall')}
                     </button>
                   </>
                 )}
@@ -253,9 +255,9 @@ export default function AppStore() {
         })}
       </div>
 
-      {loading && <p className="text-fog/60">Loading apps...</p>}
+      {loading && <p className="text-fog/60">{t('appStore.loadingApps')}</p>}
       {!loading && apps.length === 0 && (
-        <p className="text-fog/60">No apps available yet.</p>
+        <p className="text-fog/60">{t('appStore.noApps')}</p>
       )}
     </section>
   )

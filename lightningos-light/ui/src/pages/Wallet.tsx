@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { createInvoice, decodeInvoice, getLnChannels, getMempoolFees, getWalletAddress, getWalletSummary, payInvoice, sendOnchain } from '../api'
+import { getLocale } from '../i18n'
 
 const emptySummary = {
   balances: {
@@ -10,6 +12,8 @@ const emptySummary = {
 }
 
 export default function Wallet() {
+  const { t, i18n } = useTranslation()
+  const locale = getLocale(i18n.language)
   const [summary, setSummary] = useState<any>(emptySummary)
   const [summaryError, setSummaryError] = useState('')
   const [summaryWarning, setSummaryWarning] = useState('')
@@ -72,7 +76,7 @@ export default function Wallet() {
         setSummaryWarning(data?.warning || '')
       } catch (err: any) {
         if (!mounted) return
-        const message = err?.message || 'Wallet summary unavailable'
+        const message = err?.message || t('wallet.summaryUnavailable')
         setSummaryError(message)
       } finally {
         if (!mounted) return
@@ -100,7 +104,7 @@ export default function Wallet() {
       })
       .catch(() => {
         if (!mounted) return
-        setSendFeeStatus('Fee suggestions unavailable.')
+        setSendFeeStatus(t('wallet.feeSuggestionsUnavailable'))
       })
     return () => {
       mounted = false
@@ -120,7 +124,7 @@ export default function Wallet() {
         setChannels(Array.isArray(res?.channels) ? res.channels : [])
       } catch (err: any) {
         if (!mounted) return
-        setChannelsError(err?.message || 'Channels unavailable.')
+        setChannelsError(err?.message || t('wallet.channelsUnavailable'))
       } finally {
         if (!mounted) return
         setChannelsLoading(false)
@@ -157,7 +161,7 @@ export default function Wallet() {
         setDecodeError('')
       } catch (err: any) {
         setDecode(null)
-        setDecodeError(err?.message || 'Invalid invoice')
+        setDecodeError(err?.message || t('wallet.invalidInvoice'))
       } finally {
         setDecodeLoading(false)
       }
@@ -177,10 +181,10 @@ export default function Wallet() {
     : 'text-ember'
 
   const formatTimestamp = (value: any) => {
-    if (!value) return 'Unknown time'
+    if (!value) return t('common.unknownTime')
     const parsed = new Date(value)
-    if (Number.isNaN(parsed.getTime())) return 'Unknown time'
-    return parsed.toLocaleString('en-US', {
+    if (Number.isNaN(parsed.getTime())) return t('common.unknownTime')
+    return parsed.toLocaleString(locale, {
       year: 'numeric',
       month: 'short',
       day: '2-digit',
@@ -212,10 +216,10 @@ export default function Wallet() {
     const type = String(item?.type || '').toLowerCase()
     const network = activityNetwork(item)
     const direction = activityDirection(item)
-    let label = 'Activity'
-    if (type === 'invoice') label = 'Invoice'
-    else if (type === 'payment') label = 'Payment'
-    else if (network === 'onchain') label = direction === 'out' ? 'On-chain send' : 'On-chain deposit'
+    let label = t('wallet.activity')
+    if (type === 'invoice') label = t('wallet.invoice')
+    else if (type === 'payment') label = t('wallet.payment')
+    else if (network === 'onchain') label = direction === 'out' ? t('wallet.onchainSend') : t('wallet.onchainDeposit')
     else if (type) label = type.charAt(0).toUpperCase() + type.slice(1)
     if (network === 'lightning') return `⚡ ${label}`
     return label
@@ -254,7 +258,7 @@ export default function Wallet() {
   const formatChannelLabel = (ch: any) => {
     const alias = String(ch.peer_alias || '').trim()
     const pubkey = String(ch.remote_pubkey || '').trim()
-    const peerLabel = alias || (pubkey ? `${pubkey.slice(0, 10)}...` : 'Unknown peer')
+    const peerLabel = alias || (pubkey ? `${pubkey.slice(0, 10)}...` : t('wallet.unknownPeer'))
     const point = String(ch.channel_point || '').trim()
     const shortPoint = point && point.length > 16 ? `${point.slice(0, 8)}...${point.slice(-4)}` : point
     const localBalance = Number(ch.local_balance_sat || 0)
@@ -279,10 +283,10 @@ export default function Wallet() {
       const res = await getWalletAddress()
       setAddress(res?.address || '')
       if (!res?.address) {
-        setAddressStatus('Address unavailable.')
+        setAddressStatus(t('wallet.addressUnavailable'))
       }
     } catch (err: any) {
-      setAddressStatus(err?.message || 'Address fetch failed.')
+      setAddressStatus(err?.message || t('wallet.addressFetchFailed'))
     } finally {
       setAddressLoading(false)
     }
@@ -294,7 +298,7 @@ export default function Wallet() {
       await navigator.clipboard.writeText(address)
       setCopied(true)
     } catch {
-      setAddressStatus('Copy failed. Select and copy manually.')
+      setAddressStatus(t('common.copyFailedManual'))
     }
   }
 
@@ -308,15 +312,15 @@ export default function Wallet() {
     const amountSat = Number(sendAmount || 0)
     const feeRate = Number(sendFeeRate || 0)
     if (!target) {
-      setSendStatus('Destination address required.')
+      setSendStatus(t('wallet.destinationRequired'))
       return
     }
     if (!sendSweepAll && amountSat <= 0) {
-      setSendStatus('Amount must be positive.')
+      setSendStatus(t('wallet.amountMustBePositive'))
       return
     }
     setSendRunning(true)
-    setSendStatus('Sending on-chain...')
+    setSendStatus(t('wallet.sendingOnchain'))
     try {
       const payload = {
         address: target,
@@ -325,27 +329,27 @@ export default function Wallet() {
       }
       const res = await sendOnchain(payload)
       const txid = res?.txid ? ` Txid: ${res.txid}` : ''
-      setSendStatus(`On-chain send broadcast.${txid}`)
+      setSendStatus(t('wallet.onchainBroadcast', { txid }))
       setSendAddress('')
       setSendAmount('')
       setSendSweepAll(false)
     } catch (err: any) {
-      setSendStatus(err?.message || 'On-chain send failed.')
+      setSendStatus(err?.message || t('wallet.onchainSendFailed'))
     } finally {
       setSendRunning(false)
     }
   }
 
   const handleInvoice = async () => {
-    setStatus('Creating invoice...')
+    setStatus(t('wallet.creatingInvoice'))
     setInvoiceNotice('')
     setInvoiceCopied(false)
     try {
       const res = await createInvoice({ amount_sat: Number(amount), memo })
       setInvoice(res.payment_request)
-      setStatus('Invoice ready.')
+      setStatus(t('wallet.invoiceReady'))
     } catch {
-      setStatus('Invoice failed.')
+      setStatus(t('wallet.invoiceFailed'))
     }
   }
 
@@ -355,7 +359,7 @@ export default function Wallet() {
       await navigator.clipboard.writeText(invoice)
       setInvoiceCopied(true)
     } catch {
-      setInvoiceNotice('Copy failed. Select and copy manually.')
+      setInvoiceNotice(t('common.copyFailedManual'))
     }
   }
 
@@ -367,23 +371,23 @@ export default function Wallet() {
 
   const handlePay = async () => {
     if (!cleanedPaymentRequest) {
-      setStatus('Payment request required.')
+      setStatus(t('wallet.paymentRequestRequired'))
       return
     }
     if (isLnAddress && payAmountSat <= 0) {
-      setStatus('Amount must be positive for Lightning Address.')
+      setStatus(t('wallet.amountPositiveForLightningAddress'))
       return
     }
-    setStatus('Paying invoice...')
+    setStatus(t('wallet.payingInvoice'))
     try {
       await payInvoice({
         payment_request: cleanedPaymentRequest,
         channel_point: outgoingChannelPoint || undefined,
         amount_sat: isLnAddress ? payAmountSat : undefined
       })
-      setStatus('Payment sent.')
+      setStatus(t('wallet.paymentSent'))
     } catch (err: any) {
-      setStatus(err?.message || 'Payment failed.')
+      setStatus(err?.message || t('wallet.paymentFailed'))
     }
   }
 
@@ -393,47 +397,47 @@ export default function Wallet() {
     const amountMsat = Number(decode.amount_msat || 0)
     if (amountSat > 0) return `${amountSat} sats`
     if (amountMsat > 0) return `${(amountMsat / 1000).toFixed(3)} sats`
-    return 'Amountless'
+    return t('wallet.amountless')
   }
 
   return (
     <section className="space-y-6">
       <div className="section-card">
-        <h2 className="text-2xl font-semibold">Wallet</h2>
-        <p className="text-fog/60">Manage Lightning and on-chain balances.</p>
+        <h2 className="text-2xl font-semibold">{t('wallet.title')}</h2>
+        <p className="text-fog/60">{t('wallet.subtitle')}</p>
         <div className="mt-4 grid gap-4 lg:grid-cols-2 text-sm">
           <div className="rounded-2xl border border-white/10 bg-ink/60 p-4 space-y-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="text-fog/60">On-chain</p>
+                <p className="text-fog/60">{t('wallet.onchain')}</p>
                 <p className="text-xl">{onchainBalance} sats</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button className="btn-secondary text-xs px-3 py-1.5" onClick={handleAddFunds}>
-                  Add funds
+                  {t('wallet.addFunds')}
                 </button>
                 <button className="btn-secondary text-xs px-3 py-1.5" onClick={handleToggleSend}>
-                  {sendOpen ? 'Hide send' : 'Send funds'}
+                  {sendOpen ? t('wallet.hideSend') : t('wallet.sendFunds')}
                 </button>
               </div>
             </div>
             {showAddress && (
               <div className="rounded-2xl border border-white/10 bg-ink/70 p-3">
                 <div className="flex items-center justify-between text-xs text-fog/60">
-                  <span>On-chain deposit address (SegWit)</span>
+                  <span>{t('wallet.onchainDepositAddress')}</span>
                   <button className="text-fog/50 hover:text-fog" onClick={() => setShowAddress(false)}>
-                    Close
+                    {t('common.close')}
                   </button>
                 </div>
                 {addressLoading && (
-                  <p className="mt-2 text-xs text-fog/60">Generating address...</p>
+                  <p className="mt-2 text-xs text-fog/60">{t('wallet.generatingAddress')}</p>
                 )}
                 {!addressLoading && address && (
                   <>
                     <p className="mt-2 text-xs font-mono break-all">{address}</p>
                     <div className="mt-2 flex items-center gap-2">
                       <button className="btn-secondary text-xs px-3 py-1.5" onClick={handleCopy}>
-                        {copied ? 'Copied' : 'Copy address'}
+                        {copied ? t('common.copied') : t('wallet.copyAddress')}
                       </button>
                     </div>
                   </>
@@ -446,23 +450,23 @@ export default function Wallet() {
             {sendOpen && (
               <div className="rounded-2xl border border-white/10 bg-ink/80 p-3 space-y-3">
                 <div className="flex items-center justify-between text-xs text-fog/60">
-                  <span>Send on-chain</span>
+                  <span>{t('wallet.sendOnchain')}</span>
                   <button className="text-fog/50 hover:text-fog" onClick={handleToggleSend}>
-                    Close
+                    {t('common.close')}
                   </button>
                 </div>
                 <input
                   className="input-field"
-                  placeholder="Destination address"
+                  placeholder={t('wallet.destinationAddress')}
                   value={sendAddress}
                   onChange={(e) => setSendAddress(e.target.value)}
                 />
                 <div className="grid gap-3 lg:grid-cols-2 lg:items-start">
                   <div className="space-y-2 lg:max-w-[360px]">
-                    <label className="text-xs text-fog/60">Amount (sats)</label>
+                    <label className="text-xs text-fog/60">{t('wallet.amountSats')}</label>
                     <input
                       className="input-field"
-                      placeholder="Amount (sats)"
+                      placeholder={t('wallet.amountSats')}
                       type="number"
                       min={1}
                       value={sendAmount}
@@ -481,25 +485,25 @@ export default function Wallet() {
                           }
                         }}
                       />
-                      Sweep all
+                      {t('wallet.sweepAll')}
                     </label>
                     {sendSweepAll && (
                       <p className="text-xs text-brass">
-                        Warning: This will send all available on-chain funds (minus fees) to the destination address.
+                        {t('wallet.sweepAllWarning')}
                       </p>
                     )}
                   </div>
                   <div className="space-y-2 lg:max-w-[360px]">
                     <label className="text-xs text-fog/60">
-                      Fee rate (sat/vB)
+                      {t('wallet.feeRate')}
                       <span className="ml-2 text-fog/50">
-                        Fastest: {sendFeeHint?.fastest ?? '-'} | 1h: {sendFeeHint?.hour ?? '-'}
+                        {t('wallet.feeHint', { fastest: sendFeeHint?.fastest ?? '-', hour: sendFeeHint?.hour ?? '-' })}
                       </span>
                     </label>
                     <div className="flex items-center gap-2">
                       <input
                         className="input-field flex-1 min-w-[120px]"
-                        placeholder="Auto"
+                        placeholder={t('common.auto')}
                         type="number"
                         min={1}
                         value={sendFeeRate}
@@ -515,7 +519,7 @@ export default function Wallet() {
                         }}
                         disabled={!sendFeeHint?.fastest}
                       >
-                        Use fastest
+                        {t('wallet.useFastest')}
                       </button>
                     </div>
                     {sendFeeStatus && <p className="text-xs text-fog/50">{sendFeeStatus}</p>}
@@ -526,48 +530,48 @@ export default function Wallet() {
                   onClick={handleSendOnchain}
                   disabled={sendRunning}
                 >
-                  {sendRunning ? 'Sending...' : 'Send on-chain'}
+                  {sendRunning ? t('wallet.sending') : t('wallet.sendOnchain')}
                 </button>
                 {sendStatus && <p className="text-xs text-brass break-words">{sendStatus}</p>}
               </div>
             )}
           </div>
           <div className="rounded-2xl border border-white/10 bg-ink/60 p-4">
-            <p className="text-fog/60">Lightning</p>
+            <p className="text-fog/60">{t('wallet.lightning')}</p>
             <p className="text-xl">{lightningBalance} sats</p>
-            <p className="mt-2 text-xs text-fog/50">Use the cards below to receive or send over Lightning.</p>
+            <p className="mt-2 text-xs text-fog/50">{t('wallet.lightningHint')}</p>
           </div>
         </div>
         {summaryLoading && !summaryError && (
-          <p className="mt-4 text-sm text-fog/60">Fetching wallet balances...</p>
+          <p className="mt-4 text-sm text-fog/60">{t('wallet.fetchingBalances')}</p>
         )}
         {summaryWarning && !summaryError && (
           <p className="mt-4 text-sm text-brass">{summaryWarning}</p>
         )}
         {summaryError && (
-          <p className={`mt-4 text-sm ${summaryTone}`}>Wallet status: {summaryError}</p>
+          <p className={`mt-4 text-sm ${summaryTone}`}>{t('wallet.statusLabel', { status: summaryError })}</p>
         )}
         {status && <p className="mt-4 text-sm text-brass">{status}</p>}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="section-card space-y-4">
-          <h3 className="text-lg font-semibold">Create invoice</h3>
-          <input className="input-field" placeholder="Amount (sats)" value={amount} onChange={(e) => setAmount(e.target.value)} />
-          <input className="input-field" placeholder="Memo" value={memo} onChange={(e) => setMemo(e.target.value)} />
-          <button className="btn-primary" onClick={handleInvoice}>Generate invoice</button>
+          <h3 className="text-lg font-semibold">{t('wallet.createInvoice')}</h3>
+          <input className="input-field" placeholder={t('wallet.amountSats')} value={amount} onChange={(e) => setAmount(e.target.value)} />
+          <input className="input-field" placeholder={t('wallet.memo')} value={memo} onChange={(e) => setMemo(e.target.value)} />
+          <button className="btn-primary" onClick={handleInvoice}>{t('wallet.generateInvoice')}</button>
           {invoice && (
             <div className="rounded-2xl border border-white/10 bg-ink/60 p-3">
               <div className="flex items-center justify-between text-xs text-fog/60">
-                <span>Invoice (Lightning)</span>
+                <span>{t('wallet.invoiceLightning')}</span>
                 <button className="text-fog/50 hover:text-fog" onClick={handleClearInvoice}>
-                  Close
+                  {t('common.close')}
                 </button>
               </div>
               <p className="mt-2 text-xs font-mono break-all">{invoice}</p>
               <div className="mt-2 flex items-center gap-2">
                 <button className="btn-secondary text-xs px-3 py-1.5" onClick={handleCopyInvoice}>
-                  {invoiceCopied ? 'Copied' : 'Copy invoice'}
+                  {invoiceCopied ? t('common.copied') : t('wallet.copyInvoice')}
                 </button>
               </div>
               {invoiceNotice && (
@@ -578,24 +582,24 @@ export default function Wallet() {
         </div>
 
         <div className="section-card space-y-4">
-          <h3 className="text-lg font-semibold">Pay invoice</h3>
-          <textarea className="input-field min-h-[140px]" placeholder="Paste payment request or lightning address" value={paymentRequest} onChange={(e) => setPaymentRequest(e.target.value)} />
+          <h3 className="text-lg font-semibold">{t('wallet.payInvoice')}</h3>
+          <textarea className="input-field min-h-[140px]" placeholder={t('wallet.paymentRequestPlaceholder')} value={paymentRequest} onChange={(e) => setPaymentRequest(e.target.value)} />
           {isLnAddress && (
             <div className="space-y-2">
-              <label className="text-xs text-fog/60">Amount (sats)</label>
+              <label className="text-xs text-fog/60">{t('wallet.amountSats')}</label>
               <input
                 className="input-field"
-                placeholder="Amount (sats)"
+                placeholder={t('wallet.amountSats')}
                 type="number"
                 min={1}
                 value={payAmount}
                 onChange={(e) => setPayAmount(e.target.value)}
               />
-              <p className="text-xs text-fog/50">Lightning address detected. Enter the amount to pay.</p>
+              <p className="text-xs text-fog/50">{t('wallet.lightningAddressDetected')}</p>
             </div>
           )}
           {decodeLoading && (
-            <p className="text-xs text-fog/60">Decoding invoice...</p>
+            <p className="text-xs text-fog/60">{t('wallet.decodingInvoice')}</p>
           )}
           {!decodeLoading && decodeError && (
             <p className="text-xs text-ember">{decodeError}</p>
@@ -603,23 +607,23 @@ export default function Wallet() {
           {!decodeLoading && !decodeError && decode && (
             <div className="rounded-2xl border border-white/10 bg-ink/60 p-3 text-xs">
               <div className="flex items-center justify-between">
-                <span className="text-fog/60">Amount</span>
+                <span className="text-fog/60">{t('wallet.amount')}</span>
                 <span>{decodedAmount()}</span>
               </div>
               <div className="mt-2 flex items-center justify-between">
-                <span className="text-fog/60">Memo</span>
-                <span className="max-w-[220px] truncate text-right">{decode.memo || 'No memo'}</span>
+                <span className="text-fog/60">{t('wallet.memo')}</span>
+                <span className="max-w-[220px] truncate text-right">{decode.memo || t('wallet.noMemo')}</span>
               </div>
             </div>
           )}
           <div className="space-y-2">
-            <label className="text-xs text-fog/60">Outgoing channel (optional)</label>
+            <label className="text-xs text-fog/60">{t('wallet.outgoingChannel')}</label>
             <select
               className="input-field"
               value={outgoingChannelPoint}
               onChange={(e) => setOutgoingChannelPoint(e.target.value)}
             >
-              <option value="">Automatic (LND)</option>
+              <option value="">{t('wallet.automaticLnd')}</option>
               {availableChannels.map((ch) => (
                 <option key={ch.channel_point} value={ch.channel_point}>
                   {formatChannelLabel(ch)}
@@ -627,26 +631,26 @@ export default function Wallet() {
               ))}
             </select>
             <p className="text-xs text-fog/50">
-              Selecting an outgoing channel forces LND to use it. If it fails, remove the selection and try again.
+              {t('wallet.outgoingChannelHint')}
             </p>
             {!channelsLoading && amountForFilter > 0 && availableChannels.length === 0 && (
-              <p className="text-xs text-brass">No channels with enough local balance for this amount.</p>
+              <p className="text-xs text-brass">{t('wallet.noChannelsForAmount')}</p>
             )}
             {channelsError && <p className="text-xs text-fog/50">{channelsError}</p>}
           </div>
-          <button className="btn-primary" onClick={handlePay}>Pay invoice</button>
+          <button className="btn-primary" onClick={handlePay}>{t('wallet.payInvoice')}</button>
         </div>
       </div>
 
       <div className="section-card">
-        <h3 className="text-lg font-semibold">Recent activity</h3>
+        <h3 className="text-lg font-semibold">{t('wallet.recentActivity')}</h3>
         <div className="mt-4 max-h-[360px] overflow-y-auto pr-2">
           <div className="space-y-2 text-sm">
           {summaryError ? (
-            <p className="text-fog/60">Activity unavailable until LND is reachable.</p>
+            <p className="text-fog/60">{t('wallet.activityUnavailable')}</p>
           ) : orderedActivity.length ? orderedActivity.map((item: any, idx: number) => {
             const typeLabel = formatActivityType(item)
-            const statusLabel = String(item.status || 'unknown').replace(/_/g, ' ').toUpperCase()
+            const statusLabel = String(item.status || t('common.unknown')).replace(/_/g, ' ').toUpperCase()
             const direction = activityDirection(item)
             const arrow = direction === 'in' ? '<-' : direction === 'out' ? '->' : '.'
             const arrowTone = direction === 'in' ? 'text-glow' : direction === 'out' ? 'text-ember' : 'text-fog/50'
@@ -666,7 +670,7 @@ export default function Wallet() {
               </div>
             )
           }) : (
-            <p className="text-fog/60">No recent activity yet.</p>
+            <p className="text-fog/60">{t('wallet.noRecentActivity')}</p>
           )}
           </div>
         </div>

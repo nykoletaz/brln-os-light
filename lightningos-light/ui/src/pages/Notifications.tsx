@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getNotifications, getTelegramBackupConfig, testTelegramBackup, updateTelegramBackupConfig } from '../api'
+import { getLocale } from '../i18n'
 
 type Notification = {
   id: number
@@ -23,70 +25,6 @@ type Notification = {
 type TelegramBackupConfig = {
   chat_id?: string
   bot_token_set?: boolean
-}
-
-const formatTimestamp = (value: string) => {
-  if (!value) return 'Unknown time'
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return 'Unknown time'
-  return parsed.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  })
-}
-
-const capitalize = (value: string) => {
-  if (!value) return ''
-  return value.charAt(0).toUpperCase() + value.slice(1)
-}
-
-const labelForType = (value: string) => {
-  switch (value) {
-    case 'onchain':
-      return 'On-chain'
-    case 'lightning':
-      return 'Lightning'
-    case 'channel':
-      return 'Channel'
-    case 'forward':
-      return 'Forward'
-    case 'rebalance':
-      return 'Rebalance'
-    default:
-      return capitalize(value)
-  }
-}
-
-const labelForAction = (value: string) => {
-  switch (value) {
-    case 'receive':
-      return 'received'
-    case 'send':
-      return 'sent'
-    case 'open':
-      return 'opened'
-    case 'close':
-      return 'closed'
-    case 'opening':
-      return 'opening'
-    case 'closing':
-      return 'closing'
-    case 'forwarded':
-      return 'forwarded'
-    case 'rebalanced':
-      return 'rebalanced'
-    default:
-      return value
-  }
-}
-
-const normalizeStatus = (value: string) => {
-  if (!value) return 'UNKNOWN'
-  return value.replace(/_/g, ' ').toUpperCase()
 }
 
 const arrowForDirection = (value: string) => {
@@ -135,9 +73,72 @@ const mempoolTxLink = (txid?: string) => {
   return `https://mempool.space/tx/${txid}`
 }
 
-  export default function Notifications() {
+export default function Notifications() {
+  const { t, i18n } = useTranslation()
+  const locale = getLocale(i18n.language)
+
+  const formatTimestamp = (value: string) => {
+    if (!value) return t('common.unknownTime')
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return t('common.unknownTime')
+    return parsed.toLocaleString(locale, {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    })
+  }
+
+  const labelForType = (value: string) => {
+    switch (value) {
+      case 'onchain':
+        return t('notifications.type.onchain')
+      case 'lightning':
+        return t('notifications.type.lightning')
+      case 'channel':
+        return t('notifications.type.channel')
+      case 'forward':
+        return t('notifications.type.forward')
+      case 'rebalance':
+        return t('notifications.type.rebalance')
+      default:
+        if (!value) return ''
+        return value.charAt(0).toUpperCase() + value.slice(1)
+    }
+  }
+
+  const labelForAction = (value: string) => {
+    switch (value) {
+      case 'receive':
+        return t('notifications.action.received')
+      case 'send':
+        return t('notifications.action.sent')
+      case 'open':
+        return t('notifications.action.opened')
+      case 'close':
+        return t('notifications.action.closed')
+      case 'opening':
+        return t('notifications.action.opening')
+      case 'closing':
+        return t('notifications.action.closing')
+      case 'forwarded':
+        return t('notifications.action.forwarded')
+      case 'rebalanced':
+        return t('notifications.action.rebalanced')
+      default:
+        return value
+    }
+  }
+
+  const normalizeStatus = (value: string) => {
+    if (!value) return t('common.unknown').toUpperCase()
+    return value.replace(/_/g, ' ').toUpperCase()
+  }
+
   const [items, setItems] = useState<Notification[]>([])
-  const [status, setStatus] = useState('Loading notifications...')
+  const [status, setStatus] = useState(t('notifications.loading'))
   const [streamState, setStreamState] = useState<'idle' | 'waiting' | 'reconnecting' | 'error'>('idle')
   const streamErrors = useRef(0)
   const [filter, setFilter] = useState<'all' | 'onchain' | 'lightning' | 'channel' | 'forward' | 'rebalance'>('all')
@@ -152,7 +153,7 @@ const mempoolTxLink = (txid?: string) => {
   useEffect(() => {
     let mounted = true
     const load = async () => {
-      setStatus('Loading notifications...')
+      setStatus(t('notifications.loading'))
       try {
         const res = await getNotifications(200)
         if (!mounted) return
@@ -160,7 +161,7 @@ const mempoolTxLink = (txid?: string) => {
         setStatus('')
       } catch (err: any) {
         if (!mounted) return
-        setStatus(err?.message || 'Notifications unavailable')
+        setStatus(err?.message || t('notifications.unavailable'))
       }
     }
     load()
@@ -241,20 +242,20 @@ const mempoolTxLink = (txid?: string) => {
   const triggerTelegramTest = async (startingMessage?: string, force?: boolean) => {
     if (telegramTesting) return
     if (!force && !telegramEnabled) {
-      setTelegramStatus('Configure Telegram first.')
+      setTelegramStatus(t('notifications.telegram.configureFirst'))
       return
     }
     if (startingMessage) {
       setTelegramStatus(startingMessage)
     } else {
-      setTelegramStatus('Sending test message...')
+      setTelegramStatus(t('notifications.telegram.sendingTest'))
     }
     setTelegramTesting(true)
     try {
       await testTelegramBackup()
-      setTelegramStatus('Telegram test sent.')
+      setTelegramStatus(t('notifications.telegram.testSent'))
     } catch (err: any) {
-      setTelegramStatus(err?.message || 'Failed to send Telegram test.')
+      setTelegramStatus(err?.message || t('notifications.telegram.testFailed'))
     } finally {
       setTelegramTesting(false)
     }
@@ -263,7 +264,7 @@ const mempoolTxLink = (txid?: string) => {
   const handleSaveTelegram = async () => {
     if (telegramSaving) return
     setTelegramSaving(true)
-    setTelegramStatus('Saving...')
+    setTelegramStatus(t('common.saving'))
     try {
       await updateTelegramBackupConfig({
         bot_token: telegramToken,
@@ -274,17 +275,17 @@ const mempoolTxLink = (txid?: string) => {
       setTelegramChatId(data?.chat_id || '')
       setTelegramToken('')
       if (!data?.bot_token_set && !data?.chat_id) {
-        setTelegramStatus('Telegram backup disabled.')
+        setTelegramStatus(t('notifications.telegram.disabled'))
       } else {
         const nextEnabled = Boolean(data?.bot_token_set && data?.chat_id)
         if (nextEnabled) {
-          await triggerTelegramTest('Telegram backup saved. Sending test...', true)
+          await triggerTelegramTest(t('notifications.telegram.savedSendingTest'), true)
         } else {
-          setTelegramStatus('Telegram backup saved.')
+          setTelegramStatus(t('notifications.telegram.saved'))
         }
       }
     } catch (err: any) {
-      setTelegramStatus(err?.message || 'Failed to save Telegram backup.')
+      setTelegramStatus(err?.message || t('notifications.telegram.saveFailed'))
     } finally {
       setTelegramSaving(false)
     }
@@ -295,16 +296,16 @@ const mempoolTxLink = (txid?: string) => {
       <div className="section-card">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-semibold">Notifications</h2>
-            <p className="text-fog/60">Real-time LND activity and history.</p>
+            <h2 className="text-2xl font-semibold">{t('notifications.title')}</h2>
+            <p className="text-fog/60">{t('notifications.subtitle')}</p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
-            <button className={filter === 'all' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('all')}>All</button>
-            <button className={filter === 'onchain' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('onchain')}>On-chain</button>
-            <button className={filter === 'lightning' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('lightning')}>Lightning</button>
-            <button className={filter === 'channel' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('channel')}>Channels</button>
-            <button className={filter === 'forward' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('forward')}>Forwards</button>
-            <button className={filter === 'rebalance' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('rebalance')}>Rebalance</button>
+            <button className={filter === 'all' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('all')}>{t('common.all')}</button>
+            <button className={filter === 'onchain' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('onchain')}>{t('notifications.filter.onchain')}</button>
+            <button className={filter === 'lightning' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('lightning')}>{t('notifications.filter.lightning')}</button>
+            <button className={filter === 'channel' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('channel')}>{t('notifications.filter.channels')}</button>
+            <button className={filter === 'forward' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('forward')}>{t('notifications.filter.forwards')}</button>
+            <button className={filter === 'rebalance' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('rebalance')}>{t('notifications.filter.rebalance')}</button>
           </div>
         </div>
       </div>
@@ -312,15 +313,15 @@ const mempoolTxLink = (txid?: string) => {
       <div className="section-card">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-lg font-semibold">Telegram SCB backup</h3>
-            <p className="text-fog/60">Send a static channel backup on every channel open or close.</p>
+            <h3 className="text-lg font-semibold">{t('notifications.telegram.title')}</h3>
+            <p className="text-fog/60">{t('notifications.telegram.subtitle')}</p>
           </div>
           <div className="flex items-center gap-3">
             <span className={`text-xs ${telegramEnabled ? 'text-glow' : 'text-fog/60'}`}>
-              {telegramEnabled ? 'Enabled' : 'Disabled'}
+              {telegramEnabled ? t('common.enabled') : t('common.disabled')}
             </span>
             <button className="btn-secondary" type="button" onClick={() => setTelegramOpen((prev) => !prev)}>
-              {telegramOpen ? 'Hide' : 'Configure'}
+              {telegramOpen ? t('common.hide') : t('notifications.telegram.configure')}
             </button>
           </div>
         </div>
@@ -328,59 +329,59 @@ const mempoolTxLink = (txid?: string) => {
           <div className="mt-4 space-y-4">
             <div className="grid gap-4 lg:grid-cols-2">
               <div className="space-y-2">
-                <label className="text-sm text-fog/70">Bot token</label>
+                <label className="text-sm text-fog/70">{t('notifications.telegram.botToken')}</label>
                 <input
                   className="input-field"
                   type="password"
-                  placeholder={telegramConfig?.bot_token_set ? 'Token saved' : '123456:ABC...'}
+                  placeholder={telegramConfig?.bot_token_set ? t('notifications.telegram.tokenSaved') : '123456:ABC...'}
                   value={telegramToken}
                   onChange={(e) => setTelegramToken(e.target.value)}
                 />
-                <p className="text-xs text-fog/50">Get the bot token from @BotFather.</p>
+                <p className="text-xs text-fog/50">{t('notifications.telegram.botTokenHint')}</p>
               </div>
               <div className="space-y-2">
-                <label className="text-sm text-fog/70">Chat ID</label>
+                <label className="text-sm text-fog/70">{t('notifications.telegram.chatId')}</label>
                 <input
                   className="input-field"
                   placeholder="123456789"
                   value={telegramChatId}
                   onChange={(e) => setTelegramChatId(e.target.value)}
                 />
-                <p className="text-xs text-fog/50">Find your chat id via @userinfobot. Start a chat with your bot first.</p>
+                <p className="text-xs text-fog/50">{t('notifications.telegram.chatIdHint')}</p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <button className="btn-primary" onClick={handleSaveTelegram} disabled={telegramSaving}>
-                {telegramSaving ? 'Saving...' : 'Save Telegram backup'}
+                {telegramSaving ? t('common.saving') : t('notifications.telegram.save')}
               </button>
               <button
                 className="btn-secondary"
                 onClick={() => triggerTelegramTest()}
                 disabled={telegramTesting || !telegramEnabled}
               >
-                {telegramTesting ? 'Sending test...' : 'Send test'}
+                {telegramTesting ? t('notifications.telegram.sendingTest') : t('notifications.telegram.sendTest')}
               </button>
               {telegramStatus && <span className="text-sm text-brass">{telegramStatus}</span>}
             </div>
-            <p className="text-xs text-fog/50">Direct chat only. Leave both fields empty to disable Telegram backup.</p>
+            <p className="text-xs text-fog/50">{t('notifications.telegram.directChatOnly')}</p>
           </div>
         )}
       </div>
 
       <div className="section-card">
-        <h3 className="text-lg font-semibold">Recent activity</h3>
+        <h3 className="text-lg font-semibold">{t('notifications.recentActivity')}</h3>
         {status && <p className="mt-4 text-sm text-fog/60">{status}</p>}
         {!status && streamState === 'reconnecting' && (
-          <p className="mt-2 text-sm text-brass">Reconnecting live updates...</p>
+          <p className="mt-2 text-sm text-brass">{t('notifications.reconnecting')}</p>
         )}
         {!status && streamState === 'error' && (
-          <p className="mt-2 text-sm text-brass">Live updates unavailable.</p>
+          <p className="mt-2 text-sm text-brass">{t('notifications.liveUpdatesUnavailable')}</p>
         )}
         {!status && streamState === 'waiting' && filtered.length === 0 && (
-          <p className="mt-2 text-sm text-fog/60">Waiting for events...</p>
+          <p className="mt-2 text-sm text-fog/60">{t('notifications.waitingForEvents')}</p>
         )}
         {!status && !filtered.length && (
-          <p className="mt-4 text-sm text-fog/60">No notifications yet.</p>
+          <p className="mt-4 text-sm text-fog/60">{t('notifications.noNotifications')}</p>
         )}
         {filtered.length > 0 && (
           <div className="mt-4 max-h-[520px] overflow-y-auto pr-2">
@@ -392,16 +393,22 @@ const mempoolTxLink = (txid?: string) => {
                 const peer = item.peer_alias || (item.peer_pubkey ? item.peer_pubkey.slice(0, 16) : '')
                 const peerLabel = peer
                   ? item.type === 'rebalance'
-                    ? `Route ${peer}`
-                    : `Peer ${peer}`
+                    ? t('notifications.routeLabel', { peer })
+                    : t('notifications.peerLabel', { peer })
                   : ''
                 const feeRate = formatFeeRate(item.amount_sat, item.fee_sat, item.fee_msat)
                 let feeDetail = ''
                 if (feeRate) {
                   if (item.type === 'forward') {
-                    feeDetail = `Earned ${formatFeeDisplay(item.fee_sat, item.fee_msat)} (${feeRate})`
+                    feeDetail = t('notifications.feeEarned', {
+                      fee: formatFeeDisplay(item.fee_sat, item.fee_msat),
+                      rate: feeRate
+                    })
                   } else if (item.type === 'rebalance') {
-                    feeDetail = `Fee ${formatFeeDisplay(item.fee_sat, item.fee_msat)} (${feeRate})`
+                    feeDetail = t('notifications.feeDetail', {
+                      fee: formatFeeDisplay(item.fee_sat, item.fee_msat),
+                      rate: feeRate
+                    })
                   }
                 }
                 const detailParts: Array<string | JSX.Element> = [
@@ -418,11 +425,11 @@ const mempoolTxLink = (txid?: string) => {
                         target="_blank"
                         rel="noopener noreferrer"
                       >
-                        Channel {item.channel_point.slice(0, 16)}...
+                        {t('notifications.channelLabel', { value: item.channel_point.slice(0, 16) })}
                       </a>
                     )
                   } else {
-                    detailParts.push(`Channel ${item.channel_point.slice(0, 16)}...`)
+                    detailParts.push(t('notifications.channelLabel', { value: item.channel_point.slice(0, 16) }))
                   }
                 }
                 if (item.txid) {
@@ -436,7 +443,7 @@ const mempoolTxLink = (txid?: string) => {
                         target="_blank"
                         rel="noopener noreferrer"
                       >
-                        Tx {item.txid.slice(0, 16)}...
+                        {t('notifications.txLabel', { value: item.txid.slice(0, 16) })}
                       </a>
                     )
                   } else if (item.type === 'onchain') {
@@ -449,11 +456,11 @@ const mempoolTxLink = (txid?: string) => {
                         target="_blank"
                         rel="noopener noreferrer"
                       >
-                        Tx {item.txid.slice(0, 16)}...
+                        {t('notifications.txLabel', { value: item.txid.slice(0, 16) })}
                       </a>
                     )
                   } else {
-                    detailParts.push(`Tx ${item.txid.slice(0, 16)}...`)
+                    detailParts.push(t('notifications.txLabel', { value: item.txid.slice(0, 16) }))
                   }
                 }
                 if (feeDetail) {
@@ -486,7 +493,7 @@ const mempoolTxLink = (txid?: string) => {
                     <div className="text-right">
                       <div>{item.amount_sat} sats</div>
                       {formatFeeDisplay(item.fee_sat, item.fee_msat) && (
-                        <div className="text-xs text-fog/50">Fee {formatFeeDisplay(item.fee_sat, item.fee_msat)}</div>
+                        <div className="text-xs text-fog/50">{t('notifications.feeLabel', { fee: formatFeeDisplay(item.fee_sat, item.fee_msat) })}</div>
                       )}
                     </div>
                   </div>

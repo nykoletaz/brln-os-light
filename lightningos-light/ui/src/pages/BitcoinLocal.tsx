@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getBitcoinLocalConfig, getBitcoinLocalStatus, updateBitcoinLocalConfig } from '../api'
+import { getLocale } from '../i18n'
 
 type BitcoinLocalStatus = {
   installed: boolean
@@ -49,6 +51,8 @@ const formatPercent = (value?: number) => {
 }
 
 export default function BitcoinLocal() {
+  const { t, i18n } = useTranslation()
+  const locale = getLocale(i18n.language)
   const [status, setStatus] = useState<BitcoinLocalStatus | null>(null)
   const [config, setConfig] = useState<BitcoinLocalConfig | null>(null)
   const [mode, setMode] = useState<'full' | 'pruned'>('full')
@@ -214,14 +218,14 @@ export default function BitcoinLocal() {
   const sweepDuration = syncing ? Math.max(2.5, 7.5 - progressValue / 15) : 12
   const currentPeers = status?.connections ?? 0
   const rpcStatusLabel = ready
-    ? 'OK'
+    ? t('common.ok')
     : status?.status !== 'running'
-      ? 'Offline'
+      ? t('common.offline')
       : rpcStale
-        ? `Stale (${rpcFailCount}/5)`
+        ? t('bitcoinLocal.rpcStale', { count: rpcFailCount })
         : rpcFailCount > 0
-          ? `Retrying (${rpcFailCount}/5)`
-          : 'Connecting...'
+          ? t('bitcoinLocal.rpcRetrying', { count: rpcFailCount })
+          : t('common.connecting')
   const rpcBadgeClass = ready
     ? 'bg-emerald-500/15 text-emerald-200 border border-emerald-400/30 px-2 py-0.5 rounded-full text-[11px] uppercase tracking-wide'
     : 'text-fog'
@@ -260,7 +264,7 @@ export default function BitcoinLocal() {
   const lastBlockTime = typeof status?.best_block_time === 'number' ? status.best_block_time * 1000 : null
   const lastBlockAgeSec = lastBlockTime ? Math.max(0, (Date.now() - lastBlockTime) / 1000) : null
   const lastBlockLabel = lastBlockTime
-    ? new Date(lastBlockTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+    ? new Date(lastBlockTime).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
     : '-'
   const cadenceTone = lastBlockAgeSec === null
     ? 'muted'
@@ -276,7 +280,16 @@ export default function BitcoinLocal() {
       : cadenceTone === 'stale'
         ? 'bg-rose-500/15 text-rose-200 border border-rose-400/30'
         : 'bg-white/10 text-fog/60 border border-white/10'
-  const cadenceLabel = cadenceTone === 'ok' ? 'OK' : cadenceTone === 'warn' ? 'Warn' : cadenceTone === 'stale' ? 'Stale' : 'Unknown'
+  const cadenceLabel = cadenceTone === 'ok'
+    ? t('common.ok')
+    : cadenceTone === 'warn'
+      ? t('bitcoinLocal.cadenceWarn')
+      : cadenceTone === 'stale'
+        ? t('bitcoinLocal.cadenceStale')
+    : t('common.unknown')
+  const lastSuccessAgeLabel = rpcLastSuccessRef.current
+    ? t('bitcoinLocal.lastCapturedAge', { age: formatAge(rpcLastSuccessRef.current) })
+    : ''
 
   const handleSave = async () => {
     setMessage('')
@@ -288,11 +301,11 @@ export default function BitcoinLocal() {
         apply_now: applyNow
       }
       await updateBitcoinLocalConfig(payload)
-      setMessage('Configuration saved.')
+      setMessage(t('bitcoinLocal.configSaved'))
       loadConfig()
       loadStatus()
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'Failed to save configuration.')
+      setMessage(err instanceof Error ? err.message : t('bitcoinLocal.configSaveFailed'))
     } finally {
       setSaving(false)
     }
@@ -303,11 +316,11 @@ export default function BitcoinLocal() {
       <div className="section-card space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-semibold">Bitcoin Local</h2>
-            <p className="text-fog/60">Manage your local Bitcoin Core node and track sync in real time.</p>
+            <h2 className="text-2xl font-semibold">{t('bitcoinLocal.title')}</h2>
+            <p className="text-fog/60">{t('bitcoinLocal.subtitle')}</p>
           </div>
           <span className={`text-xs uppercase tracking-wide px-3 py-1 rounded-full ${statusClass}`}>
-            {status?.status?.replace('_', ' ') || 'unknown'}
+            {status?.status?.replace('_', ' ') || t('common.unknown')}
           </span>
         </div>
         {message && <p className="text-sm text-brass">{message}</p>}
@@ -315,9 +328,9 @@ export default function BitcoinLocal() {
 
       {!installed && (
         <div className="section-card space-y-3">
-          <h3 className="text-lg font-semibold">Bitcoin Core not installed</h3>
-          <p className="text-fog/60">Install Bitcoin Core in the App Store to enable local monitoring.</p>
-          <a className="btn-primary inline-flex items-center" href="#apps">Open App Store</a>
+          <h3 className="text-lg font-semibold">{t('bitcoinLocal.notInstalledTitle')}</h3>
+          <p className="text-fog/60">{t('bitcoinLocal.notInstalledBody')}</p>
+          <a className="btn-primary inline-flex items-center" href="#apps">{t('bitcoinLocal.openAppStore')}</a>
         </div>
       )}
 
@@ -326,8 +339,8 @@ export default function BitcoinLocal() {
           <div className="grid gap-6 lg:grid-cols-2">
             <div className="section-card space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Sync</h3>
-                <span className="text-xs text-fog/60">{syncing ? 'Syncing' : 'Status'}</span>
+                <h3 className="text-lg font-semibold">{t('bitcoinLocal.sync')}</h3>
+                <span className="text-xs text-fog/60">{syncing ? t('bitcoinLocal.syncing') : t('common.status')}</span>
               </div>
 
               <div className="chain-track" style={{ ['--sync-progress' as any]: progressValue / 100 }}>
@@ -349,7 +362,7 @@ export default function BitcoinLocal() {
 
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-fog/60">{syncing ? 'Downloading blocks' : 'Verification progress'}</span>
+                  <span className="text-fog/60">{syncing ? t('bitcoinLocal.downloadingBlocks') : t('bitcoinLocal.verificationProgress')}</span>
                   <span className="font-semibold text-fog">{progress}%</span>
                 </div>
                 <div className="h-3 rounded-full bg-white/10 overflow-hidden">
@@ -359,60 +372,62 @@ export default function BitcoinLocal() {
 
               <div className="grid gap-3 text-sm text-fog/70">
                 <div className="flex items-center justify-between">
-                  <span>{ready ? 'Live blocks' : 'Blocks'}</span>
-                  <span className="text-fog">{status?.blocks?.toLocaleString() || '-'}</span>
+                  <span>{ready ? t('bitcoinLocal.liveBlocks') : t('bitcoinLocal.blocks')}</span>
+                  <span className="text-fog">{status?.blocks?.toLocaleString(locale) || '-'}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Headers</span>
-                  <span className="text-fog">{status?.headers?.toLocaleString() || '-'}</span>
+                  <span>{t('bitcoinLocal.headers')}</span>
+                  <span className="text-fog">{status?.headers?.toLocaleString(locale) || '-'}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Disk usage</span>
+                  <span>{t('bitcoinLocal.diskUsage')}</span>
                   <span className="text-fog">{formatGB(status?.size_on_disk)}</span>
                 </div>
               </div>
             </div>
 
             <div className="section-card space-y-4">
-              <h3 className="text-lg font-semibold">Node status</h3>
+              <h3 className="text-lg font-semibold">{t('bitcoinLocal.nodeStatus')}</h3>
               <div className="grid gap-3 text-sm text-fog/70">
                 <div className="flex items-center justify-between">
-                  <span>RPC status</span>
+                  <span>{t('bitcoinLocal.rpcStatus')}</span>
                   <span className={rpcBadgeClass}>{rpcStatusLabel}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Network</span>
+                  <span>{t('bitcoinLocal.network')}</span>
                   <span className="text-fog">{status?.chain || '-'}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Peers</span>
+                  <span>{t('bitcoinLocal.peers')}</span>
                   <span className="text-fog">{currentPeers || '-'}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Version</span>
+                  <span>{t('bitcoinLocal.version')}</span>
                   <span className="text-fog">{status?.subversion || status?.version || '-'}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Pruned</span>
-                  <span className="text-fog">{status?.pruned ? 'Yes' : 'No'}</span>
+                  <span>{t('bitcoinLocal.pruned')}</span>
+                  <span className="text-fog">{status?.pruned ? t('common.yes') : t('common.no')}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Prune target</span>
+                  <span>{t('bitcoinLocal.pruneTarget')}</span>
                   <span className="text-fog">{formatGB(status?.prune_target_size)}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Data dir</span>
+                  <span>{t('bitcoinLocal.dataDir')}</span>
                   <span className="text-fog">{status?.data_dir || config?.data_dir || '-'}</span>
                 </div>
               </div>
               <div className="glow-divider" />
               {rpcStale ? (
                 <p className="text-xs text-brass">
-                  RPC reconnecting. Showing last captured data{rpcLastSuccessRef.current ? ` (${formatAge(rpcLastSuccessRef.current)} ago)` : ''}. Retrying every 6s.
+                  {t('bitcoinLocal.rpcReconnecting', {
+                    age: lastSuccessAgeLabel
+                  })}
                 </p>
               ) : (
                 <p className="text-xs text-fog/60">
-                  {syncing ? 'The node is syncing the blockchain. This may take hours or days.' : 'Node is ready for local use.'}
+                  {syncing ? t('bitcoinLocal.syncingNote') : t('bitcoinLocal.readyNote')}
                 </p>
               )}
             </div>
@@ -422,11 +437,11 @@ export default function BitcoinLocal() {
             <div className="section-card space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <h3 className="text-lg font-semibold">Storage configuration</h3>
-                  <p className="text-fog/60 text-sm">Choose full node or pruned mode to reduce disk usage.</p>
+                  <h3 className="text-lg font-semibold">{t('bitcoinLocal.storageConfig')}</h3>
+                  <p className="text-fog/60 text-sm">{t('bitcoinLocal.storageSubtitle')}</p>
                 </div>
                 <div className="text-xs text-fog/50">
-                  Min prune: {config?.min_prune_gb?.toFixed(2) || '0.54'} GB
+                  {t('bitcoinLocal.minPrune', { value: config?.min_prune_gb?.toFixed(2) || '0.54' })}
                 </div>
               </div>
 
@@ -436,21 +451,21 @@ export default function BitcoinLocal() {
                   onClick={() => setMode('full')}
                   type="button"
                 >
-                  Full node
+                  {t('bitcoinLocal.fullNode')}
                 </button>
                 <button
                   className={`px-4 py-2 rounded-full border ${mode === 'pruned' ? 'bg-glow text-ink border-transparent' : 'border-white/20 text-fog'}`}
                   onClick={() => setMode('pruned')}
                   type="button"
                 >
-                  Pruned
+                  {t('bitcoinLocal.prunedMode')}
                 </button>
               </div>
 
               {mode === 'pruned' && (
                 <div className="grid gap-3 lg:grid-cols-2">
                   <label className="text-sm text-fog/70">
-                    Prune size (GB)
+                    {t('bitcoinLocal.pruneSize')}
                     <input
                       className="input-field mt-2"
                       type="number"
@@ -461,8 +476,8 @@ export default function BitcoinLocal() {
                     />
                   </label>
                   <div className="text-xs text-fog/50">
-                    <p>Pruned mode keeps only part of the blockchain to save disk space.</p>
-                    <p>Minimum value accepted by Bitcoin Core: {config?.min_prune_gb?.toFixed(2) || '0.54'} GB.</p>
+                    <p>{t('bitcoinLocal.prunedModeDescription')}</p>
+                    <p>{t('bitcoinLocal.minPruneAccepted', { value: config?.min_prune_gb?.toFixed(2) || '0.54' })}</p>
                   </div>
                 </div>
               )}
@@ -474,15 +489,15 @@ export default function BitcoinLocal() {
                   checked={applyNow}
                   onChange={(e) => setApplyNow(e.target.checked)}
                 />
-                Apply now (restarts bitcoind)
+                {t('bitcoinLocal.applyNow')}
               </label>
 
               <div className="flex flex-wrap items-center gap-3">
                 <button className="btn-primary" onClick={handleSave} disabled={saving}>
-                  {saving ? 'Saving...' : 'Save configuration'}
+                  {saving ? t('common.saving') : t('bitcoinLocal.saveConfig')}
                 </button>
                 <span className="text-xs text-fog/50">
-                  Prune changes require a restart to take effect.
+                  {t('bitcoinLocal.pruneRestartNote')}
                 </span>
               </div>
             </div>
@@ -490,8 +505,8 @@ export default function BitcoinLocal() {
             <div className="section-card space-y-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h3 className="text-lg font-semibold">Block cadence</h3>
-                  <p className="text-xs text-fog/60">Last {cadenceHours.toFixed(1)} hours</p>
+                  <h3 className="text-lg font-semibold">{t('bitcoinLocal.blockCadence')}</h3>
+                  <p className="text-xs text-fog/60">{t('bitcoinLocal.lastHours', { hours: cadenceHours.toFixed(1) })}</p>
                 </div>
                 <span className={`text-xs uppercase tracking-wide px-3 py-1 rounded-full ${cadenceBadgeClass}`}>
                   {cadenceLabel}
@@ -499,11 +514,11 @@ export default function BitcoinLocal() {
               </div>
               <div className="grid gap-2 text-sm text-fog/70">
                 <div className="flex items-center justify-between">
-                  <span>Last block seen</span>
-                  <span className="text-fog">{formatDuration(lastBlockAgeSec)} ago</span>
+                  <span>{t('bitcoinLocal.lastBlockSeen')}</span>
+                  <span className="text-fog">{t('bitcoinLocal.timeAgo', { time: formatDuration(lastBlockAgeSec) })}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Network block time</span>
+                  <span>{t('bitcoinLocal.networkBlockTime')}</span>
                   <span className="text-fog">{lastBlockLabel}</span>
                 </div>
               </div>
@@ -512,14 +527,14 @@ export default function BitcoinLocal() {
                 {(cadenceBuckets.length > 0 ? cadenceBuckets : Array.from({ length: 12 }).map(() => ({ start_time: 0, end_time: 0, count: 0 }))).map((bucket, idx) => {
                   const height = Math.max(8, Math.round((bucket.count / maxCadence) * 100))
                   const startLabel = bucket.start_time
-                    ? new Date(bucket.start_time * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+                    ? new Date(bucket.start_time * 1000).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
                     : ''
                   const endLabel = bucket.end_time
-                    ? new Date(bucket.end_time * 1000).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+                    ? new Date(bucket.end_time * 1000).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
                     : ''
                   const title = startLabel && endLabel
-                    ? `${startLabel}–${endLabel}: ${bucket.count} blocks`
-                    : `${bucket.count} blocks`
+                    ? `${startLabel}–${endLabel}: ${bucket.count} ${t('bitcoinLocal.blocksLabel')}`
+                    : `${bucket.count} ${t('bitcoinLocal.blocksLabel')}`
                   return (
                     <div className="block-cadence-bar" key={`cadence-${idx}`} title={title}>
                       <div className="block-cadence-fill" style={{ height: `${height}%` }} />
@@ -528,8 +543,8 @@ export default function BitcoinLocal() {
                 })}
               </div>
               <div className="flex items-center justify-between text-xs text-fog/50">
-                <span>{cadenceTotal} blocks / {cadenceHours.toFixed(1)}h</span>
-                <span>avg {cadenceAvg.toFixed(1)} blocks/h</span>
+                <span>{t('bitcoinLocal.blocksPerHour', { total: cadenceTotal, hours: cadenceHours.toFixed(1) })}</span>
+                <span>{t('bitcoinLocal.avgBlocksPerHour', { avg: cadenceAvg.toFixed(1) })}</span>
               </div>
             </div>
           </div>

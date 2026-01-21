@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getBitcoinActive, getDisk, getLndStatus, getPostgres, getSystem, restartService } from '../api'
 
 export default function Dashboard() {
+  const { t } = useTranslation()
   const [system, setSystem] = useState<any>(null)
   const [disk, setDisk] = useState<any[]>([])
   const [bitcoin, setBitcoin] = useState<any>(null)
   const [postgres, setPostgres] = useState<any>(null)
   const [lnd, setLnd] = useState<any>(null)
-  const [status, setStatus] = useState('Loading...')
+  const [status, setStatus] = useState<'loading' | 'ok' | 'unavailable'>('loading')
 
   const syncLabel = (info: any) => {
     if (!info || typeof info.verification_progress !== 'number') {
-      return 'n/a'
+      return t('common.na')
     }
     return `${(info.verification_progress * 100).toFixed(2)}%`
   }
@@ -47,7 +49,12 @@ export default function Dashboard() {
     </span>
   )
 
-  const overallTone = status === 'OK' ? 'ok' : status === 'Unavailable' ? 'warn' : 'muted'
+  const overallTone = status === 'ok' ? 'ok' : status === 'unavailable' ? 'warn' : 'muted'
+  const statusLabel = status === 'ok'
+    ? t('common.ok')
+    : status === 'unavailable'
+      ? t('common.unavailable')
+      : t('dashboard.loadingStatus')
   const lndInfoStale = Boolean(lnd?.info_stale && lnd?.info_known)
   const lndInfoAge = Number(lnd?.info_age_seconds || 0)
   const lndInfoStaleTooLong = lndInfoStale && lndInfoAge > 900
@@ -69,10 +76,10 @@ export default function Dashboard() {
         setBitcoin(btc)
         setPostgres(pg)
         setLnd(lndStatus)
-        setStatus('OK')
+        setStatus('ok')
       } catch {
         if (!mounted) return
-        setStatus('Unavailable')
+        setStatus('unavailable')
       }
     }
     load()
@@ -92,15 +99,15 @@ export default function Dashboard() {
       <div className="section-card">
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-sm text-fog/60">System pulse</p>
+            <p className="text-sm text-fog/60">{t('dashboard.systemPulse')}</p>
             <div className="flex items-center gap-3">
-              <h2 className="text-2xl font-semibold">Overall status</h2>
-              <Badge label={status} tone={overallTone} />
+              <h2 className="text-2xl font-semibold">{t('dashboard.overallStatus')}</h2>
+              <Badge label={statusLabel} tone={overallTone} />
             </div>
           </div>
           <div className="flex gap-2">
-            <button className="btn-secondary" onClick={() => restart('lnd')}>Restart LND</button>
-            <button className="btn-secondary" onClick={() => restart('lightningos-manager')}>Restart Manager</button>
+            <button className="btn-secondary" onClick={() => restart('lnd')}>{t('dashboard.restartLnd')}</button>
+            <button className="btn-secondary" onClick={() => restart('lightningos-manager')}>{t('dashboard.restartManager')}</button>
           </div>
         </div>
       </div>
@@ -108,19 +115,19 @@ export default function Dashboard() {
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="section-card">
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">LND</h3>
+            <h3 className="text-lg font-semibold">{t('dashboard.lnd')}</h3>
             <div className="text-right">
               <div className="flex items-center justify-end gap-2 text-xs text-fog/60">
                 <span>{lnd?.version ? `v${lnd.version}` : ''}</span>
                 {lndInfoStale && (
-                  <span className="uppercase text-[10px] text-fog/40">cached</span>
+                  <span className="uppercase text-[10px] text-fog/40">{t('dashboard.cached')}</span>
                 )}
               </div>
               {(lnd?.pubkey || lnd?.uri) && (
                 <div className="mt-2 space-y-1 text-xs text-fog/60">
                   {lnd?.pubkey && (
                     <div className="flex items-center justify-end gap-2">
-                      <span className="text-fog/50">Pubkey</span>
+                      <span className="text-fog/50">{t('dashboard.pubkey')}</span>
                       <span
                         className="font-mono text-fog/70 max-w-[220px] truncate"
                         title={lnd.pubkey}
@@ -130,8 +137,8 @@ export default function Dashboard() {
                       <button
                         className="text-fog/50 hover:text-fog"
                         onClick={() => copyToClipboard(lnd.pubkey)}
-                        title="Copy pubkey"
-                        aria-label="Copy pubkey"
+                        title={t('dashboard.copyPubkey')}
+                        aria-label={t('dashboard.copyPubkey')}
                       >
                         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
                           <rect x="9" y="9" width="11" height="11" rx="2" />
@@ -142,7 +149,7 @@ export default function Dashboard() {
                   )}
                   {lnd?.uri && (
                     <div className="flex items-center justify-end gap-2">
-                      <span className="text-fog/50">URI</span>
+                      <span className="text-fog/50">{t('dashboard.uri')}</span>
                       <span
                         className="font-mono text-fog/70 max-w-[220px] truncate"
                         title={lnd.uri}
@@ -152,8 +159,8 @@ export default function Dashboard() {
                       <button
                         className="text-fog/50 hover:text-fog"
                         onClick={() => copyToClipboard(lnd.uri)}
-                        title="Copy URI"
-                        aria-label="Copy URI"
+                        title={t('dashboard.copyUri')}
+                        aria-label={t('dashboard.copyUri')}
                       >
                         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
                           <rect x="9" y="9" width="11" height="11" rx="2" />
@@ -169,17 +176,17 @@ export default function Dashboard() {
           {lnd ? (
             <div className="mt-4 text-sm space-y-2">
               <div className="flex justify-between">
-                <span>Wallet</span>
+                <span>{t('dashboard.wallet')}</span>
                 <Badge label={lnd.wallet_state} tone={lnd.wallet_state === 'unlocked' ? 'ok' : 'warn'} />
               </div>
               <div className="flex justify-between items-center">
-                <span>Synced</span>
+                <span>{t('dashboard.synced')}</span>
                 <div className="flex items-center gap-2">
                   <Badge
                     label={
                       lnd.synced_to_chain
-                        ? (lndInfoStale && !lndInfoStaleTooLong ? 'chain cached' : 'chain')
-                        : 'chain pending'
+                        ? (lndInfoStale && !lndInfoStaleTooLong ? t('dashboard.chainCached') : t('dashboard.chain'))
+                        : t('dashboard.chainPending')
                     }
                     tone={
                       lnd.synced_to_chain
@@ -190,8 +197,8 @@ export default function Dashboard() {
                   <Badge
                     label={
                       lnd.synced_to_graph
-                        ? (lndInfoStale && !lndInfoStaleTooLong ? 'graph cached' : 'graph')
-                        : 'graph pending'
+                        ? (lndInfoStale && !lndInfoStaleTooLong ? t('dashboard.graphCached') : t('dashboard.graph'))
+                        : t('dashboard.graphPending')
                     }
                     tone={
                       lnd.synced_to_graph
@@ -202,100 +209,105 @@ export default function Dashboard() {
                 </div>
               </div>
               <div className="flex justify-between items-center">
-                <span>Channels</span>
+                <span>{t('dashboard.channels')}</span>
                 <div className="flex items-center gap-2">
-                  <Badge label={`${lnd.channels.active} active`} tone={lnd.channels.active > 0 ? 'ok' : 'warn'} />
-                  <Badge label={`${lnd.channels.inactive} inactive`} tone={lnd.channels.inactive > 0 ? 'warn' : 'muted'} />
+                  <Badge label={t('dashboard.activeCount', { count: lnd.channels.active })} tone={lnd.channels.active > 0 ? 'ok' : 'warn'} />
+                  <Badge label={t('dashboard.inactiveCount', { count: lnd.channels.inactive })} tone={lnd.channels.inactive > 0 ? 'warn' : 'muted'} />
                 </div>
               </div>
-              <div className="flex justify-between"><span>Balances</span><span>{lnd.balances.onchain_sat} sats on-chain / {lnd.balances.lightning_sat} sats LN</span></div>
+              <div className="flex justify-between">
+                <span>{t('dashboard.balances')}</span>
+                <span>{t('dashboard.balanceSummary', { onchain: lnd.balances.onchain_sat, lightning: lnd.balances.lightning_sat })}</span>
+              </div>
             </div>
           ) : (
-            <p className="text-fog/60 mt-4">Loading LND status...</p>
+            <p className="text-fog/60 mt-4">{t('dashboard.loadingLndStatus')}</p>
           )}
         </div>
 
         <div className="section-card">
-          <h3 className="text-lg font-semibold">{bitcoin?.mode === 'local' ? 'Bitcoin Local' : 'Bitcoin Remote'}</h3>
+          <h3 className="text-lg font-semibold">
+            {bitcoin?.mode === 'local' ? t('dashboard.bitcoinLocal') : t('dashboard.bitcoinRemote')}
+          </h3>
           {bitcoin ? (
             <div className="mt-4 text-sm space-y-2">
-              <div className="flex justify-between"><span>Host</span><span>{bitcoin.rpchost}</span></div>
-              <div className="flex justify-between"><span>RPC</span><Badge label={bitcoin.rpc_ok ? 'OK' : 'Fail'} tone={bitcoin.rpc_ok ? 'ok' : 'warn'} /></div>
-              <div className="flex justify-between"><span>ZMQ Raw Block</span><Badge label={bitcoin.zmq_rawblock_ok ? 'OK' : 'Fail'} tone={bitcoin.zmq_rawblock_ok ? 'ok' : 'warn'} /></div>
-              <div className="flex justify-between"><span>ZMQ Raw Tx</span><Badge label={bitcoin.zmq_rawtx_ok ? 'OK' : 'Fail'} tone={bitcoin.zmq_rawtx_ok ? 'ok' : 'warn'} /></div>
+              <div className="flex justify-between"><span>{t('dashboard.host')}</span><span>{bitcoin.rpchost}</span></div>
+              <div className="flex justify-between"><span>{t('dashboard.rpc')}</span><Badge label={bitcoin.rpc_ok ? t('common.ok') : t('common.fail')} tone={bitcoin.rpc_ok ? 'ok' : 'warn'} /></div>
+              <div className="flex justify-between"><span>{t('dashboard.zmqRawBlock')}</span><Badge label={bitcoin.zmq_rawblock_ok ? t('common.ok') : t('common.fail')} tone={bitcoin.zmq_rawblock_ok ? 'ok' : 'warn'} /></div>
+              <div className="flex justify-between"><span>{t('dashboard.zmqRawTx')}</span><Badge label={bitcoin.zmq_rawtx_ok ? t('common.ok') : t('common.fail')} tone={bitcoin.zmq_rawtx_ok ? 'ok' : 'warn'} /></div>
               {bitcoin.rpc_ok && (
                 <>
-                  <div className="flex justify-between"><span>Chain</span><span>{bitcoin.chain || 'n/a'}</span></div>
-                  <div className="flex justify-between"><span>Blocks</span><span>{bitcoin.blocks ?? 'n/a'}</span></div>
-                  <div className="flex justify-between"><span>Sync</span><span>{syncLabel(bitcoin)}</span></div>
+                  <div className="flex justify-between"><span>{t('dashboard.chain')}</span><span>{bitcoin.chain || t('common.na')}</span></div>
+                  <div className="flex justify-between"><span>{t('dashboard.blocks')}</span><span>{bitcoin.blocks ?? t('common.na')}</span></div>
+                  <div className="flex justify-between"><span>{t('dashboard.sync')}</span><span>{syncLabel(bitcoin)}</span></div>
                 </>
               )}
             </div>
           ) : (
-            <p className="text-fog/60 mt-4">Loading bitcoin status...</p>
+            <p className="text-fog/60 mt-4">{t('dashboard.loadingBitcoinStatus')}</p>
           )}
         </div>
 
         <div className="section-card">
-          <h3 className="text-lg font-semibold">Postgres</h3>
+          <h3 className="text-lg font-semibold">{t('dashboard.postgres')}</h3>
           {postgres ? (
             <div className="mt-4 text-sm space-y-2">
-              <div className="flex justify-between"><span>Service</span><Badge label={postgres.service_active ? 'Active' : 'Inactive'} tone={postgres.service_active ? 'ok' : 'warn'} /></div>
-              <div className="flex justify-between"><span>Version</span><span>{postgres.version || 'n/a'}</span></div>
-              <div className="flex justify-between"><span>DB size</span><span>{postgres.db_size_mb} MB</span></div>
-              <div className="flex justify-between"><span>Connections</span><span>{postgres.connections}</span></div>
+              <div className="flex justify-between"><span>{t('dashboard.service')}</span><Badge label={postgres.service_active ? t('common.active') : t('common.inactive')} tone={postgres.service_active ? 'ok' : 'warn'} /></div>
+              <div className="flex justify-between"><span>{t('dashboard.version')}</span><span>{postgres.version || t('common.na')}</span></div>
+              <div className="flex justify-between"><span>{t('dashboard.dbSize')}</span><span>{postgres.db_size_mb} MB</span></div>
+              <div className="flex justify-between"><span>{t('dashboard.connections')}</span><span>{postgres.connections}</span></div>
             </div>
           ) : (
-            <p className="text-fog/60 mt-4">Loading postgres status...</p>
+            <p className="text-fog/60 mt-4">{t('dashboard.loadingPostgresStatus')}</p>
           )}
         </div>
 
         <div className="section-card">
-          <h3 className="text-lg font-semibold">System</h3>
+          <h3 className="text-lg font-semibold">{t('dashboard.system')}</h3>
           {system ? (
             <div className="mt-4 grid grid-cols-2 gap-4 text-sm">
               <div>
-                <p className="text-fog/60">CPU load</p>
+                <p className="text-fog/60">{t('dashboard.cpuLoad')}</p>
                 <p>{system.cpu_load_1?.toFixed?.(2)} / {system.cpu_percent?.toFixed?.(1)}%</p>
               </div>
               <div>
-                <p className="text-fog/60">RAM used</p>
+                <p className="text-fog/60">{t('dashboard.ramUsed')}</p>
                 <p>{system.ram_used_mb} / {system.ram_total_mb} MB</p>
               </div>
               <div>
-                <p className="text-fog/60">Uptime</p>
-                <p>{Math.round(system.uptime_sec / 3600)} hours</p>
+                <p className="text-fog/60">{t('dashboard.uptime')}</p>
+                <p>{t('dashboard.uptimeHours', { count: Math.round(system.uptime_sec / 3600) })}</p>
               </div>
               <div>
-                <p className="text-fog/60">Temp</p>
+                <p className="text-fog/60">{t('dashboard.temp')}</p>
                 <p>{system.temperature_c?.toFixed?.(1)} C</p>
               </div>
             </div>
           ) : (
-            <p className="text-fog/60 mt-4">Loading system info...</p>
+            <p className="text-fog/60 mt-4">{t('dashboard.loadingSystemInfo')}</p>
           )}
         </div>
       </div>
 
       <div className="section-card">
-        <h3 className="text-lg font-semibold">Disks</h3>
+        <h3 className="text-lg font-semibold">{t('dashboard.disks')}</h3>
         {disk.length ? (
           <div className="mt-4 grid gap-3">
             {disk.map((item) => (
               <div key={item.device} className="flex flex-col lg:flex-row lg:items-center lg:justify-between bg-ink/40 rounded-2xl p-4">
                 <div>
                   <p className="text-sm text-fog/70">{item.device} ({item.type})</p>
-                  <p className="text-xs text-fog/50">Power on hours: {item.power_on_hours}</p>
+                  <p className="text-xs text-fog/50">{t('dashboard.powerOnHours', { count: item.power_on_hours })}</p>
                 </div>
                 <div className="text-sm text-fog/80">
-                  Wear: {item.wear_percent_used}% | Days left: {item.days_left_estimate}
+                  {t('dashboard.wearDaysLeft', { wear: item.wear_percent_used, days: item.days_left_estimate })}
                 </div>
-                <div className="text-xs text-fog/60">SMART: {item.smart_status}</div>
+                <div className="text-xs text-fog/60">{t('dashboard.smartLabel', { status: item.smart_status })}</div>
               </div>
             ))}
           </div>
         ) : (
-          <p className="text-fog/60 mt-4">No disk data yet.</p>
+          <p className="text-fog/60 mt-4">{t('dashboard.noDiskData')}</p>
         )}
       </div>
     </section>

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getBitcoinSource, getLndConfig, setBitcoinSource, updateLndConfig, updateLndRawConfig } from '../api'
 
 export default function LndConfig() {
+  const { t } = useTranslation()
   const [config, setConfig] = useState<any>(null)
   const [alias, setAlias] = useState('')
   const [color, setColor] = useState('#ff9900')
@@ -38,10 +40,10 @@ export default function LndConfig() {
 
   const handleSave = async () => {
     if (!isHexColor(color)) {
-      setStatus('Color must be hex (#RRGGBB).')
+      setStatus(t('lndConfig.colorInvalid'))
       return
     }
-    setStatus('Saving...')
+    setStatus(t('common.saving'))
     try {
       await updateLndConfig({
         alias,
@@ -50,26 +52,26 @@ export default function LndConfig() {
         max_channel_size_sat: Number(maxChan || 0),
         apply_now: true
       })
-      setStatus('Saved and applied.')
+      setStatus(t('lndConfig.savedApplied'))
     } catch {
-      setStatus('Save failed.')
+      setStatus(t('lndConfig.saveFailed'))
     }
   }
 
   const handleSaveRaw = async () => {
-    setStatus('Saving advanced config...')
+    setStatus(t('lndConfig.savingAdvanced'))
     try {
       const result = await updateLndRawConfig({ raw_user_conf: raw, apply_now: true })
       if (result?.warning) {
-        setStatus(`Advanced config applied. ${result.warning}`)
+        setStatus(t('lndConfig.advancedAppliedWarning', { warning: result.warning }))
       } else {
-        setStatus('Advanced config applied.')
+        setStatus(t('lndConfig.advancedApplied'))
       }
     } catch (err) {
       if (err instanceof Error && err.message) {
         setStatus(err.message)
       } else {
-        setStatus('Advanced config failed.')
+        setStatus(t('lndConfig.advancedFailed'))
       }
     }
   }
@@ -77,14 +79,15 @@ export default function LndConfig() {
   const handleToggleSource = async () => {
     if (sourceBusy) return
     const next = bitcoinSource === 'remote' ? 'local' : 'remote'
+    const targetLabel = next === 'local' ? t('common.local') : t('common.remote')
     setSourceBusy(true)
-    setStatus(`Switching to ${next} Bitcoin...`)
+    setStatus(t('lndConfig.switchingBitcoin', { target: targetLabel }))
     try {
       await setBitcoinSource({ source: next })
       setBitcoinSourceState(next)
-      setStatus(`Bitcoin source set to ${next}. LND is restarting...`)
+      setStatus(t('lndConfig.bitcoinSourceSet', { target: targetLabel }))
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : 'Failed to switch Bitcoin source.')
+      setStatus(err instanceof Error ? err.message : t('lndConfig.switchFailed'))
     } finally {
       setSourceBusy(false)
     }
@@ -95,24 +98,24 @@ export default function LndConfig() {
       <div className="section-card">
         <div className="flex items-start justify-between gap-6">
           <div>
-            <h2 className="text-2xl font-semibold">LND configuration</h2>
-            <p className="text-fog/60">Edit supported values in /data/lnd/lnd.conf.</p>
-            <p className="text-fog/50 text-sm">Advanced editor rewrites the full lnd.conf.</p>
+            <h2 className="text-2xl font-semibold">{t('lndConfig.title')}</h2>
+            <p className="text-fog/60">{t('lndConfig.subtitle')}</p>
+            <p className="text-fog/50 text-sm">{t('lndConfig.advancedHint')}</p>
           </div>
           <div className="flex flex-col items-end gap-2">
-            <span className="text-xs text-fog/60">Bitcoin source</span>
+            <span className="text-xs text-fog/60">{t('lndConfig.bitcoinSource')}</span>
             <button
               className={`relative flex h-9 w-32 items-center rounded-full border border-white/10 bg-ink/60 px-2 transition ${sourceBusy ? 'opacity-70' : 'hover:border-white/30'}`}
               onClick={handleToggleSource}
               type="button"
               disabled={sourceBusy}
-              aria-label="Toggle bitcoin source"
+              aria-label={t('lndConfig.toggleBitcoinSource')}
             >
               <span
                 className={`absolute top-1 h-7 w-14 rounded-full bg-glow shadow transition-all ${bitcoinSource === 'local' ? 'left-[68px]' : 'left-[6px]'}`}
               />
-              <span className={`relative z-10 flex-1 text-center text-xs ${bitcoinSource === 'remote' ? 'text-ink' : 'text-fog/60'}`}>Remote</span>
-              <span className={`relative z-10 flex-1 text-center text-xs ${bitcoinSource === 'local' ? 'text-ink' : 'text-fog/60'}`}>Local</span>
+              <span className={`relative z-10 flex-1 text-center text-xs ${bitcoinSource === 'remote' ? 'text-ink' : 'text-fog/60'}`}>{t('common.remote')}</span>
+              <span className={`relative z-10 flex-1 text-center text-xs ${bitcoinSource === 'local' ? 'text-ink' : 'text-fog/60'}`}>{t('common.local')}</span>
             </button>
           </div>
         </div>
@@ -121,19 +124,19 @@ export default function LndConfig() {
 
       <div className="section-card space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold">Basic settings</h3>
+          <h3 className="text-lg font-semibold">{t('lndConfig.basicSettings')}</h3>
           <button className="btn-secondary" onClick={() => setAdvanced((v) => !v)}>
-            {advanced ? 'Hide advanced' : 'Show advanced'}
+            {advanced ? t('lndConfig.hideAdvanced') : t('lndConfig.showAdvanced')}
           </button>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-2">
-            <label className="text-sm text-fog/70">Alias</label>
-            <input className="input-field" placeholder="Node name" value={alias} onChange={(e) => setAlias(e.target.value)} />
-            <p className="text-xs text-fog/50">Public node name shown in the graph.</p>
+            <label className="text-sm text-fog/70">{t('lndConfig.alias')}</label>
+            <input className="input-field" placeholder={t('lndConfig.nodeName')} value={alias} onChange={(e) => setAlias(e.target.value)} />
+            <p className="text-xs text-fog/50">{t('lndConfig.aliasHint')}</p>
           </div>
           <div className="space-y-2">
-            <label className="text-sm text-fog/70">Node color</label>
+            <label className="text-sm text-fog/70">{t('lndConfig.nodeColor')}</label>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <input
                 className="h-12 w-16 rounded-xl border border-white/10 bg-ink/60 p-1"
@@ -146,7 +149,7 @@ export default function LndConfig() {
               />
               <input
                 className="input-field flex-1"
-                placeholder="#ff9900"
+                placeholder={t('lndConfig.colorPlaceholder')}
                 value={colorInput}
                 onChange={(e) => {
                   const next = e.target.value
@@ -157,48 +160,48 @@ export default function LndConfig() {
                 }}
               />
             </div>
-            <p className="text-xs text-fog/50">HEX color for your node in the public graph.</p>
+            <p className="text-xs text-fog/50">{t('lndConfig.colorHint')}</p>
           </div>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-2">
-            <label className="text-sm text-fog/70">Min channel size (sat)</label>
+            <label className="text-sm text-fog/70">{t('lndConfig.minChannelSize')}</label>
             <input
               className="input-field"
-              placeholder="20000"
+              placeholder={t('lndConfig.minChannelPlaceholder')}
               type="number"
               min={0}
               value={minChan}
               onChange={(e) => setMinChan(e.target.value)}
             />
-            <p className="text-xs text-fog/50">LND enforces a minimum of 20000 sat. Leave blank to use default.</p>
+            <p className="text-xs text-fog/50">{t('lndConfig.minChannelHint')}</p>
           </div>
           <div className="space-y-2">
-            <label className="text-sm text-fog/70">Max channel size (sat)</label>
+            <label className="text-sm text-fog/70">{t('lndConfig.maxChannelSize')}</label>
             <input
               className="input-field"
-              placeholder="Optional"
+              placeholder={t('common.optional')}
               type="number"
               min={0}
               value={maxChan}
               onChange={(e) => setMaxChan(e.target.value)}
             />
-            <p className="text-xs text-fog/50">Leave blank to use the LND default. Must be higher than min size.</p>
+            <p className="text-xs text-fog/50">{t('lndConfig.maxChannelHint')}</p>
           </div>
         </div>
-        <button className="btn-primary" onClick={handleSave}>Save and restart LND</button>
-        <p className="text-xs text-fog/50">Changes require an LND restart and are applied automatically.</p>
+        <button className="btn-primary" onClick={handleSave}>{t('lndConfig.saveRestart')}</button>
+        <p className="text-xs text-fog/50">{t('lndConfig.restartHint')}</p>
       </div>
 
       {advanced && (
         <div className="section-card space-y-4">
-          <h3 className="text-lg font-semibold">Advanced editor</h3>
+          <h3 className="text-lg font-semibold">{t('lndConfig.advancedEditor')}</h3>
           <textarea className="input-field min-h-[180px]" value={raw} onChange={(e) => setRaw(e.target.value)} />
-          <button className="btn-secondary" onClick={handleSaveRaw}>Apply advanced config</button>
+          <button className="btn-secondary" onClick={handleSaveRaw}>{t('lndConfig.applyAdvanced')}</button>
         </div>
       )}
 
-      {!config && <p className="text-fog/60">Loading config...</p>}
+      {!config && <p className="text-fog/60">{t('lndConfig.loadingConfig')}</p>}
     </section>
   )
 }
