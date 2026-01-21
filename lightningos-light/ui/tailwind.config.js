@@ -7,16 +7,16 @@ export default {
         display: ['"Space Grotesk"', 'sans-serif']
       },
       colors: {
-        ink: '#0b1020',
-        slate: '#111827',
-        fog: '#e5e7eb',
-        ember: '#ef4444',
-        glow: '#14b8a6',
-        midnight: '#0f172a',
-        brass: '#f59e0b'
+        ink: 'rgb(var(--color-ink) / <alpha-value>)',
+        slate: 'rgb(var(--color-slate) / <alpha-value>)',
+        fog: 'rgb(var(--color-fog) / <alpha-value>)',
+        ember: 'rgb(var(--color-ember) / <alpha-value>)',
+        glow: 'rgb(var(--color-glow) / <alpha-value>)',
+        midnight: 'rgb(var(--color-midnight) / <alpha-value>)',
+        brass: 'rgb(var(--color-brass) / <alpha-value>)'
       },
       boxShadow: {
-        panel: '0 20px 40px rgba(2, 6, 23, 0.35)'
+        panel: 'var(--shadow-panel)'
       }
     }
   },

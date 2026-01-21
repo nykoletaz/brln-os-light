@@ -36,11 +36,22 @@ type RouteItem = {
   element: JSX.Element
 }
 
+type ThemeMode = 'dark' | 'light'
+
 export default function App() {
   const route = useHashRoute()
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    const stored = window.localStorage.getItem('los-theme')
+    return stored === 'light' ? 'light' : 'dark'
+  })
   const [walletUnlocked, setWalletUnlocked] = useState<boolean | null>(null)
   const [walletExists, setWalletExists] = useState<boolean | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    window.localStorage.setItem('los-theme', theme)
+  }, [theme])
 
   useEffect(() => {
     let active = true
@@ -141,7 +152,12 @@ export default function App() {
       <div className="min-h-screen flex flex-col lg:flex-row text-fog">
         <Sidebar routes={routes} current={current.key} open={menuOpen} onClose={() => setMenuOpen(false)} />
         <div className="flex-1 flex flex-col">
-          <Topbar onMenuToggle={() => setMenuOpen((prev) => !prev)} menuOpen={menuOpen} />
+          <Topbar
+            onMenuToggle={() => setMenuOpen((prev) => !prev)}
+            menuOpen={menuOpen}
+            theme={theme}
+            onThemeToggle={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
+          />
           <main className="px-6 pb-16 pt-6 lg:px-12">
             {current.element}
           </main>

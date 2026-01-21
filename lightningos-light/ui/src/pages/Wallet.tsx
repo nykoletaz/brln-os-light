@@ -579,7 +579,7 @@ export default function Wallet() {
 
         <div className="section-card space-y-4">
           <h3 className="text-lg font-semibold">Pay invoice</h3>
-          <textarea className="input-field min-h-[140px]" placeholder="Paste payment request" value={paymentRequest} onChange={(e) => setPaymentRequest(e.target.value)} />
+          <textarea className="input-field min-h-[140px]" placeholder="Paste payment request or lightning address" value={paymentRequest} onChange={(e) => setPaymentRequest(e.target.value)} />
           {isLnAddress && (
             <div className="space-y-2">
               <label className="text-xs text-fog/60">Amount (sats)</label>
