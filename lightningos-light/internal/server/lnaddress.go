@@ -12,7 +12,7 @@ import (
   "time"
 )
 
-const lnurlRequestTimeout = 10 * time.Second
+const lnurlRequestTimeout = 20 * time.Second
 
 type lnurlPayResponse struct {
   Callback string `json:"callback"`
@@ -61,16 +61,18 @@ func resolveLightningAddress(ctx context.Context, address string, amountSat int6
     return "", err
   }
 
-  reqCtx, cancel := context.WithTimeout(ctx, lnurlRequestTimeout)
-  defer cancel()
-
   metadataURL := fmt.Sprintf("https://%s/.well-known/lnurlp/%s", domain, url.PathEscape(user))
-  metaReq, err := http.NewRequestWithContext(reqCtx, http.MethodGet, metadataURL, nil)
+  metaCtx, metaCancel := context.WithTimeout(ctx, lnurlRequestTimeout)
+  defer metaCancel()
+  metaReq, err := http.NewRequestWithContext(metaCtx, http.MethodGet, metadataURL, nil)
   if err != nil {
     return "", err
   }
   metaResp, err := http.DefaultClient.Do(metaReq)
   if err != nil {
+    if errors.Is(err, context.DeadlineExceeded) || errors.Is(metaCtx.Err(), context.DeadlineExceeded) {
+      return "", errors.New("lnurl request timed out")
+    }
     return "", err
   }
   defer metaResp.Body.Close()
@@ -118,12 +120,17 @@ func resolveLightningAddress(ctx context.Context, address string, amountSat int6
   }
   callbackURL.RawQuery = q.Encode()
 
-  cbReq, err := http.NewRequestWithContext(reqCtx, http.MethodGet, callbackURL.String(), nil)
+  cbCtx, cbCancel := context.WithTimeout(ctx, lnurlRequestTimeout)
+  defer cbCancel()
+  cbReq, err := http.NewRequestWithContext(cbCtx, http.MethodGet, callbackURL.String(), nil)
   if err != nil {
     return "", err
   }
   cbResp, err := http.DefaultClient.Do(cbReq)
   if err != nil {
+    if errors.Is(err, context.DeadlineExceeded) || errors.Is(cbCtx.Err(), context.DeadlineExceeded) {
+      return "", errors.New("lnurl request timed out")
+    }
     return "", err
   }
   defer cbResp.Body.Close()
