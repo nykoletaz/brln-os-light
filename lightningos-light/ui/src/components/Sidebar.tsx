@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { getChatInbox, getLnPeers } from '../api'
 import clsx from '../utils/clsx'
 
 type RouteItem = {
@@ -15,9 +16,26 @@ type SidebarProps = {
   onClose: () => void
 }
 
+const lastReadKey = 'chat:lastRead'
+
+const readLastReadMap = () => {
+  try {
+    const raw = localStorage.getItem(lastReadKey)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object') {
+      return parsed as Record<string, number>
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return {}
+}
+
 export default function Sidebar({ routes, current, open, onClose }: SidebarProps) {
   const { t } = useTranslation()
   const [version, setVersion] = useState('')
+  const [unreadChats, setUnreadChats] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -35,6 +53,55 @@ export default function Sidebar({ routes, current, open, onClose }: SidebarProps
       active = false
     }
   }, [])
+
+  useEffect(() => {
+    let mounted = true
+    const loadUnread = async () => {
+      try {
+        const [inboxRes, peersRes] = await Promise.allSettled([getChatInbox(), getLnPeers()])
+        if (!mounted) return
+        const items = inboxRes.status === 'fulfilled' && Array.isArray(inboxRes.value?.items)
+          ? inboxRes.value.items
+          : []
+        const peers = peersRes.status === 'fulfilled' && Array.isArray(peersRes.value?.peers)
+          ? peersRes.value.peers
+          : []
+        const onlineSet = peersRes.status === 'fulfilled'
+          ? new Set(peers.map((peer: any) => peer?.pub_key).filter(Boolean))
+          : null
+        const lastReadMap = readLastReadMap()
+        const unread = new Set<string>()
+        for (const item of items) {
+          const peerKey = typeof item?.peer_pubkey === 'string' ? item.peer_pubkey : ''
+          if (!peerKey) continue
+          if (onlineSet && !onlineSet.has(peerKey)) {
+            continue
+          }
+          const ts = new Date(item.last_inbound_at).getTime()
+          if (!ts || Number.isNaN(ts)) continue
+          const lastRead = lastReadMap[peerKey] || 0
+          if (ts > lastRead) {
+            unread.add(peerKey)
+          }
+        }
+        setUnreadChats(unread.size)
+      } catch {
+        if (!mounted) return
+        setUnreadChats(0)
+      }
+    }
+
+    loadUnread()
+    const timer = window.setInterval(loadUnread, 12000)
+    return () => {
+      mounted = false
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  const unreadLabel = unreadChats === 1
+    ? t('chat.unreadSingle')
+    : t('chat.unreadMultiple', { count: unreadChats })
 
   return (
     <aside
@@ -77,7 +144,18 @@ export default function Sidebar({ routes, current, open, onClose }: SidebarProps
             )}
             onClick={onClose}
           >
-            {route.label}
+            {route.key === 'chat' ? (
+              <span className="inline-flex items-center gap-2">
+                <span>{route.label}</span>
+                {unreadChats > 0 && (
+                  <span className="rounded-full bg-ember px-2 py-0.5 text-[10px] font-semibold text-white" title={unreadLabel}>
+                    {unreadChats}
+                  </span>
+                )}
+              </span>
+            ) : (
+              route.label
+            )}
           </a>
         ))}
       </nav>
