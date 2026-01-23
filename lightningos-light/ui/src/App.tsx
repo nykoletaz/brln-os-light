@@ -38,6 +38,73 @@ type RouteItem = {
   element: JSX.Element
 }
 
+type MenuConfig = {
+  favorites: string[]
+  hidden: string[]
+}
+
+const MENU_CONFIG_KEY = 'los-menu-config'
+
+const readMenuConfig = (): MenuConfig | null => {
+  try {
+    const raw = window.localStorage.getItem(MENU_CONFIG_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    return {
+      favorites: Array.isArray(parsed.favorites) ? parsed.favorites.filter((item) => typeof item === 'string') : [],
+      hidden: Array.isArray(parsed.hidden) ? parsed.hidden.filter((item) => typeof item === 'string') : []
+    }
+  } catch {
+    return null
+  }
+}
+
+const uniqueKeys = (items: string[]) => {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of items) {
+    if (seen.has(item)) continue
+    seen.add(item)
+    result.push(item)
+  }
+  return result
+}
+
+const normalizeMenuConfig = (config: MenuConfig | null, keys: string[]) => {
+  const keySet = new Set(keys)
+  const favoritesInput = config?.favorites ?? []
+  const hiddenInput = config?.hidden ?? []
+  const hidden = uniqueKeys(hiddenInput.filter((item) => keySet.has(item)))
+  const hiddenSet = new Set(hidden)
+  const favorites = uniqueKeys(favoritesInput.filter((item) => keySet.has(item) && !hiddenSet.has(item)))
+  return { favorites, hidden }
+}
+
+const sameMenuConfig = (left: MenuConfig, right: MenuConfig) => {
+  if (left.favorites.length !== right.favorites.length || left.hidden.length !== right.hidden.length) {
+    return false
+  }
+  for (let index = 0; index < left.favorites.length; index += 1) {
+    if (left.favorites[index] !== right.favorites[index]) return false
+  }
+  for (let index = 0; index < left.hidden.length; index += 1) {
+    if (left.hidden[index] !== right.hidden[index]) return false
+  }
+  return true
+}
+
+const applyMenuConfig = (routes: RouteItem[], config: MenuConfig) => {
+  const hiddenSet = new Set(config.hidden)
+  const favoriteSet = new Set(config.favorites)
+  const routeMap = new Map(routes.map((route) => [route.key, route]))
+  const favorites = config.favorites
+    .map((key) => routeMap.get(key))
+    .filter((route): route is RouteItem => Boolean(route) && !hiddenSet.has(route.key))
+  const rest = routes.filter((route) => !favoriteSet.has(route.key) && !hiddenSet.has(route.key))
+  return [...favorites, ...rest]
+}
+
 export default function App() {
   const { t, i18n } = useTranslation()
   const route = useHashRoute()
@@ -46,6 +113,26 @@ export default function App() {
   const [walletUnlocked, setWalletUnlocked] = useState<boolean | null>(null)
   const [walletExists, setWalletExists] = useState<boolean | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
+  const baseRoutes = useMemo(() => {
+    return [
+      { key: 'dashboard', label: t('nav.dashboard'), element: <Dashboard /> },
+      { key: 'reports', label: t('nav.reports'), element: <Reports /> },
+      { key: 'wallet', label: t('nav.wallet'), element: <Wallet /> },
+      { key: 'lightning-ops', label: t('nav.lightningOps'), element: <LightningOps /> },
+      { key: 'chat', label: t('nav.chat'), element: <Chat /> },
+      { key: 'lnd', label: t('nav.lndConfig'), element: <LndConfig /> },
+      { key: 'apps', label: t('nav.apps'), element: <AppStore /> },
+      { key: 'bitcoin', label: t('nav.bitcoinRemote'), element: <BitcoinRemote /> },
+      { key: 'bitcoin-local', label: t('nav.bitcoinLocal'), element: <BitcoinLocal /> },
+      { key: 'elements', label: t('nav.elements'), element: <Elements /> },
+      { key: 'notifications', label: t('nav.notifications'), element: <Notifications /> },
+      { key: 'disks', label: t('nav.disks'), element: <Disks /> },
+      { key: 'terminal', label: t('nav.terminal'), element: <Terminal /> },
+      { key: 'logs', label: t('nav.logs'), element: <Logs /> }
+    ]
+  }, [i18n.language, t])
+  const baseRouteKeys = useMemo(() => baseRoutes.map((item) => item.key), [baseRoutes])
+  const [menuConfig, setMenuConfig] = useState<MenuConfig>(() => normalizeMenuConfig(readMenuConfig(), baseRouteKeys))
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -85,32 +172,37 @@ export default function App() {
     }
   }, [])
 
+  useEffect(() => {
+    setMenuConfig((current) => {
+      const normalized = normalizeMenuConfig(current, baseRouteKeys)
+      return sameMenuConfig(current, normalized) ? current : normalized
+    })
+  }, [baseRouteKeys])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MENU_CONFIG_KEY, JSON.stringify(menuConfig))
+    } catch {
+      // ignore storage errors
+    }
+  }, [menuConfig])
+
   const wizardHidden = walletUnlocked === true
   const wizardRequired = walletExists === false && !wizardHidden
 
-  const routes = useMemo(() => {
-    const list: RouteItem[] = []
-    if (!wizardHidden) {
-      list.push({ key: 'wizard', label: t('nav.wizard'), element: <Wizard /> })
-    }
-    list.push(
-      { key: 'dashboard', label: t('nav.dashboard'), element: <Dashboard /> },
-      { key: 'reports', label: t('nav.reports'), element: <Reports /> },
-      { key: 'wallet', label: t('nav.wallet'), element: <Wallet /> },
-      { key: 'lightning-ops', label: t('nav.lightningOps'), element: <LightningOps /> },
-      { key: 'chat', label: t('nav.chat'), element: <Chat /> },
-      { key: 'lnd', label: t('nav.lndConfig'), element: <LndConfig /> },
-      { key: 'apps', label: t('nav.apps'), element: <AppStore /> },
-      { key: 'bitcoin', label: t('nav.bitcoinRemote'), element: <BitcoinRemote /> },
-      { key: 'bitcoin-local', label: t('nav.bitcoinLocal'), element: <BitcoinLocal /> },
-      { key: 'elements', label: t('nav.elements'), element: <Elements /> },
-      { key: 'notifications', label: t('nav.notifications'), element: <Notifications /> },
-      { key: 'disks', label: t('nav.disks'), element: <Disks /> },
-      { key: 'terminal', label: t('nav.terminal'), element: <Terminal /> },
-      { key: 'logs', label: t('nav.logs'), element: <Logs /> }
-    )
-    return list
-  }, [i18n.language, t, wizardHidden])
+  const wizardRoute = useMemo(
+    () => ({ key: 'wizard', label: t('nav.wizard'), element: <Wizard /> }),
+    [t]
+  )
+  const menuRoutes = useMemo(() => applyMenuConfig(baseRoutes, menuConfig), [baseRoutes, menuConfig])
+  const sidebarRoutes = useMemo(
+    () => (wizardHidden ? menuRoutes : [wizardRoute, ...menuRoutes]),
+    [menuRoutes, wizardHidden, wizardRoute]
+  )
+  const allRoutes = useMemo(
+    () => (wizardHidden ? baseRoutes : [wizardRoute, ...baseRoutes]),
+    [baseRoutes, wizardHidden, wizardRoute]
+  )
 
   useEffect(() => {
     setMenuOpen(false)
@@ -134,15 +226,15 @@ export default function App() {
   }, [menuOpen])
 
   const current = useMemo(() => {
-    const matched = routes.find((item) => item.key === route)
+    const matched = allRoutes.find((item) => item.key === route)
     if (wizardRequired) {
-      return routes.find((item) => item.key === 'wizard') || matched || routes[0]
+      return allRoutes.find((item) => item.key === 'wizard') || matched || allRoutes[0]
     }
     if (matched) {
       return matched
     }
-    return routes.find((item) => item.key === 'dashboard') || routes[0]
-  }, [route, routes, wizardRequired])
+    return allRoutes.find((item) => item.key === 'dashboard') || allRoutes[0]
+  }, [allRoutes, route, wizardRequired])
 
   const handlePaletteToggle = () => {
     setPalette((current) => {
@@ -164,7 +256,15 @@ export default function App() {
         aria-hidden="true"
       />
       <div className="min-h-screen flex flex-col lg:flex-row text-fog">
-        <Sidebar routes={routes} current={current.key} open={menuOpen} onClose={() => setMenuOpen(false)} />
+        <Sidebar
+          routes={sidebarRoutes}
+          allRoutes={baseRoutes}
+          menuConfig={menuConfig}
+          onMenuConfigChange={(next) => setMenuConfig(normalizeMenuConfig(next, baseRouteKeys))}
+          current={current.key}
+          open={menuOpen}
+          onClose={() => setMenuOpen(false)}
+        />
         <div className="flex-1 flex flex-col">
           <Topbar
             onMenuToggle={() => setMenuOpen((prev) => !prev)}
