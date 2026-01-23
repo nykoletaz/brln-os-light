@@ -397,24 +397,26 @@ export default function Sidebar({ routes, allRoutes, menuConfig, onMenuConfigCha
         </nav>
       )}
       <div className="mt-6 border-t border-white/10 pt-4 text-xs text-fog/60">
-        <p>
-          {t('sidebar.versionLabel')}{' '}
-          <span className="text-fog">{version || t('common.unavailable')}</span>
-        </p>
-        {!editing && (
-          <button
-            type="button"
-            className="mt-3 inline-flex items-center gap-2 text-fog/70 hover:text-white transition"
-            onClick={() => setEditing(true)}
-            aria-label={t('sidebar.editMenu')}
-          >
-            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.6">
-              <path d="M12 20h9" />
-              <path d="M16.5 3.5l4 4-10 10H6.5v-4l10-10z" />
-            </svg>
-            <span className="text-xs">{t('sidebar.editMenu')}</span>
-          </button>
-        )}
+        <div className="flex items-center justify-between gap-3">
+          <p>
+            {t('sidebar.versionLabel')}{' '}
+            <span className="text-fog">{version || t('common.unavailable')}</span>
+          </p>
+          {!editing && (
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/15 text-fog/70 transition hover:text-white hover:border-white/40"
+              onClick={() => setEditing(true)}
+              aria-label={t('sidebar.editMenu')}
+              title={t('sidebar.editMenu')}
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.6">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5l4 4-10 10H6.5v-4l10-10z" />
+              </svg>
+            </button>
+          )}
+        </div>
         <a
           className="mt-2 inline-flex text-fog/70 hover:text-white transition"
           href="https://br-ln.com"
