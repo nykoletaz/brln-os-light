@@ -545,6 +545,8 @@
     "seedGenerationFailed": "Seed generation failed.",
     "seedInvalid": "Seed words invalid.",
     "seedWordsTitle": "Seed words (write once)",
+    "credentialsHelp": "If you don't have your credentials yet, join the BR⚡LN Club by",
+    "credentialsHelpLink": "clicking here.",
     "step1Title": "Step 1: Connect to Bitcoin remote",
     "step2Title": "Step 2: LND wallet",
     "step3Title": "Step 3: Unlock existing wallet",

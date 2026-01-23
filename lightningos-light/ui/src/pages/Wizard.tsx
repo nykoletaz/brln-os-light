@@ -187,6 +187,17 @@ export default function Wizard() {
               <p>{zmqTx || 'tcp://bitcoin.br-ln.com:28333'}</p>
             </div>
           </div>
+          <p className="text-sm text-fog/70">
+            {t('wizard.credentialsHelp')}{' '}
+            <a
+              className="text-glow underline underline-offset-4"
+              href="https://services.br-ln.com"
+              target="_blank"
+              rel="noreferrer"
+            >
+              {t('wizard.credentialsHelpLink')}
+            </a>
+          </p>
           <div className="grid gap-4 lg:grid-cols-2">
             <input className="input-field" placeholder={t('wizard.rpcUser')} value={rpcUser} onChange={(e) => setRpcUser(e.target.value)} />
             <input className="input-field" placeholder={t('wizard.rpcPassword')} type="password" value={rpcPass} onChange={(e) => setRpcPass(e.target.value)} />
