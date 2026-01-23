@@ -6,11 +6,13 @@ import './styles/main.css'
 import '@fontsource/space-grotesk/400.css'
 import '@fontsource/space-grotesk/500.css'
 import '@fontsource/space-grotesk/600.css'
+import { resolvePalette, resolveTheme } from './theme'
 
-const storedTheme = window.localStorage.getItem('los-theme')
-if (storedTheme === 'light' || storedTheme === 'dark') {
-  document.documentElement.setAttribute('data-theme', storedTheme)
-}
+const storedTheme = resolveTheme(window.localStorage.getItem('los-theme'))
+document.documentElement.setAttribute('data-theme', storedTheme)
+
+const storedPalette = resolvePalette(window.localStorage.getItem('los-palette'))
+document.documentElement.setAttribute('data-palette', storedPalette)
 
 const root = document.getElementById('root')
 if (root) {

@@ -18,6 +18,7 @@ import LndConfig from './pages/LndConfig'
 import AppStore from './pages/AppStore'
 import Terminal from './pages/Terminal'
 import { getLndStatus, getWizardStatus } from './api'
+import { defaultPalette, paletteOrder, resolvePalette, resolveTheme, type PaletteKey, type ThemeMode } from './theme'
 
 function useHashRoute() {
   const [hash, setHash] = useState(window.location.hash.replace('#', ''))
@@ -37,15 +38,11 @@ type RouteItem = {
   element: JSX.Element
 }
 
-type ThemeMode = 'dark' | 'light'
-
 export default function App() {
   const { t, i18n } = useTranslation()
   const route = useHashRoute()
-  const [theme, setTheme] = useState<ThemeMode>(() => {
-    const stored = window.localStorage.getItem('los-theme')
-    return stored === 'light' ? 'light' : 'dark'
-  })
+  const [theme, setTheme] = useState<ThemeMode>(() => resolveTheme(window.localStorage.getItem('los-theme')))
+  const [palette, setPalette] = useState<PaletteKey>(() => resolvePalette(window.localStorage.getItem('los-palette')))
   const [walletUnlocked, setWalletUnlocked] = useState<boolean | null>(null)
   const [walletExists, setWalletExists] = useState<boolean | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -54,6 +51,11 @@ export default function App() {
     document.documentElement.setAttribute('data-theme', theme)
     window.localStorage.setItem('los-theme', theme)
   }, [theme])
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-palette', palette)
+    window.localStorage.setItem('los-palette', palette)
+  }, [palette])
 
   useEffect(() => {
     let active = true
@@ -142,6 +144,16 @@ export default function App() {
     return routes.find((item) => item.key === 'dashboard') || routes[0]
   }, [route, routes, wizardRequired])
 
+  const handlePaletteToggle = () => {
+    setPalette((current) => {
+      const index = paletteOrder.indexOf(current)
+      if (index === -1) {
+        return defaultPalette
+      }
+      return paletteOrder[(index + 1) % paletteOrder.length]
+    })
+  }
+
   return (
     <>
       <div
@@ -158,7 +170,9 @@ export default function App() {
             onMenuToggle={() => setMenuOpen((prev) => !prev)}
             menuOpen={menuOpen}
             theme={theme}
+            palette={palette}
             onThemeToggle={() => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))}
+            onPaletteToggle={handlePaletteToggle}
           />
           <main className="px-6 pb-16 pt-6 lg:px-12">
             {current.element}

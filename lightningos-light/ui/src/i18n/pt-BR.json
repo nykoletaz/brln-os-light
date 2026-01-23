@@ -70,6 +70,18 @@
     "statusUnavailable": "Status indisponível",
     "switchToDark": "Mudar para tema escuro",
     "switchToLight": "Mudar para tema claro",
+    "switchPalette": "Trocar paleta",
+    "paletteLabel": "Paleta: {{palette}}",
+    "paletteNames": {
+      "teal": "Turquesa",
+      "ocean": "Oceano",
+      "sunset": "Por do sol",
+      "orchid": "Orquidea",
+      "forest": "Floresta",
+      "aurora": "Aurora",
+      "ember": "Brasa",
+      "slate": "Ardosia"
+    },
     "systemLabel": "SYSTEM",
     "toggleLanguage": "Alternar idioma"
   },

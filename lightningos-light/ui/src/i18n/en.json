@@ -70,6 +70,18 @@
     "statusUnavailable": "Status unavailable",
     "switchToDark": "Switch to dark theme",
     "switchToLight": "Switch to light theme",
+    "switchPalette": "Switch palette",
+    "paletteLabel": "Palette: {{palette}}",
+    "paletteNames": {
+      "teal": "Teal",
+      "ocean": "Ocean",
+      "sunset": "Sunset",
+      "orchid": "Orchid",
+      "forest": "Forest",
+      "aurora": "Aurora",
+      "ember": "Ember",
+      "slate": "Slate"
+    },
     "systemLabel": "SYSTEM",
     "toggleLanguage": "Toggle language"
   },

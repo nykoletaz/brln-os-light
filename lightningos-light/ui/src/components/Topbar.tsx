@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getHealth, getLndConfig, getLndStatus } from '../api'
 import { setLanguage } from '../i18n'
+import type { PaletteKey, ThemeMode } from '../theme'
 
 const statusColors: Record<string, string> = {
   OK: 'bg-glow/20 text-glow border-glow/40',
@@ -12,17 +13,21 @@ const statusColors: Record<string, string> = {
 type TopbarProps = {
   onMenuToggle?: () => void
   menuOpen?: boolean
-  theme: 'dark' | 'light'
+  theme: ThemeMode
+  palette: PaletteKey
   onThemeToggle: () => void
+  onPaletteToggle: () => void
 }
 
-export default function Topbar({ onMenuToggle, menuOpen, theme, onThemeToggle }: TopbarProps) {
+export default function Topbar({ onMenuToggle, menuOpen, theme, palette, onThemeToggle, onPaletteToggle }: TopbarProps) {
   const { t, i18n } = useTranslation()
   const [status, setStatus] = useState('...')
   const [issues, setIssues] = useState<Array<{ component?: string; level?: string; message?: string }>>([])
   const [nodeAlias, setNodeAlias] = useState('')
   const [nodePubkey, setNodePubkey] = useState('')
   const isPortuguese = i18n.language === 'pt-BR'
+  const paletteName = t(`topbar.paletteNames.${palette}`)
+  const paletteLabel = t('topbar.paletteLabel', { palette: paletteName })
 
   useEffect(() => {
     let mounted = true
@@ -165,6 +170,15 @@ export default function Topbar({ onMenuToggle, menuOpen, theme, onThemeToggle }:
               </svg>
             </span>
             <span className="theme-toggle__thumb" />
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-ink/60 text-fog/70 hover:text-white hover:border-white/40 transition"
+            onClick={onPaletteToggle}
+            aria-label={t('topbar.switchPalette')}
+            title={paletteLabel}
+          >
+            <span className="h-4 w-4 rounded-full bg-glow shadow" />
           </button>
         </div>
       </div>
