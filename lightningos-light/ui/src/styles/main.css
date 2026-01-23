@@ -234,27 +234,27 @@ html[data-theme="light"] .hover\\:text-rose-200:hover {
   color: rgb(var(--color-ember) / 0.9);
 }
 
-.bg-emerald-500\\/15 {
+.bg-emerald-500\/15 {
   background-color: rgb(var(--color-glow) / 0.15);
 }
 
-.border-emerald-400\\/30 {
+.border-emerald-400\/30 {
   border-color: rgb(var(--color-glow) / 0.3);
 }
 
-.bg-amber-500\\/15 {
+.bg-amber-500\/15 {
   background-color: rgb(var(--color-brass) / 0.15);
 }
 
-.border-amber-400\\/30 {
+.border-amber-400\/30 {
   border-color: rgb(var(--color-brass) / 0.3);
 }
 
-.bg-rose-500\\/15 {
+.bg-rose-500\/15 {
   background-color: rgb(var(--color-ember) / 0.15);
 }
 
-.border-rose-400\\/30 {
+.border-rose-400\/30 {
   border-color: rgb(var(--color-ember) / 0.3);
 }
 
