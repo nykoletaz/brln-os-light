@@ -197,12 +197,12 @@ Comando para calcular e armazenar os custos e lucros diários, garantindo que os
 ### 2) Agendamento diário de atualização
 Configure um systemd timer para executar diariamente um serviço que atualiza o banco de dados com os dados do dia anterior.
 ```bash
-sudo cp lightningos-light/templates/systemd/lightningos-reports.timer \
+sudo cp templates/systemd/lightningos-reports.timer \
   /etc/systemd/system/lightningos-reports.timer
 ```
 
 ```bash
-sudo cp lightningos-light/templates/systemd/lightningos-reports.service \
+sudo cp templates/systemd/lightningos-reports.service \
   /etc/systemd/system/lightningos-reports.service
 ```
 
@@ -223,7 +223,7 @@ sudo systemctl enable --now lightningos-reports.timer
 ## Systemd do manager
 1) Copie a unit e ajuste User/Group:
 ```bash
-sudo cp lightningos-light/templates/systemd/lightningos-manager.service \
+sudo cp templates/systemd/lightningos-manager.service \
   /etc/systemd/system/lightningos-manager.service
 sudo ${EDITOR:-nano} /etc/systemd/system/lightningos-manager.service
 ```

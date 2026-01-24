@@ -197,12 +197,12 @@ Command to calculate and store daily costs and profits, ensuring that financial 
 ### 2) Daily update scheduling
 Configure a systemd timer to run a service daily that updates the database with the previous day's data.
 ```bash
-sudo cp lightningos-light/templates/systemd/lightningos-reports.timer \
+sudo cp templates/systemd/lightningos-reports.timer \
   /etc/systemd/system/lightningos-reports.timer
 ```
 
 ```bash
-sudo cp lightningos-light/templates/systemd/lightningos-reports.service \
+sudo cp templates/systemd/lightningos-reports.service \
   /etc/systemd/system/lightningos-reports.service
 ```
 
@@ -223,7 +223,7 @@ sudo systemctl enable --now lightningos-reports.timer
 ## Manager systemd unit
 1) Copy the unit and edit User/Group:
 ```bash
-sudo cp lightningos-light/templates/systemd/lightningos-manager.service \
+sudo cp templates/systemd/lightningos-manager.service \
   /etc/systemd/system/lightningos-manager.service
 sudo ${EDITOR:-nano} /etc/systemd/system/lightningos-manager.service
 ```
