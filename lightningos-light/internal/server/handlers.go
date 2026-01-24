@@ -9,6 +9,7 @@ import (
   "io"
   "net"
   "net/http"
+  "net/url"
   "os"
   "path/filepath"
   "strconv"
@@ -223,37 +224,95 @@ type postgresResponse struct {
   DBSizeMB int64 `json:"db_size_mb"`
   Connections int64 `json:"connections"`
   Version string `json:"version"`
+  Databases []postgresDatabase `json:"databases,omitempty"`
+}
+
+type postgresDatabase struct {
+  Name string `json:"name"`
+  Source string `json:"source"`
+  SizeMB int64 `json:"size_mb"`
+  Connections int64 `json:"connections"`
+  Available bool `json:"available"`
 }
 
 func (s *Server) handlePostgres(w http.ResponseWriter, r *http.Request) {
   ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
   defer cancel()
 
+  entries := postgresDSNEntries()
+  databases := make([]postgresDatabase, 0, len(entries))
+  version := ""
+
+  for _, entry := range entries {
+    dbName := databaseNameFromDSN(entry.DSN)
+    if dbName == "" {
+      continue
+    }
+    db := postgresDatabase{
+      Name: dbName,
+      Source: entry.Source,
+    }
+    pool, err := pgxpool.New(ctx, entry.DSN)
+    if err == nil {
+      db.Available = true
+      var sizeBytes int64
+      _ = pool.QueryRow(ctx, "select pg_database_size($1)", dbName).Scan(&sizeBytes)
+      db.SizeMB = sizeBytes / (1024 * 1024)
+
+      var connections int64
+      _ = pool.QueryRow(ctx, "select count(*) from pg_stat_activity where datname=$1", dbName).Scan(&connections)
+      db.Connections = connections
+
+      if version == "" {
+        _ = pool.QueryRow(ctx, "show server_version").Scan(&version)
+      }
+      pool.Close()
+    }
+    databases = append(databases, db)
+  }
+
   resp := postgresResponse{
     ServiceActive: system.SystemctlIsActive(ctx, "postgresql"),
     DBName: s.cfg.Postgres.DBName,
+    Databases: databases,
+    Version: version,
   }
 
-  dsn := os.Getenv("LND_PG_DSN")
-  if dsn != "" {
-    pool, err := pgxpool.New(ctx, dsn)
-    if err == nil {
-      defer pool.Close()
-      var sizeBytes int64
-      _ = pool.QueryRow(ctx, "select pg_database_size($1)", s.cfg.Postgres.DBName).Scan(&sizeBytes)
-      resp.DBSizeMB = sizeBytes / (1024 * 1024)
-
-      var connections int64
-      _ = pool.QueryRow(ctx, "select count(*) from pg_stat_activity where datname=$1", s.cfg.Postgres.DBName).Scan(&connections)
-      resp.Connections = connections
-
-      var version string
-      _ = pool.QueryRow(ctx, "show server_version").Scan(&version)
-      resp.Version = version
-    }
+  if len(databases) > 0 {
+    resp.DBName = databases[0].Name
+    resp.DBSizeMB = databases[0].SizeMB
+    resp.Connections = databases[0].Connections
   }
 
   writeJSON(w, http.StatusOK, resp)
+}
+
+type postgresDSNEntry struct {
+  Source string
+  DSN string
+}
+
+func postgresDSNEntries() []postgresDSNEntry {
+  entries := []postgresDSNEntry{}
+  if dsn := strings.TrimSpace(os.Getenv("LND_PG_DSN")); dsn != "" && !isPlaceholderDSN(dsn) {
+    entries = append(entries, postgresDSNEntry{Source: "lnd", DSN: dsn})
+  }
+  if dsn := strings.TrimSpace(os.Getenv("NOTIFICATIONS_PG_DSN")); dsn != "" && !isPlaceholderDSN(dsn) {
+    entries = append(entries, postgresDSNEntry{Source: "lightningos", DSN: dsn})
+  }
+  return entries
+}
+
+func databaseNameFromDSN(raw string) string {
+  if strings.TrimSpace(raw) == "" {
+    return ""
+  }
+  parsed, err := url.Parse(raw)
+  if err != nil {
+    return ""
+  }
+  name := strings.TrimPrefix(parsed.Path, "/")
+  return strings.TrimSpace(name)
 }
 
 type bitcoinStatus struct {

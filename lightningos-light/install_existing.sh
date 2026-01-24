@@ -456,6 +456,11 @@ ensure_terminal_service() {
   cp "$REPO_ROOT/templates/systemd/lightningos-terminal.service" /etc/systemd/system/lightningos-terminal.service
   sed -i "s|^User=.*|User=${user}|" /etc/systemd/system/lightningos-terminal.service
   sed -i "s|^Group=.*|Group=${group}|" /etc/systemd/system/lightningos-terminal.service
+  if getent group lightningos >/dev/null 2>&1; then
+    sed -i "s|^SupplementaryGroups=.*|SupplementaryGroups=lightningos|" /etc/systemd/system/lightningos-terminal.service
+  else
+    sed -i "/^SupplementaryGroups=/d" /etc/systemd/system/lightningos-terminal.service
+  fi
 }
 
 ensure_terminal_helper() {

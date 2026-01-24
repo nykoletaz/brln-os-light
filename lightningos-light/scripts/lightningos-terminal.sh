@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 SECRETS_PATH="/etc/lightningos/secrets.env"
-if [[ -f "$SECRETS_PATH" ]]; then
+if [[ -r "$SECRETS_PATH" ]]; then
   # shellcheck disable=SC1091
   source "$SECRETS_PATH"
 fi

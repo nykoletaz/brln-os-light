@@ -72,6 +72,7 @@ export default function Dashboard() {
   const lndInfoStale = Boolean(lnd?.info_stale && lnd?.info_known)
   const lndInfoAge = Number(lnd?.info_age_seconds || 0)
   const lndInfoStaleTooLong = lndInfoStale && lndInfoAge > 900
+  const postgresDatabases = Array.isArray(postgres?.databases) ? postgres.databases : []
 
   useEffect(() => {
     let mounted = true
@@ -268,8 +269,30 @@ export default function Dashboard() {
             <div className="mt-4 text-sm space-y-2">
               <div className="flex justify-between"><span>{t('dashboard.service')}</span><Badge label={postgres.service_active ? t('common.active') : t('common.inactive')} tone={postgres.service_active ? 'ok' : 'warn'} /></div>
               <div className="flex justify-between"><span>{t('dashboard.version')}</span><span>{postgres.version || t('common.na')}</span></div>
-              <div className="flex justify-between"><span>{t('dashboard.dbSize')}</span><span>{postgres.db_size_mb} MB</span></div>
-              <div className="flex justify-between"><span>{t('dashboard.connections')}</span><span>{postgres.connections}</span></div>
+              {postgresDatabases.length ? (
+                <div className="mt-3 space-y-3">
+                  {postgresDatabases.map((db: any) => {
+                    const sourceLabel = db?.source === 'lnd' ? 'LND' : db?.source === 'lightningos' ? 'LIGHTNINGOS' : ''
+                    const sizeLabel = db?.available ? `${db?.size_mb ?? 0} MB` : t('common.na')
+                    const connLabel = db?.available ? db?.connections ?? 0 : t('common.na')
+                    return (
+                      <div key={`${db?.source || 'db'}-${db?.name || 'unknown'}`} className="rounded-2xl border border-white/10 bg-ink/40 px-3 py-2 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-fog/80">{db?.name || t('common.na')}</span>
+                          {sourceLabel && <Badge label={sourceLabel} tone="muted" />}
+                        </div>
+                        <div className="flex justify-between text-xs text-fog/70"><span>{t('dashboard.dbSize')}</span><span>{sizeLabel}</span></div>
+                        <div className="flex justify-between text-xs text-fog/70"><span>{t('dashboard.connections')}</span><span>{connLabel}</span></div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <>
+                  <div className="flex justify-between"><span>{t('dashboard.dbSize')}</span><span>{postgres.db_size_mb} MB</span></div>
+                  <div className="flex justify-between"><span>{t('dashboard.connections')}</span><span>{postgres.connections}</span></div>
+                </>
+              )}
             </div>
           ) : (
             <p className="text-fog/60 mt-4">{t('dashboard.loadingPostgresStatus')}</p>
