@@ -335,7 +335,9 @@ ensure_tools() {
 
 build_manager() {
   print_step "Building manager"
-  (cd "$REPO_ROOT" && go mod download && go build -o dist/lightningos-manager ./cmd/lightningos-manager)
+  (cd "$REPO_ROOT" && \
+    GOFLAGS="-mod=mod" go mod download && \
+    GOFLAGS="-mod=mod" go build -o dist/lightningos-manager ./cmd/lightningos-manager)
   install -m 0755 "$REPO_ROOT/dist/lightningos-manager" /opt/lightningos/manager/lightningos-manager
   print_ok "Manager built and installed"
 }
