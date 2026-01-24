@@ -187,6 +187,39 @@ sudo -u postgres psql -c "create database lightningos owner losapp;"
 4) In config.yaml:
 - postgres.db_name: "lnd" (keep the default; not used if LND does not use Postgres)
 
+## Reports Update
+### 1) Daily cost and profit synchronization
+Command to calculate and store daily costs and profits, ensuring that financial reports display accurate and complete information.
+```bash
+/opt/lightningos/manager/lightningos-manager reports-backfill --from YYYY-MM-DD --to YYYY-MM-DD
+```
+
+### 2) Daily update scheduling
+Configure a systemd timer to run a service daily that updates the database with the previous day's data.
+```bash
+sudo cp lightningos-light/templates/systemd/lightningos-reports.timer \
+  /etc/systemd/system/lightningos-reports.timer
+```
+
+```bash
+sudo cp lightningos-light/templates/systemd/lightningos-reports.service \
+  /etc/systemd/system/lightningos-reports.service
+```
+
+### 3) Recommended adjustments
+Edit the lightningos-reports.service file and adjust it according to your environment:
+- User=admin
+- Group=admin
+```bash
+sudo ${EDITOR:-nano} /etc/systemd/system/lightningos-reports.service
+```
+
+### 4) Enable and start
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now lightningos-reports.timer
+```
+
 ## Manager systemd unit
 1) Copy the unit and edit User/Group:
 ```bash
