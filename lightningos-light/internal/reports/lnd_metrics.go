@@ -14,7 +14,12 @@ const (
   paymentsPageSize = 500
 )
 
-func ComputeMetrics(ctx context.Context, lnd *lndclient.Client, tr TimeRange, memoMatch bool) (Metrics, error) {
+type RebalanceOverride struct {
+  FeeMsat int64
+  Count int64
+}
+
+func ComputeMetrics(ctx context.Context, lnd *lndclient.Client, tr TimeRange, memoMatch bool, override *RebalanceOverride) (Metrics, error) {
   if lnd == nil {
     return Metrics{}, fmt.Errorf("lnd client unavailable")
   }
@@ -28,9 +33,16 @@ func ComputeMetrics(ctx context.Context, lnd *lndclient.Client, tr TimeRange, me
     return Metrics{}, err
   }
 
-  rebalanceCostMsat, rebalanceCount, err := fetchRebalanceMetrics(ctx, lnd, tr.StartUnix(), tr.EndUnixInclusive(), pubkey, memoMatch)
-  if err != nil {
-    return Metrics{}, err
+  rebalanceCostMsat := int64(0)
+  rebalanceCount := int64(0)
+  if override != nil {
+    rebalanceCostMsat = override.FeeMsat
+    rebalanceCount = override.Count
+  } else {
+    rebalanceCostMsat, rebalanceCount, err = fetchRebalanceMetrics(ctx, lnd, tr.StartUnix(), tr.EndUnixInclusive(), pubkey, memoMatch)
+    if err != nil {
+      return Metrics{}, err
+    }
   }
 
   netMsat := forwardRevenueMsat - rebalanceCostMsat

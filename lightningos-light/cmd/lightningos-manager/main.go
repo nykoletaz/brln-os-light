@@ -75,7 +75,8 @@ func runReports(args []string) {
   }
   defer pool.Close()
 
-  svc := reports.NewService(pool, lndclient.New(cfg, logger), logger)
+  lnd := lndclient.New(cfg, logger)
+  svc := reports.NewService(pool, lnd, logger)
   if err := svc.EnsureSchema(ctx); err != nil {
     logger.Fatalf("reports-run failed: %v", err)
   }
@@ -90,7 +91,7 @@ func runReports(args []string) {
     reportDate = parsed
   }
 
-  row, err := svc.RunDaily(ctx, reportDate, loc)
+  row, err := svc.RunDaily(ctx, reportDate, loc, nil)
   if err != nil {
     logger.Fatalf("reports-run failed: %v", err)
   }
@@ -133,7 +134,8 @@ func runReportsBackfill(args []string) {
   }
   defer pool.Close()
 
-  svc := reports.NewService(pool, lndclient.New(cfg, logger), logger)
+  lnd := lndclient.New(cfg, logger)
+  svc := reports.NewService(pool, lnd, logger)
   schemaCtx, schemaCancel := context.WithTimeout(context.Background(), 30*time.Second)
   if err := svc.EnsureSchema(schemaCtx); err != nil {
     schemaCancel()
@@ -163,9 +165,18 @@ func runReportsBackfill(args []string) {
   }
 
   logger.Printf("reports: backfill %s -> %s", startDate.Format("2006-01-02"), endDate.Format("2006-01-02"))
+
+  startLocal := time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, loc)
+  endLocal := time.Date(endDate.Year(), endDate.Month(), endDate.Day(), 23, 59, 59, 0, loc)
+  rebalanceByDay, err := reports.FetchRebalanceFeesByDay(context.Background(), lnd, uint64(startLocal.UTC().Unix()), uint64(endLocal.UTC().Unix()), loc)
+  if err != nil {
+    logger.Fatalf("reports-backfill failed: %v", err)
+  }
   for day := startDate; !day.After(endDate); day = day.AddDate(0, 0, 1) {
     dayCtx, dayCancel := context.WithTimeout(context.Background(), reportsRunTimeout())
-    row, err := svc.RunDaily(dayCtx, day, loc)
+    dayKey := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+    override := rebalanceByDay[dayKey]
+    row, err := svc.RunDaily(dayCtx, day, loc, &override)
     dayCancel()
     if err != nil {
       logger.Fatalf("reports-backfill failed on %s: %v", day.Format("2006-01-02"), err)

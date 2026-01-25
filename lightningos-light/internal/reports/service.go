@@ -43,9 +43,9 @@ func (s *Service) EnsureSchema(ctx context.Context) error {
   return EnsureSchema(ctx, s.db)
 }
 
-func (s *Service) RunDaily(ctx context.Context, reportDate time.Time, loc *time.Location) (Row, error) {
+func (s *Service) RunDaily(ctx context.Context, reportDate time.Time, loc *time.Location, override *RebalanceOverride) (Row, error) {
   tr := BuildTimeRangeForDate(reportDate, loc)
-  metrics, err := ComputeMetrics(ctx, s.lnd, tr, false)
+  metrics, err := ComputeMetrics(ctx, s.lnd, tr, false, override)
   if err != nil {
     return Row{}, err
   }
@@ -107,7 +107,7 @@ func (s *Service) Live(ctx context.Context, now time.Time, loc *time.Location, l
   s.liveMu.Unlock()
 
   tr := BuildTimeRangeForLookback(now, loc, lookbackHours)
-  metrics, err := ComputeMetrics(ctx, s.lnd, tr, false)
+  metrics, err := ComputeMetrics(ctx, s.lnd, tr, false, nil)
   if err != nil {
     return TimeRange{}, Metrics{}, err
   }
