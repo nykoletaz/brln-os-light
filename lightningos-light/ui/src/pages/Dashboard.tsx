@@ -8,6 +8,7 @@ export default function Dashboard() {
   const locale = getLocale(i18n.language)
   const gbFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 })
   const percentFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 })
+  const satFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 })
   const [system, setSystem] = useState<any>(null)
   const [disk, setDisk] = useState<any[]>([])
   const [bitcoin, setBitcoin] = useState<any>(null)
@@ -30,6 +31,11 @@ export default function Dashboard() {
   const formatPercent = (value?: number) => {
     if (typeof value !== 'number' || Number.isNaN(value)) return '-'
     return percentFormatter.format(value)
+  }
+
+  const formatSats = (value?: number) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+    return satFormatter.format(value)
   }
 
   const compactValue = (value: string, head = 10, tail = 10) => {
@@ -232,7 +238,10 @@ export default function Dashboard() {
               </div>
               <div className="flex justify-between">
                 <span>{t('dashboard.balances')}</span>
-                <span>{t('dashboard.balanceSummary', { onchain: lnd.balances.onchain_sat, lightning: lnd.balances.lightning_sat })}</span>
+                <span>{t('dashboard.balanceSummary', {
+                  onchain: formatSats(lnd?.balances?.onchain_sat),
+                  lightning: formatSats(lnd?.balances?.lightning_sat)
+                })}</span>
               </div>
             </div>
           ) : (
@@ -253,6 +262,7 @@ export default function Dashboard() {
               {bitcoin.rpc_ok && (
                 <>
                   <div className="flex justify-between"><span>{t('dashboard.chain')}</span><span>{bitcoin.chain || t('common.na')}</span></div>
+                  <div className="flex justify-between"><span>{t('dashboard.version')}</span><span>{bitcoin.subversion || (typeof bitcoin.version === 'number' ? bitcoin.version : t('common.na'))}</span></div>
                   <div className="flex justify-between"><span>{t('dashboard.blocks')}</span><span>{bitcoin.blocks ?? t('common.na')}</span></div>
                   <div className="flex justify-between"><span>{t('dashboard.sync')}</span><span>{syncLabel(bitcoin)}</span></div>
                 </>

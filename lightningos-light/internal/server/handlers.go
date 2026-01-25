@@ -323,6 +323,8 @@ type bitcoinStatus struct {
   RPCOk bool `json:"rpc_ok"`
   ZMQRawBlockOk bool `json:"zmq_rawblock_ok"`
   ZMQRawTxOk bool `json:"zmq_rawtx_ok"`
+  Version int `json:"version,omitempty"`
+  Subversion string `json:"subversion,omitempty"`
   Chain string `json:"chain,omitempty"`
   Blocks int64 `json:"blocks,omitempty"`
   Headers int64 `json:"headers,omitempty"`
@@ -540,6 +542,10 @@ func (s *Server) bitcoinStatus(ctx context.Context) (bitcoinStatus, error) {
       status.VerificationProgress = info.VerificationProgress
       status.InitialBlockDownload = info.InitialBlockDownload
       status.BestBlockHash = info.BestBlockHash
+      if netInfo, netErr := fetchBitcoinNetworkInfo(ctx, s.cfg.BitcoinRemote.RPCHost, rpcUser, rpcPass); netErr == nil {
+        status.Version = netInfo.Version
+        status.Subversion = netInfo.Subversion
+      }
     } else {
       status.RPCOk = false
     }
@@ -579,6 +585,10 @@ func (s *Server) bitcoinLocalStatusActive(ctx context.Context) (bitcoinStatus, e
           status.VerificationProgress = info.VerificationProgress
           status.InitialBlockDownload = info.InitialBlockDownload
           status.BestBlockHash = info.BestBlockHash
+          if netInfo, netErr := fetchBitcoinNetworkInfo(ctx, cfg.Host, cfg.User, cfg.Pass); netErr == nil {
+            status.Version = netInfo.Version
+            status.Subversion = netInfo.Subversion
+          }
         } else {
           status.RPCOk = false
         }
@@ -588,7 +598,7 @@ func (s *Server) bitcoinLocalStatusActive(ctx context.Context) (bitcoinStatus, e
     status.ZMQRawTxOk = testTCP(status.ZMQRawTx)
     return status, nil
   }
-  info, _, err := fetchBitcoinLocalInfo(ctx, paths)
+  info, netInfo, err := fetchBitcoinLocalInfo(ctx, paths)
   if err == nil {
     status.RPCOk = true
     status.Chain = info.Chain
@@ -597,6 +607,8 @@ func (s *Server) bitcoinLocalStatusActive(ctx context.Context) (bitcoinStatus, e
     status.VerificationProgress = info.VerificationProgress
     status.InitialBlockDownload = info.InitialBlockDownload
     status.BestBlockHash = info.BestBlockHash
+    status.Version = netInfo.Version
+    status.Subversion = netInfo.Subversion
   }
   status.ZMQRawBlockOk = testTCP(status.ZMQRawBlock)
   status.ZMQRawTxOk = testTCP(status.ZMQRawTx)
@@ -2286,8 +2298,18 @@ type bitcoinInfo struct {
   BestBlockHash string `json:"bestblockhash"`
 }
 
+type bitcoinNetworkInfo struct {
+  Version int `json:"version"`
+  Subversion string `json:"subversion"`
+}
+
 type bitcoinRPCResponse struct {
   Result bitcoinInfo `json:"result"`
+  Error *rpcErrorDetail `json:"error"`
+}
+
+type bitcoinNetworkRPCResponse struct {
+  Result bitcoinNetworkInfo `json:"result"`
   Error *rpcErrorDetail `json:"error"`
 }
 
@@ -2313,11 +2335,22 @@ func parseBitcoinInfo(body []byte) (bitcoinInfo, error) {
   return payload.Result, nil
 }
 
-func doBitcoinRPC(ctx context.Context, url, user, pass string) ([]byte, error) {
+func parseBitcoinNetworkInfo(body []byte) (bitcoinNetworkInfo, error) {
+  var payload bitcoinNetworkRPCResponse
+  if err := json.Unmarshal(body, &payload); err != nil {
+    return bitcoinNetworkInfo{}, err
+  }
+  if payload.Error != nil {
+    return bitcoinNetworkInfo{}, fmt.Errorf(payload.Error.Message)
+  }
+  return payload.Result, nil
+}
+
+func doBitcoinRPC(ctx context.Context, url, user, pass, method string) ([]byte, error) {
   payload := map[string]any{
     "jsonrpc": "1.0",
     "id": "lightningos",
-    "method": "getblockchaininfo",
+    "method": method,
     "params": []any{},
   }
   buf, _ := json.Marshal(payload)
@@ -2347,35 +2380,47 @@ func doBitcoinRPC(ctx context.Context, url, user, pass string) ([]byte, error) {
   return body, nil
 }
 
-func fetchBitcoinInfo(ctx context.Context, host, user, pass string) (bitcoinInfo, error) {
+func fetchBitcoinRPC(ctx context.Context, host, user, pass, method string) ([]byte, error) {
   if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
-    body, err := doBitcoinRPC(ctx, host, user, pass)
-    if err != nil {
-      return bitcoinInfo{}, err
-    }
-    return parseBitcoinInfo(body)
+    return doBitcoinRPC(ctx, host, user, pass, method)
   }
 
-  body, err := doBitcoinRPC(ctx, "http://"+host, user, pass)
+  body, err := doBitcoinRPC(ctx, "http://"+host, user, pass, method)
   if err == nil {
-    return parseBitcoinInfo(body)
+    return body, nil
   }
   var statusErr rpcStatusError
   if err != nil && errors.As(err, &statusErr) {
-    return bitcoinInfo{}, err
+    return nil, err
   }
 
-  body, httpsErr := doBitcoinRPC(ctx, "https://"+host, user, pass)
+  body, httpsErr := doBitcoinRPC(ctx, "https://"+host, user, pass, method)
   if httpsErr == nil {
-    return parseBitcoinInfo(body)
+    return body, nil
   }
   if err != nil && httpsErr != nil {
-    return bitcoinInfo{}, fmt.Errorf("rpc http failed: %v; https failed: %v", err, httpsErr)
+    return nil, fmt.Errorf("rpc http failed: %v; https failed: %v", err, httpsErr)
   }
+  if err != nil {
+    return nil, err
+  }
+  return nil, httpsErr
+}
+
+func fetchBitcoinInfo(ctx context.Context, host, user, pass string) (bitcoinInfo, error) {
+  body, err := fetchBitcoinRPC(ctx, host, user, pass, "getblockchaininfo")
   if err != nil {
     return bitcoinInfo{}, err
   }
-  return bitcoinInfo{}, httpsErr
+  return parseBitcoinInfo(body)
+}
+
+func fetchBitcoinNetworkInfo(ctx context.Context, host, user, pass string) (bitcoinNetworkInfo, error) {
+  body, err := fetchBitcoinRPC(ctx, host, user, pass, "getnetworkinfo")
+  if err != nil {
+    return bitcoinNetworkInfo{}, err
+  }
+  return parseBitcoinNetworkInfo(body)
 }
 
 func testBitcoinRPC(ctx context.Context, host, user, pass string) (bool, error) {
