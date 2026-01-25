@@ -1219,7 +1219,10 @@ func (n *Notifier) runForwards() {
     }
 
     client := lnrpc.NewLightningClient(conn)
+    endTime := uint64(time.Now().Unix())
     res, err := client.ForwardingHistory(context.Background(), &lnrpc.ForwardingHistoryRequest{
+      StartTime: 0,
+      EndTime: endTime,
       IndexOffset: offset,
       NumMaxEvents: 200,
       PeerAliasLookup: true,
