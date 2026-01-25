@@ -10,6 +10,7 @@ GO_TARBALL_URL="https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
 NODE_VERSION="${NODE_VERSION:-current}"
 GOTTY_VERSION="${GOTTY_VERSION:-1.0.1}"
 GOTTY_URL="https://github.com/yudai/gotty/releases/download/v${GOTTY_VERSION}/gotty_linux_amd64.tar.gz"
+POSTGRES_VERSION="${POSTGRES_VERSION:-latest}"
 
 DEFAULT_LND_DIR="/data/lnd"
 DEFAULT_BITCOIN_DIR="/data/bitcoin"
@@ -131,9 +132,11 @@ fix_lightningos_permissions() {
 
 install_go() {
   print_step "Installing Go ${GO_VERSION}"
-  if command -v go >/dev/null 2>&1; then
+  local go_bin
+  go_bin=$(detect_go_binary)
+  if [[ -n "$go_bin" ]]; then
     local current major minor
-    current=$(go version | awk '{print $3}' | sed 's/go//')
+    current=$("$go_bin" version | awk '{print $3}' | sed 's/go//')
     major=$(echo "$current" | cut -d. -f1)
     minor=$(echo "$current" | cut -d. -f2)
     if [[ "$major" -gt 1 || ( "$major" -eq 1 && "$minor" -ge 22 ) ]]; then
@@ -191,6 +194,18 @@ resolve_node_version() {
   fi
   print_warn "Could not resolve latest Node.js version; falling back to 20"
   NODE_VERSION="20"
+}
+
+detect_go_binary() {
+  if command -v go >/dev/null 2>&1; then
+    command -v go
+    return 0
+  fi
+  if [[ -x /usr/local/go/bin/go ]]; then
+    echo "/usr/local/go/bin/go"
+    return 0
+  fi
+  return 1
 }
 
 install_gotty() {
@@ -329,9 +344,11 @@ resolve_data_dir() {
 
 ensure_go() {
   local go_ok="0"
-  if command -v go >/dev/null 2>&1; then
+  local go_bin
+  go_bin=$(detect_go_binary || true)
+  if [[ -n "$go_bin" ]]; then
     local current major minor
-    current=$(go version | awk '{print $3}' | sed 's/go//')
+    current=$("$go_bin" version | awk '{print $3}' | sed 's/go//')
     major=$(echo "$current" | cut -d. -f1)
     minor=$(echo "$current" | cut -d. -f2)
     if [[ "$major" -gt 1 || ( "$major" -eq 1 && "$minor" -ge 22 ) ]]; then
@@ -553,9 +570,7 @@ ensure_postgres_service() {
     print_warn "PostgreSQL service not found"
     if prompt_yes_no "Install PostgreSQL now (required for reports/notifications)?" "y"; then
       if command -v apt-get >/dev/null 2>&1; then
-        print_step "Installing PostgreSQL"
-        apt-get update
-        apt-get install -y postgresql postgresql-client
+        install_postgres_packages
       else
         print_warn "apt-get not found; install PostgreSQL manually"
         return
@@ -572,6 +587,63 @@ ensure_postgres_service() {
       print_warn "PostgreSQL is required for reports/notifications"
     fi
   fi
+}
+
+get_os_codename() {
+  local codename=""
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    codename="${VERSION_CODENAME:-}"
+  fi
+  if [[ -z "$codename" ]]; then
+    codename=$(lsb_release -cs 2>/dev/null || true)
+  fi
+  echo "$codename"
+}
+
+setup_postgres_repo() {
+  print_step "Configuring PostgreSQL repository"
+  local codename
+  codename=$(get_os_codename)
+  if [[ -z "$codename" ]]; then
+    print_warn "Could not detect OS codename; skipping PGDG repo"
+    return
+  fi
+  apt-get install -y ca-certificates curl gnupg
+  curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg
+  echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt ${codename}-pgdg main" \
+    > /etc/apt/sources.list.d/pgdg.list
+  print_ok "PostgreSQL repo ready (${codename}-pgdg)"
+}
+
+resolve_postgres_version() {
+  if [[ "$POSTGRES_VERSION" =~ ^[0-9]+$ ]]; then
+    return 0
+  fi
+  local versions
+  versions=$(apt-cache search --names-only '^postgresql-[0-9]+$' 2>/dev/null | awk '{print $1}' | sed 's/postgresql-//' | sort -nr)
+  if [[ -z "$versions" ]]; then
+    print_warn "Could not detect PostgreSQL versions; falling back to 17"
+    POSTGRES_VERSION="17"
+    return 0
+  fi
+  POSTGRES_VERSION=$(echo "$versions" | head -n1)
+  print_ok "Using PostgreSQL ${POSTGRES_VERSION}"
+}
+
+install_postgres_packages() {
+  print_step "Installing PostgreSQL"
+  apt-get update
+  setup_postgres_repo
+  apt-get update
+  resolve_postgres_version
+  apt-get install -y \
+    postgresql-common \
+    postgresql-client-common \
+    postgresql-"${POSTGRES_VERSION}" \
+    postgresql-client-"${POSTGRES_VERSION}"
+  print_ok "PostgreSQL installed"
 }
 
 psql_as_postgres() {
