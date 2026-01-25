@@ -43,6 +43,7 @@ const (
   statusCacheOK = 30 * time.Second
   statusCacheErr = 45 * time.Second
   statusCacheTimeout = 60 * time.Second
+  maxGRPCMsgSize = 32 * 1024 * 1024
 )
 
 type macaroonCredential struct {
@@ -107,7 +108,10 @@ func (c *Client) dial(ctx context.Context, withMacaroon bool) (*grpc.ClientConn,
   }
 
   creds := credentials.NewClientTLSFromCert(certPool, "")
-  opts := []grpc.DialOption{grpc.WithTransportCredentials(creds)}
+  opts := []grpc.DialOption{
+    grpc.WithTransportCredentials(creds),
+    grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxGRPCMsgSize)),
+  }
 
   if withMacaroon {
     macBytes, err := os.ReadFile(c.cfg.LND.AdminMacaroonPath)
