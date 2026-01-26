@@ -78,6 +78,7 @@ const mempoolTxLink = (txid?: string) => {
 export default function Notifications() {
   const { t, i18n } = useTranslation()
   const locale = getLocale(i18n.language)
+  const limitOptions = [200, 500, 1000]
 
   const formatTimestamp = (value: string) => {
     if (!value) return t('common.unknownTime')
@@ -146,6 +147,8 @@ export default function Notifications() {
   const [streamState, setStreamState] = useState<'idle' | 'waiting' | 'reconnecting' | 'error'>('idle')
   const streamErrors = useRef(0)
   const [filter, setFilter] = useState<'all' | 'onchain' | 'lightning' | 'keysend' | 'channel' | 'forward' | 'rebalance'>('all')
+  const [limit, setLimit] = useState(200)
+  const limitRef = useRef(limit)
   const [telegramConfig, setTelegramConfig] = useState<TelegramBackupConfig | null>(null)
   const [telegramToken, setTelegramToken] = useState('')
   const [telegramChatId, setTelegramChatId] = useState('')
@@ -155,11 +158,15 @@ export default function Notifications() {
   const [telegramOpen, setTelegramOpen] = useState(false)
 
   useEffect(() => {
+    limitRef.current = limit
+  }, [limit])
+
+  useEffect(() => {
     let mounted = true
     const load = async () => {
       setStatus(t('notifications.loading'))
       try {
-        const res = await getNotifications(200)
+        const res = await getNotifications(limit)
         if (!mounted) return
         setItems(Array.isArray(res?.items) ? res.items : [])
         setStatus('')
@@ -172,7 +179,7 @@ export default function Notifications() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [limit])
 
   useEffect(() => {
     let mounted = true
@@ -209,7 +216,7 @@ export default function Notifications() {
         setItems((prev) => {
           const next = [payload, ...prev.filter((item) => item.id !== payload.id)]
           next.sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
-          return next.slice(0, 200)
+          return next.slice(0, limitRef.current)
         })
       } catch {
         // ignore malformed payloads
@@ -313,6 +320,11 @@ export default function Notifications() {
             <button className={filter === 'channel' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('channel')}>{t('notifications.filter.channels')}</button>
             <button className={filter === 'forward' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('forward')}>{t('notifications.filter.forwards')}</button>
             <button className={filter === 'rebalance' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('rebalance')}>{t('notifications.filter.rebalance')}</button>
+            <select className="input-field max-w-[140px]" value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
+              {limitOptions.map((value) => (
+                <option key={value} value={value}>{t('notifications.linesOption', { count: value })}</option>
+              ))}
+            </select>
           </div>
         </div>
       </div>
