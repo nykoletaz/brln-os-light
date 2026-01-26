@@ -8,7 +8,11 @@ export default function Disks() {
   const locale = getLocale(i18n.language)
   const gbFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 })
   const percentFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 })
+  const tempFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 })
   const [disks, setDisks] = useState<any[]>([])
+
+  const wearWarnThreshold = 75
+  const tempWarnThreshold = 70
 
   useEffect(() => {
     getDisk()
@@ -26,6 +30,32 @@ export default function Disks() {
     return percentFormatter.format(value)
   }
 
+  const formatPercentValue = (value?: number) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+    return `${percentFormatter.format(value)}%`
+  }
+
+  const formatTemp = (value?: number) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+    return `${tempFormatter.format(value)} C`
+  }
+
+  const badgeClass = (tone: 'ok' | 'warn' | 'muted') => {
+    if (tone === 'ok') {
+      return 'bg-emerald-500/15 text-emerald-200 border border-emerald-400/30'
+    }
+    if (tone === 'warn') {
+      return 'bg-amber-500/15 text-amber-200 border border-amber-400/30'
+    }
+    return 'bg-white/10 text-fog/60 border border-white/10'
+  }
+
+  const Badge = ({ label, tone }: { label: string; tone: 'ok' | 'warn' | 'muted' }) => (
+    <span className={`text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full ${badgeClass(tone)}`}>
+      {label}
+    </span>
+  )
+
   return (
     <section className="space-y-6">
       <div className="section-card">
@@ -39,6 +69,10 @@ export default function Disks() {
             const totalLabel = formatGB(disk.total_gb)
             const usedLabel = formatGB(disk.used_gb)
             const percentLabel = formatPercent(disk.used_percent)
+            const wearLabel = formatPercentValue(disk.wear_percent_used)
+            const tempLabel = formatTemp(disk.temperature_c)
+            const wearWarn = typeof disk.wear_percent_used === 'number' && disk.wear_percent_used >= wearWarnThreshold
+            const tempWarn = typeof disk.temperature_c === 'number' && disk.temperature_c >= tempWarnThreshold
             const partitions = Array.isArray(disk.partitions) ? disk.partitions : []
             return (
             <div key={disk.device} className="border border-white/10 rounded-2xl p-4">
@@ -49,10 +83,20 @@ export default function Disks() {
                 </div>
                 <div className="text-sm text-fog/70">{t('disks.smartLabel', { status: disk.smart_status })}</div>
               </div>
-              <div className="mt-3 grid gap-3 lg:grid-cols-5 text-sm">
+              <div className="mt-3 grid gap-3 lg:grid-cols-6 text-sm">
                 <div>
                   <p className="text-fog/60">{t('disks.wear')}</p>
-                  <p>{disk.wear_percent_used}%</p>
+                  <div className="flex items-center gap-2">
+                    <p>{wearLabel}</p>
+                    {wearWarn && <Badge label={t('disks.wearWarn')} tone="warn" />}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-fog/60">{t('disks.temp')}</p>
+                  <div className="flex items-center gap-2">
+                    <p>{tempLabel}</p>
+                    {tempWarn && <Badge label={t('disks.tempWarn')} tone="warn" />}
+                  </div>
                 </div>
                 <div>
                   <p className="text-fog/60">{t('disks.powerOnHours')}</p>

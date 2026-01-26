@@ -240,10 +240,13 @@
     "size": "Tamanho",
     "smartLabel": "SMART",
     "subtitle": "Dados SMART com estimativa de vida útil.",
+    "temp": "Temp",
+    "tempWarn": "Temp alta",
     "title": "Saúde dos discos",
     "used": "Uso",
     "usedValue": "{{used}} ({{percent}}%)",
-    "wear": "Desgaste"
+    "wear": "Desgaste",
+    "wearWarn": "Desgaste alto"
   },
   "logs": {
     "fetchFailed": "Falha ao buscar logs.",

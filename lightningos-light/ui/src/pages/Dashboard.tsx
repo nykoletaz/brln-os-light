@@ -8,6 +8,7 @@ export default function Dashboard() {
   const locale = getLocale(i18n.language)
   const gbFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 })
   const percentFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 })
+  const tempFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 })
   const satFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 })
   const [system, setSystem] = useState<any>(null)
   const [disk, setDisk] = useState<any[]>([])
@@ -15,6 +16,9 @@ export default function Dashboard() {
   const [postgres, setPostgres] = useState<any>(null)
   const [lnd, setLnd] = useState<any>(null)
   const [status, setStatus] = useState<'loading' | 'ok' | 'unavailable'>('loading')
+
+  const wearWarnThreshold = 75
+  const tempWarnThreshold = 70
 
   const syncLabel = (info: any) => {
     if (!info || typeof info.verification_progress !== 'number') {
@@ -31,6 +35,11 @@ export default function Dashboard() {
   const formatPercent = (value?: number) => {
     if (typeof value !== 'number' || Number.isNaN(value)) return '-'
     return percentFormatter.format(value)
+  }
+
+  const formatTemp = (value?: number) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+    return `${tempFormatter.format(value)} C`
   }
 
   const formatSats = (value?: number) => {
@@ -344,6 +353,9 @@ export default function Dashboard() {
               const totalLabel = formatGB(item.total_gb)
               const usedLabel = formatGB(item.used_gb)
               const percentLabel = formatPercent(item.used_percent)
+              const tempLabel = formatTemp(item.temperature_c)
+              const wearWarn = typeof item.wear_percent_used === 'number' && item.wear_percent_used >= wearWarnThreshold
+              const tempWarn = typeof item.temperature_c === 'number' && item.temperature_c >= tempWarnThreshold
               const partitions = Array.isArray(item.partitions) ? item.partitions : []
               return (
               <div key={item.device} className="flex flex-col lg:flex-row lg:items-center lg:justify-between bg-ink/40 rounded-2xl p-4">
@@ -371,8 +383,15 @@ export default function Dashboard() {
                     </div>
                   )}
                 </div>
-                <div className="text-sm text-fog/80">
-                  {t('dashboard.wearDaysLeft', { wear: item.wear_percent_used, days: item.days_left_estimate })}
+                <div className="text-sm text-fog/80 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>{t('dashboard.wearDaysLeft', { wear: item.wear_percent_used, days: item.days_left_estimate })}</span>
+                    {wearWarn && <Badge label={t('disks.wearWarn')} tone="warn" />}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-fog/60">
+                    <span>{t('disks.temp')}: {tempLabel}</span>
+                    {tempWarn && <Badge label={t('disks.tempWarn')} tone="warn" />}
+                  </div>
                 </div>
                 <div className="text-xs text-fog/60">{t('dashboard.smartLabel', { status: item.smart_status })}</div>
               </div>

@@ -240,10 +240,13 @@
     "size": "Size",
     "smartLabel": "SMART",
     "subtitle": "SMART data with lifespan estimation.",
+    "temp": "Temp",
+    "tempWarn": "Hot",
     "title": "Disk health",
     "used": "Used",
     "usedValue": "{{used}} ({{percent}}%)",
-    "wear": "Wear"
+    "wear": "Wear",
+    "wearWarn": "High wear"
   },
   "logs": {
     "fetchFailed": "Log fetch failed.",

@@ -15,6 +15,7 @@ type DiskSmart struct {
   Type string `json:"type"`
   PowerOnHours int64 `json:"power_on_hours"`
   WearPercentUsed int `json:"wear_percent_used"`
+  TemperatureC float64 `json:"temperature_c,omitempty"`
   DaysLeftEstimate int64 `json:"days_left_estimate"`
   SmartStatus string `json:"smart_status"`
   Alerts []string `json:"alerts"`
@@ -336,6 +337,7 @@ func smartctlDevice(ctx context.Context, device string) (DiskSmart, error) {
     Type: guessDiskType(device),
   }
 
+  tempFound := false
   lines := strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n")
   for _, line := range lines {
     lower := strings.ToLower(strings.TrimSpace(line))
@@ -370,6 +372,27 @@ func smartctlDevice(ctx context.Context, device string) (DiskSmart, error) {
     }
     if strings.HasPrefix(strings.TrimSpace(line), "Power_On_Hours") {
       smart.PowerOnHours = parseSmartAttribute(line)
+    }
+
+    trimmed := strings.TrimSpace(line)
+    if strings.HasPrefix(trimmed, "Temperature_Celsius") ||
+      strings.HasPrefix(trimmed, "Temperature_Internal") ||
+      strings.HasPrefix(trimmed, "Airflow_Temperature_Cel") ||
+      strings.HasPrefix(trimmed, "Drive_Temperature") {
+      if temp := parseSmartAttribute(trimmed); temp > 0 {
+        smart.TemperatureC = float64(temp)
+        tempFound = true
+      }
+    }
+
+    if !tempFound && strings.Contains(lower, "temperature") && strings.Contains(line, ":") {
+      if strings.Contains(lower, "warning") || strings.Contains(lower, "threshold") || strings.Contains(lower, "critical") {
+        continue
+      }
+      if temp, ok := parseTemperatureAfterColon(line); ok {
+        smart.TemperatureC = temp
+        tempFound = true
+      }
     }
   }
 
@@ -434,6 +457,43 @@ func parseSmartAttribute(line string) int64 {
   }
   v, _ := strconv.ParseInt(cleaned, 10, 64)
   return v
+}
+
+func parseTemperatureAfterColon(line string) (float64, bool) {
+  idx := strings.Index(line, ":")
+  if idx < 0 || idx+1 >= len(line) {
+    return 0, false
+  }
+  return parseFirstFloat(line[idx+1:])
+}
+
+func parseFirstFloat(value string) (float64, bool) {
+  var b strings.Builder
+  foundDigit := false
+  foundDot := false
+  for _, r := range value {
+    if r >= '0' && r <= '9' {
+      b.WriteRune(r)
+      foundDigit = true
+      continue
+    }
+    if r == '.' && foundDigit && !foundDot {
+      b.WriteRune(r)
+      foundDot = true
+      continue
+    }
+    if foundDigit {
+      break
+    }
+  }
+  if !foundDigit {
+    return 0, false
+  }
+  parsed, err := strconv.ParseFloat(b.String(), 64)
+  if err != nil {
+    return 0, false
+  }
+  return parsed, true
 }
 
 func smartDigits(value string) string {
