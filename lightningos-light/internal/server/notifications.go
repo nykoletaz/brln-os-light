@@ -763,6 +763,9 @@ func (n *Notifier) runPayments() {
       if status == "IN_FLIGHT" {
         continue
       }
+      if status != "SUCCEEDED" && isProbePayment(pay) {
+        continue
+      }
 
       amount := pay.ValueSat
       feeMsat := paymentFeeMsat(pay)
@@ -1626,6 +1629,19 @@ func isKeysendPayment(pay *lnrpc.Payment) bool {
     }
   }
   return false
+}
+
+func isProbePayment(pay *lnrpc.Payment) bool {
+  if pay == nil {
+    return false
+  }
+  if strings.TrimSpace(pay.PaymentRequest) != "" {
+    return false
+  }
+  if isKeysendPayment(pay) {
+    return false
+  }
+  return true
 }
 
 func keysendDestinationFromPayment(pay *lnrpc.Payment) string {
