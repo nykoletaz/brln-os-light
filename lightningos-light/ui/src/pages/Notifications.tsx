@@ -312,7 +312,7 @@ export default function Notifications() {
             <h2 className="text-2xl font-semibold">{t('notifications.title')}</h2>
             <p className="text-fog/60">{t('notifications.subtitle')}</p>
           </div>
-          <div className="flex flex-wrap gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
             <button className={filter === 'all' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('all')}>{t('common.all')}</button>
             <button className={filter === 'onchain' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('onchain')}>{t('notifications.filter.onchain')}</button>
             <button className={filter === 'lightning' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('lightning')}>{t('notifications.filter.lightning')}</button>
@@ -320,7 +320,7 @@ export default function Notifications() {
             <button className={filter === 'channel' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('channel')}>{t('notifications.filter.channels')}</button>
             <button className={filter === 'forward' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('forward')}>{t('notifications.filter.forwards')}</button>
             <button className={filter === 'rebalance' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('rebalance')}>{t('notifications.filter.rebalance')}</button>
-            <select className="input-field max-w-[140px]" value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
+            <select className="btn-secondary text-xs" value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
               {limitOptions.map((value) => (
                 <option key={value} value={value}>{t('notifications.linesOption', { count: value })}</option>
               ))}
