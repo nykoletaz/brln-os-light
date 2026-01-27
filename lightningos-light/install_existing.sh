@@ -407,6 +407,7 @@ ensure_go() {
   local go_bin
   go_bin=$(detect_go_binary || true)
   if [[ -n "$go_bin" ]]; then
+    export PATH="$(dirname "$go_bin"):$PATH"
     local current major minor
     current=$("$go_bin" version | awk '{print $3}' | sed 's/go//')
     major=$(echo "$current" | cut -d. -f1)
