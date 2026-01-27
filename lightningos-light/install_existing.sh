@@ -26,6 +26,12 @@ SECRETS_PATH="/etc/lightningos/secrets.env"
 NOTIFICATIONS_DB_NAME="lightningos"
 NOTIFICATIONS_APP_USER="losapp"
 NOTIFICATIONS_ADMIN_USER="losadmin"
+LND_SERVICE=""
+LND_USER=""
+LND_GROUP=""
+BITCOIN_SERVICE=""
+BITCOIN_USER=""
+BITCOIN_GROUP=""
 
 print_step() {
   CURRENT_STEP="$1"
@@ -502,8 +508,16 @@ ensure_manager_service() {
   sed -i "s|^User=.*|User=${user}|" "$dst"
   sed -i "s|^Group=.*|Group=${group}|" "$dst"
   local groups=("systemd-journal")
-  getent group lnd >/dev/null 2>&1 && groups+=("lnd")
-  getent group bitcoin >/dev/null 2>&1 && groups+=("bitcoin")
+  if [[ -n "$LND_GROUP" ]]; then
+    getent group "$LND_GROUP" >/dev/null 2>&1 && groups+=("$LND_GROUP")
+  else
+    getent group lnd >/dev/null 2>&1 && groups+=("lnd")
+  fi
+  if [[ -n "$BITCOIN_GROUP" ]]; then
+    getent group "$BITCOIN_GROUP" >/dev/null 2>&1 && groups+=("$BITCOIN_GROUP")
+  else
+    getent group bitcoin >/dev/null 2>&1 && groups+=("bitcoin")
+  fi
   getent group docker >/dev/null 2>&1 && groups+=("docker")
   local group_line
   group_line=$(IFS=' '; echo "${groups[*]}")
@@ -621,6 +635,99 @@ ensure_group_exists() {
 
 service_exists() {
   systemctl list-unit-files --type=service --no-pager 2>/dev/null | awk '{print $1}' | grep -qx "${1}.service"
+}
+
+detect_first_service() {
+  local svc
+  for svc in "$@"; do
+    if service_exists "$svc"; then
+      echo "$svc"
+      return 0
+    fi
+  done
+  return 1
+}
+
+detect_service_user() {
+  local svc="$1"
+  if [[ -z "$svc" ]]; then
+    return 1
+  fi
+  local user
+  user=$(systemctl show -p User --value "$svc" 2>/dev/null || true)
+  user=$(echo "$user" | tr -d ' ')
+  if [[ -n "$user" ]]; then
+    echo "$user"
+    return 0
+  fi
+  return 1
+}
+
+detect_service_group() {
+  local svc="$1"
+  local fallback="$2"
+  if [[ -z "$svc" ]]; then
+    return 1
+  fi
+  local group
+  group=$(systemctl show -p Group --value "$svc" 2>/dev/null || true)
+  group=$(echo "$group" | tr -d ' ')
+  if [[ -z "$group" ]]; then
+    group="$fallback"
+  fi
+  if [[ -n "$group" ]]; then
+    echo "$group"
+    return 0
+  fi
+  return 1
+}
+
+detect_core_service_users() {
+  LND_SERVICE=$(detect_first_service lnd lnd@default || true)
+  if [[ -n "$LND_SERVICE" ]]; then
+    LND_USER=$(detect_service_user "$LND_SERVICE" || true)
+    LND_GROUP=$(detect_service_group "$LND_SERVICE" "$LND_USER" || true)
+  fi
+
+  BITCOIN_SERVICE=$(detect_first_service bitcoind bitcoin bitcoind@default bitcoin@default || true)
+  if [[ -n "$BITCOIN_SERVICE" ]]; then
+    BITCOIN_USER=$(detect_service_user "$BITCOIN_SERVICE" || true)
+    BITCOIN_GROUP=$(detect_service_group "$BITCOIN_SERVICE" "$BITCOIN_USER" || true)
+  fi
+}
+
+fix_lnd_permissions() {
+  local lnd_dir="$1"
+  local lnd_user="$2"
+  local lnd_group="$3"
+  if [[ -z "$lnd_dir" || -z "$lnd_user" || -z "$lnd_group" ]]; then
+    print_warn "Missing LND user/group; skipping LND permissions fix"
+    return 0
+  fi
+
+  local chain_dir="${lnd_dir}/data/chain/bitcoin/mainnet"
+  if [[ -d "$lnd_dir" ]]; then
+    chown "$lnd_user:$lnd_group" "$lnd_dir"
+    chmod 750 "$lnd_dir"
+  fi
+  for dir in "$lnd_dir/data" "$lnd_dir/data/chain" "$lnd_dir/data/chain/bitcoin" "$chain_dir"; do
+    if [[ -d "$dir" ]]; then
+      chown "$lnd_user:$lnd_group" "$dir"
+      chmod 750 "$dir"
+    fi
+  done
+  if [[ -f "$lnd_dir/tls.cert" ]]; then
+    chown "$lnd_user:$lnd_group" "$lnd_dir/tls.cert"
+    chmod 640 "$lnd_dir/tls.cert"
+  fi
+  if [[ -d "$chain_dir" ]]; then
+    shopt -s nullglob
+    for mac in "$chain_dir"/*.macaroon; do
+      chown "$lnd_user:$lnd_group" "$mac"
+      chmod 640 "$mac"
+    done
+    shopt -u nullglob
+  fi
 }
 
 ensure_postgres_service() {
@@ -836,6 +943,16 @@ main() {
     print_warn "Could not detect LND backend"
   fi
 
+  detect_core_service_users
+  if [[ -n "$LND_USER" ]]; then
+    print_ok "Detected LND service user: ${LND_USER}"
+  else
+    print_warn "LND service user not detected"
+  fi
+  if [[ -n "$BITCOIN_USER" ]]; then
+    print_ok "Detected Bitcoin service user: ${BITCOIN_USER}"
+  fi
+
   if [[ "$lnd_backend" != "postgres" ]]; then
     if prompt_yes_no "Install/enable Postgres for reports/notifications?" "y"; then
       ensure_postgres_service
@@ -913,13 +1030,39 @@ main() {
       break
     fi
   done
-  if prompt_yes_no "Add ${manager_user} to lnd/bitcoin/docker groups when available?" "y"; then
-    ensure_group_membership "$manager_user" lnd bitcoin docker systemd-journal
+  local membership_groups=()
+  if [[ -n "$LND_GROUP" ]]; then
+    membership_groups+=("$LND_GROUP")
+  else
+    membership_groups+=("lnd")
+  fi
+  if [[ -n "$BITCOIN_GROUP" ]]; then
+    membership_groups+=("$BITCOIN_GROUP")
+  else
+    membership_groups+=("bitcoin")
+  fi
+  membership_groups+=("docker" "systemd-journal")
+  local membership_label
+  membership_label=$(IFS=', '; echo "${membership_groups[*]}")
+  if prompt_yes_no "Add ${manager_user} to ${membership_label} groups when available?" "y"; then
+    ensure_group_membership "$manager_user" "${membership_groups[@]}"
+  fi
+  if [[ -n "$LND_USER" && -n "$BITCOIN_GROUP" ]]; then
+    if ! id -nG "$LND_USER" | tr ' ' '\n' | grep -qx "$BITCOIN_GROUP"; then
+      if prompt_yes_no "Add ${LND_USER} to ${BITCOIN_GROUP} group for Bitcoin RPC cookie access?" "y"; then
+        ensure_group_membership "$LND_USER" "$BITCOIN_GROUP"
+      fi
+    fi
   fi
   if prompt_yes_no "Allow ${manager_user} to run smartctl via sudo (no password)?" "y"; then
     configure_smartctl_sudoers "$manager_user" || print_warn "SMART data may be unavailable"
   fi
   ensure_manager_service "$manager_user" "$manager_group"
+  if [[ -n "$LND_USER" && -n "$LND_GROUP" ]]; then
+    fix_lnd_permissions "$lnd_dir" "$LND_USER" "$LND_GROUP"
+  else
+    print_warn "Skipping LND permissions fix (user/group not detected)"
+  fi
   fix_lightningos_permissions "$manager_group"
   fix_lightningos_storage_permissions "$manager_user" "$manager_group"
 
