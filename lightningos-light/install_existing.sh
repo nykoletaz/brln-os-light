@@ -12,6 +12,13 @@ GOTTY_VERSION="${GOTTY_VERSION:-1.0.1}"
 GOTTY_URL="https://github.com/yudai/gotty/releases/download/v${GOTTY_VERSION}/gotty_linux_amd64.tar.gz"
 POSTGRES_VERSION="${POSTGRES_VERSION:-latest}"
 
+CURRENT_STEP=""
+LOG_FILE="/var/log/lightningos-install-existing.log"
+
+mkdir -p /var/log
+exec > >(tee -a "$LOG_FILE") 2>&1
+trap 'echo ""; echo "Installation failed during: ${CURRENT_STEP:-unknown}"; echo "Last command: $BASH_COMMAND"; echo "Check: systemctl status lightningos-manager --no-pager"; echo "Also: journalctl -u lightningos-manager -n 50 --no-pager"; exit 1' ERR
+
 DEFAULT_LND_DIR="/data/lnd"
 DEFAULT_BITCOIN_DIR="/data/bitcoin"
 CONFIG_PATH="/etc/lightningos/config.yaml"
@@ -21,6 +28,7 @@ NOTIFICATIONS_APP_USER="losapp"
 NOTIFICATIONS_ADMIN_USER="losadmin"
 
 print_step() {
+  CURRENT_STEP="$1"
   echo ""
   echo "==> $1"
 }
@@ -163,9 +171,23 @@ install_go() {
   fi
 
   rm -rf /usr/local/go
-  curl -L "$GO_TARBALL_URL" -o /tmp/go.tgz
-  tar -C /usr/local -xzf /tmp/go.tgz
-  rm -f /tmp/go.tgz
+  local tmp="/tmp/go.tgz"
+  local primary_url="$GO_TARBALL_URL"
+  local fallback_url="https://dl.google.com/go/go${GO_VERSION}.linux-amd64.tar.gz"
+  if [[ "$primary_url" == "$fallback_url" ]]; then
+    fallback_url="https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz"
+  fi
+
+  if ! curl -fL "$primary_url" -o "$tmp" || ! tar -tzf "$tmp" >/dev/null 2>&1; then
+    print_warn "Go download failed from ${primary_url}"
+    if ! curl -fL "$fallback_url" -o "$tmp" || ! tar -tzf "$tmp" >/dev/null 2>&1; then
+      print_warn "Go download failed from ${fallback_url}"
+      exit 1
+    fi
+  fi
+
+  tar -C /usr/local -xzf "$tmp"
+  rm -f "$tmp"
   export PATH="/usr/local/go/bin:$PATH"
   print_ok "Go installed"
 }
@@ -367,12 +389,12 @@ ensure_go() {
     current=$("$go_bin" version | awk '{print $3}' | sed 's/go//')
     major=$(echo "$current" | cut -d. -f1)
     minor=$(echo "$current" | cut -d. -f2)
-    if [[ "$major" -gt 1 || ( "$major" -eq 1 && "$minor" -ge 22 ) ]]; then
+    if [[ "$major" -gt 1 || ( "$major" -eq 1 && "$minor" -ge 24 ) ]]; then
       go_ok="1"
     fi
   fi
   if [[ "$go_ok" != "1" ]]; then
-    print_warn "Go 1.22+ required"
+    print_warn "Go 1.24+ required"
     if prompt_yes_no "Install Go ${GO_VERSION} now?" "y"; then
       install_go
     else
@@ -919,6 +941,7 @@ main() {
   fi
 
   print_step "Done"
+  echo "Log: ${LOG_FILE}"
   echo "Check: systemctl status lightningos-manager --no-pager"
   echo "Health: curl -k https://127.0.0.1:8443/api/health"
 }
