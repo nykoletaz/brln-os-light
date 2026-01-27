@@ -76,14 +76,33 @@ sudo chmod 440 /etc/sudoers.d/lightningos
 sudo visudo -cf /etc/sudoers.d/lightningos
 ```
 
-4) Allow LND gRPC from Docker (required by LNDg):
+4) Allow LND gRPC from Docker (required by LNDg).
+**Important:** these lines must be outside sections like `[Bitcoind]`. Put them at the top of the file or inside `[Application Options]`.
 ```bash
 GATEWAY=$(sudo docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
-sudo sed -i '/^rpclisten=/d;/^tlsextraip=/d;/^tlsextradomain=/d' /data/lnd/lnd.conf
-echo "rpclisten=127.0.0.1:10009" | sudo tee -a /data/lnd/lnd.conf
-echo "rpclisten=${GATEWAY}:10009" | sudo tee -a /data/lnd/lnd.conf
-echo "tlsextraip=${GATEWAY}" | sudo tee -a /data/lnd/lnd.conf
-echo "tlsextradomain=host.docker.internal" | sudo tee -a /data/lnd/lnd.conf
+LND_CONF=/data/lnd/lnd.conf
+sudo sed -i '/^rpclisten=/d;/^tlsextraip=/d;/^tlsextradomain=/d' "$LND_CONF"
+sudo awk -v gw="$GATEWAY" '
+  BEGIN {added=0}
+  /^[[:space:]]*\\[.*\\]/ && added==0 {
+    print "[Application Options]"
+    print "rpclisten=127.0.0.1:10009"
+    print "rpclisten=" gw ":10009"
+    print "tlsextraip=" gw
+    print "tlsextradomain=host.docker.internal"
+    added=1
+  }
+  {print}
+  END {
+    if (added==0) {
+      print "[Application Options]"
+      print "rpclisten=127.0.0.1:10009"
+      print "rpclisten=" gw ":10009"
+      print "tlsextraip=" gw
+      print "tlsextradomain=host.docker.internal"
+    }
+  }
+' "$LND_CONF" | sudo tee "$LND_CONF" >/dev/null
 sudo rm -f /data/lnd/tls.cert /data/lnd/tls.key
 sudo systemctl restart lnd
 ```
