@@ -1999,6 +1999,107 @@ func (s *Server) lndWarmupActive() bool {
   return time.Since(last) <= lndWarmupPeriod
 }
 
+func (s *Server) handleOnchainUtxos(w http.ResponseWriter, r *http.Request) {
+  minConfs := int32(0)
+  maxConfs := int32(0)
+  if raw := strings.TrimSpace(r.URL.Query().Get("include_unconfirmed")); raw != "" {
+    if parsed, err := strconv.ParseBool(raw); err == nil && !parsed {
+      minConfs = 1
+    }
+  }
+  if raw := strings.TrimSpace(r.URL.Query().Get("min_conf")); raw != "" {
+    if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 {
+      minConfs = int32(parsed)
+    }
+  }
+  if raw := strings.TrimSpace(r.URL.Query().Get("max_conf")); raw != "" {
+    if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 {
+      maxConfs = int32(parsed)
+    }
+  }
+  if maxConfs > 0 && maxConfs < minConfs {
+    maxConfs = minConfs
+  }
+
+  limit := 500
+  if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+    if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+      limit = parsed
+    }
+  }
+
+  ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
+  defer cancel()
+
+  items, err := s.lnd.ListOnchainUtxos(ctx, minConfs, maxConfs)
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, lndStatusMessage(err))
+    return
+  }
+
+  if limit > 0 && len(items) > limit {
+    items = items[:limit]
+  }
+
+  writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (s *Server) handleOnchainTransactions(w http.ResponseWriter, r *http.Request) {
+  limit := 200
+  if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+    if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+      limit = parsed
+    }
+  }
+
+  minConfs := int32(0)
+  maxConfs := int32(0)
+  if raw := strings.TrimSpace(r.URL.Query().Get("include_unconfirmed")); raw != "" {
+    if parsed, err := strconv.ParseBool(raw); err == nil && !parsed {
+      minConfs = 1
+    }
+  }
+  if raw := strings.TrimSpace(r.URL.Query().Get("min_conf")); raw != "" {
+    if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 {
+      minConfs = int32(parsed)
+    }
+  }
+  if raw := strings.TrimSpace(r.URL.Query().Get("max_conf")); raw != "" {
+    if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 {
+      maxConfs = int32(parsed)
+    }
+  }
+  if maxConfs > 0 && maxConfs < minConfs {
+    maxConfs = minConfs
+  }
+
+  ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
+  defer cancel()
+
+  items, err := s.lnd.ListOnchainTransactions(ctx, limit)
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, lndStatusMessage(err))
+    return
+  }
+
+  if minConfs > 0 || maxConfs > 0 {
+    filtered := items[:0]
+    for _, item := range items {
+      confs := item.Confirmations
+      if minConfs > 0 && confs < minConfs {
+        continue
+      }
+      if maxConfs > 0 && confs > maxConfs {
+        continue
+      }
+      filtered = append(filtered, item)
+    }
+    items = filtered
+  }
+
+  writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
 func (s *Server) handleWalletSummary(w http.ResponseWriter, r *http.Request) {
   ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
   defer cancel()

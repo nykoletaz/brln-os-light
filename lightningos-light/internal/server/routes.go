@@ -60,6 +60,11 @@ func (s *Server) routes() http.Handler {
   r.Post("/api/reports/config", s.handleReportsConfigPost)
   r.Get("/api/terminal/status", s.handleTerminalStatus)
 
+  r.Route("/api/onchain", func(r chi.Router) {
+    r.Get("/utxos", s.handleOnchainUtxos)
+    r.Get("/transactions", s.handleOnchainTransactions)
+  })
+
   r.Route("/api/wallet", func(r chi.Router) {
     r.Get("/summary", s.handleWalletSummary)
     r.Post("/address", s.handleWalletAddress)

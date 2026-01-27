@@ -27,6 +27,15 @@ async function request(path: string, options?: RequestInit) {
   return res.json()
 }
 
+const buildQuery = (params?: Record<string, string | number | boolean | undefined | null>) => {
+  if (!params) return ''
+  const query = Object.entries(params)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+    .join('&')
+  return query ? `?${query}` : ''
+}
+
 export const getHealth = () => request('/api/health')
 export const getSystem = () => request('/api/system')
 export const getDisk = () => request('/api/disk')
@@ -145,6 +154,20 @@ export const testTelegramBackup = () =>
   request('/api/notifications/backup/telegram/test', { method: 'POST' })
 
 export const getTerminalStatus = () => request('/api/terminal/status')
+
+export const getOnchainUtxos = (params?: {
+  min_conf?: number
+  max_conf?: number
+  include_unconfirmed?: boolean
+  limit?: number
+}) => request(`/api/onchain/utxos${buildQuery(params)}`)
+
+export const getOnchainTransactions = (params?: {
+  min_conf?: number
+  max_conf?: number
+  include_unconfirmed?: boolean
+  limit?: number
+}) => request(`/api/onchain/transactions${buildQuery(params)}`)
 
 export const getReportsRange = (range: string) =>
   request(`/api/reports/range?range=${encodeURIComponent(range)}`)

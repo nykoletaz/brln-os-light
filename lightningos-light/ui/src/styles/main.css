@@ -421,3 +421,123 @@ html[data-theme="light"] .hover\\:text-rose-200:hover {
     filter: brightness(1.25);
   }
 }
+
+.onchain-hero {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(135deg, rgba(12, 18, 34, 0.9), rgba(12, 18, 34, 0.6));
+}
+
+.onchain-hero::before {
+  content: "";
+  position: absolute;
+  inset: -45% 0 0 -20%;
+  background: radial-gradient(circle, rgb(var(--color-glow) / 0.35), transparent 65%);
+  opacity: 0.8;
+}
+
+.onchain-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(120deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 120px 120px;
+  opacity: 0.25;
+  pointer-events: none;
+}
+
+.onchain-kpi {
+  @apply rounded-2xl border border-white/10 bg-white/5 px-4 py-3;
+}
+
+.onchain-kpi p {
+  @apply text-xs uppercase tracking-[0.2em] text-fog/60;
+}
+
+.onchain-kpi h3 {
+  @apply mt-2 text-lg font-semibold text-fog;
+}
+
+.onchain-pill {
+  @apply rounded-full border border-white/10 bg-ink/60 px-3 py-2 flex flex-col items-start gap-1;
+}
+
+.onchain-table {
+  display: grid;
+  gap: 12px;
+}
+
+.onchain-table-head {
+  display: grid;
+  grid-template-columns: 1.1fr 0.6fr 1.4fr 1.4fr;
+  gap: 12px;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(229, 231, 235, 0.55);
+  min-width: 680px;
+}
+
+.onchain-table-head--tx {
+  grid-template-columns: 1.3fr 0.8fr 0.7fr 0.6fr 1.3fr 1.5fr;
+  min-width: 980px;
+}
+
+.onchain-table-body {
+  display: grid;
+  gap: 10px;
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.onchain-row {
+  @apply px-3 rounded-2xl border border-white/10 bg-white/5;
+  display: grid;
+  grid-template-columns: 1.1fr 0.6fr 1.4fr 1.4fr;
+  gap: 12px;
+  align-items: center;
+  min-width: 680px;
+}
+
+.onchain-row--tx {
+  grid-template-columns: 1.3fr 0.8fr 0.7fr 0.6fr 1.3fr 1.5fr;
+  min-width: 980px;
+}
+
+.onchain-badge {
+  @apply inline-flex items-center justify-center rounded-full border px-2 py-1 text-[10px] uppercase tracking-wide;
+}
+
+.onchain-badge--ok {
+  border-color: rgb(var(--color-glow) / 0.35);
+  color: rgb(var(--color-glow) / 0.9);
+  background: rgb(var(--color-glow) / 0.12);
+}
+
+.onchain-badge--warn {
+  border-color: rgb(var(--color-brass) / 0.35);
+  color: rgb(var(--color-brass) / 0.95);
+  background: rgb(var(--color-brass) / 0.12);
+}
+
+.onchain-link {
+  @apply text-fog/70 hover:text-white transition;
+}
+
+.onchain-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.onchain-dot--in {
+  background: rgb(var(--color-glow) / 0.7);
+}
+
+.onchain-dot--out {
+  background: rgb(var(--color-ember) / 0.7);
+}
