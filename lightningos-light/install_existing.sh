@@ -47,6 +47,12 @@ print_warn() {
   echo "[WARN] $1"
 }
 
+get_lan_ip() {
+  local ip
+  ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  echo "$ip"
+}
+
 require_root() {
   if [[ "$(id -u)" -ne 0 ]]; then
     echo "This script must run as root. Use sudo." >&2
@@ -637,6 +643,21 @@ service_exists() {
   systemctl list-unit-files --type=service --no-pager 2>/dev/null | awk '{print $1}' | grep -qx "${1}.service"
 }
 
+ensure_ufw_manager_port() {
+  if ! command -v ufw >/dev/null 2>&1; then
+    return 0
+  fi
+  local status
+  status=$(ufw status 2>/dev/null || true)
+  if ! echo "$status" | grep -qi "Status: active"; then
+    return 0
+  fi
+  if echo "$status" | grep -Eq '(^|[[:space:]])8443/tcp([[:space:]]|$)'; then
+    return 0
+  fi
+  ufw allow 8443/tcp || print_warn "Failed to open UFW port 8443/tcp"
+}
+
 detect_first_service() {
   local svc
   for svc in "$@"; do
@@ -1093,10 +1114,18 @@ main() {
     systemctl enable --now lightningos-terminal || true
   fi
 
+  ensure_ufw_manager_port
+
   print_step "Done"
   echo "Log: ${LOG_FILE}"
   echo "Check: systemctl status lightningos-manager --no-pager"
-  echo "Health: curl -k https://127.0.0.1:8443/api/health"
+  local lan_ip
+  lan_ip=$(get_lan_ip)
+  if [[ -n "$lan_ip" ]]; then
+    echo "Open: https://${lan_ip}:8443"
+  else
+    echo "Open: https://IP_DA_MAQUINA:8443"
+  fi
 }
 
 main "$@"

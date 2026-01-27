@@ -1090,6 +1090,7 @@ install_systemd() {
     else
       systemctl disable --now lightningos-terminal >/dev/null 2>&1 || true
     fi
+  ensure_ufw_manager_port
   print_ok "Services enabled and started"
 }
 
@@ -1134,6 +1135,21 @@ service_status_summary() {
       print_warn "$svc is not active"
     fi
   done
+}
+
+ensure_ufw_manager_port() {
+  if ! command -v ufw >/dev/null 2>&1; then
+    return 0
+  fi
+  local status
+  status=$(ufw status 2>/dev/null || true)
+  if ! echo "$status" | grep -qi "Status: active"; then
+    return 0
+  fi
+  if echo "$status" | grep -Eq '(^|[[:space:]])8443/tcp([[:space:]]|$)'; then
+    return 0
+  fi
+  ufw allow 8443/tcp || print_warn "Failed to open UFW port 8443/tcp"
 }
 
 show_manager_logs() {
