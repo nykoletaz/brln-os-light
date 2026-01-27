@@ -664,6 +664,7 @@
     "compact": "Compact",
     "comfy": "Comfy",
     "items": "items",
+    "more": "more",
     "searchUtxo": "Search address, outpoint, or txid",
     "minAmount": "Min amount (sats)",
     "maxAmount": "Max amount (sats)",

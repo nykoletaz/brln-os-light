@@ -12,6 +12,7 @@ import (
   "net/url"
   "os"
   "path/filepath"
+  "sort"
   "strconv"
   "strings"
   "time"
@@ -2081,11 +2082,15 @@ func (s *Server) handleOnchainTransactions(w http.ResponseWriter, r *http.Reques
   ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
   defer cancel()
 
-  items, err := s.lnd.ListOnchainTransactions(ctx, limit)
+  items, err := s.lnd.ListOnchainTransactions(ctx, 0)
   if err != nil {
     writeError(w, http.StatusInternalServerError, lndStatusMessage(err))
     return
   }
+
+  sort.Slice(items, func(i, j int) bool {
+    return items[i].Timestamp.After(items[j].Timestamp)
+  })
 
   if minConfs > 0 || maxConfs > 0 {
     filtered := items[:0]
@@ -2100,6 +2105,10 @@ func (s *Server) handleOnchainTransactions(w http.ResponseWriter, r *http.Reques
       filtered = append(filtered, item)
     }
     items = filtered
+  }
+
+  if limit > 0 && len(items) > limit {
+    items = items[:limit]
   }
 
   writeJSON(w, http.StatusOK, map[string]any{"items": items})

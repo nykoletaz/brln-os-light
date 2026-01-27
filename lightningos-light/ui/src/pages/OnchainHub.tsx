@@ -62,7 +62,6 @@ export default function OnchainHub() {
   const [fees, setFees] = useState<MempoolFeeHint | null>(null)
   const [feesStatus, setFeesStatus] = useState('')
   const [activePane, setActivePane] = useState<'utxos' | 'txs'>('txs')
-  const [denseView, setDenseView] = useState(false)
   const mountedRef = useRef(true)
 
   const [utxoQuery, setUtxoQuery] = useState('')
@@ -277,8 +276,6 @@ export default function OnchainHub() {
 
   const utxoPaneVisible = activePane === 'utxos'
   const txPaneVisible = activePane === 'txs'
-  const tablePadding = denseView ? 'py-2' : 'py-3'
-
   return (
     <section className="space-y-6">
       <div className="section-card onchain-hero">
@@ -363,16 +360,7 @@ export default function OnchainHub() {
               <h3 className="text-xl font-semibold">{t('onchainHub.utxos')}</h3>
               <p className="text-xs text-fog/60">{t('onchainHub.utxosSubtitle')}</p>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className={clsx('text-xs px-3 py-1 rounded-full border', denseView ? 'border-glow/40 text-glow' : 'border-white/15 text-fog/60')}
-                onClick={() => setDenseView((prev) => !prev)}
-              >
-                {denseView ? t('onchainHub.compact') : t('onchainHub.comfy')}
-              </button>
-              <span className="text-xs text-fog/50">{utxoFiltered.length} {t('onchainHub.items')}</span>
-            </div>
+            <span className="text-xs text-fog/50">{utxoFiltered.length} {t('onchainHub.items')}</span>
           </div>
 
           <div className="grid gap-3">
@@ -446,7 +434,7 @@ export default function OnchainHub() {
             )}
             <div className="onchain-table-body">
               {utxoFiltered.map((item) => (
-                <div key={`${item.txid}-${item.vout}`} className={clsx('onchain-row', tablePadding)}>
+                <div key={`${item.txid}-${item.vout}`} className={clsx('onchain-row', 'py-3')}>
                   <div>
                     <p className="text-sm text-fog">{formatSats(item.amount_sat)} sats</p>
                     <p className="text-xs text-fog/50">{item.address_type || '-'}</p>
@@ -458,14 +446,7 @@ export default function OnchainHub() {
                   </div>
                   <div className="text-xs text-fog/70 break-all">{item.address || '-'}</div>
                   <div className="flex items-center gap-2 text-xs text-fog/70 break-all">
-                    <button
-                      type="button"
-                      className="onchain-link"
-                      onClick={() => copyToClipboard(item.outpoint)}
-                    >
-                      {item.outpoint || '-'}
-                    </button>
-                    {item.txid && (
+                    {item.txid ? (
                       <a
                         className="onchain-link"
                         href={`${explorerBase}/tx/${item.txid}`}
@@ -473,8 +454,16 @@ export default function OnchainHub() {
                         rel="noreferrer"
                         title={t('onchainHub.viewExternal')}
                       >
-                        {t('onchainHub.view')}
+                        {item.outpoint || item.txid}
                       </a>
+                    ) : (
+                      <button
+                        type="button"
+                        className="onchain-link"
+                        onClick={() => copyToClipboard(item.outpoint)}
+                      >
+                        {item.outpoint || '-'}
+                      </button>
                     )}
                   </div>
                 </div>
@@ -568,7 +557,7 @@ export default function OnchainHub() {
             )}
             <div className="onchain-table-body">
               {txFiltered.map((item) => (
-                <div key={item.txid} className={clsx('onchain-row onchain-row--tx', tablePadding)}>
+                <div key={item.txid} className={clsx('onchain-row onchain-row--tx', 'py-3')}>
                   <div className="flex items-center gap-2">
                     <span className={clsx('onchain-dot', item.direction === 'in' ? 'onchain-dot--in' : 'onchain-dot--out')} />
                     <div>
@@ -583,9 +572,19 @@ export default function OnchainHub() {
                       {item.confirmations > 0 ? item.confirmations.toLocaleString(locale) : t('onchainHub.pending')}
                     </span>
                   </div>
-                  <div className="text-xs text-fog/70 break-all">
-                    {item.addresses && item.addresses.length ? item.addresses.slice(0, 2).join(', ') : '-'}
-                    {item.addresses && item.addresses.length > 2 && ` +${item.addresses.length - 2}`}
+                  <div className="onchain-addresses text-xs text-fog/70">
+                    {item.addresses && item.addresses.length ? (
+                      <>
+                        {item.addresses.slice(0, 3).map((addr) => (
+                          <span key={addr}>{addr}</span>
+                        ))}
+                        {item.addresses.length > 3 && (
+                          <span className="text-fog/50">+{item.addresses.length - 3} {t('onchainHub.more')}</span>
+                        )}
+                      </>
+                    ) : (
+                      <span>-</span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 text-xs text-fog/70 break-all">
                     <a

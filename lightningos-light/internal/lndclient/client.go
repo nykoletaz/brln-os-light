@@ -787,10 +787,6 @@ func (c *Client) ListOnchain(ctx context.Context, limit int) ([]RecentActivity, 
 }
 
 func (c *Client) ListOnchainTransactions(ctx context.Context, limit int) ([]OnchainTransaction, error) {
-  if limit <= 0 {
-    limit = 200
-  }
-
   conn, err := c.dial(ctx, true)
   if err != nil {
     return nil, err
@@ -799,7 +795,7 @@ func (c *Client) ListOnchainTransactions(ctx context.Context, limit int) ([]Onch
 
   client := lnrpc.NewLightningClient(conn)
   req := &lnrpc.GetTransactionsRequest{
-    MaxTransactions: uint32(limit),
+    MaxTransactions: 0,
     StartHeight:     0,
     EndHeight:       -1,
   }
