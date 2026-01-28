@@ -1,5 +1,11 @@
 # LightningOS Light - Guia para Node Existente (PT-BR)
 
+## AVISO MUITO IMPORTANTE
+**O LightningOS NAO FOI CONCEBIDO PARA NODES COM INSTALACOES EXISTENTES.**  
+Ele foi pensado com base em nodes configurados pelos tutoriais **BRLN BOLT** e **MINIBOLT**, mas existem diversas particularidades que infelizmente nao podem ser totalmente mapeadas em uma instalacao livre.  
+Por isso, **se voce nao tem conhecimentos medianos de Linux e linha de comando, nao recomendamos esta instalacao**.  
+Pode ser necessario realizar varios ajustes manuais e adaptacoes que nao estao totalmente cobertas neste guia.
+
 ## Escopo
 - Este guia e para quem ja tem Bitcoin Core e LND funcionando.
 - Nao use o install.sh. O fluxo e manual apos git pull e build.
@@ -38,6 +44,8 @@ chmod +x install_existing.sh
 # ou:
 sudo bash install_existing.sh
 ```
+
+## Configuracao manual
 
 ## App Store (LNDg e outros apps)
 Para usar a App Store em nodes existentes (sem instalar o Bitcoin pelo LightningOS), siga estes passos:
