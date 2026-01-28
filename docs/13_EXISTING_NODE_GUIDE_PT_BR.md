@@ -81,8 +81,12 @@ sudo visudo -cf /etc/sudoers.d/lightningos
 ```bash
 GATEWAY=$(sudo docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
 LND_CONF=/data/lnd/lnd.conf
+sudo cp "$LND_CONF" "${LND_CONF}.bak.$(date +%F_%H%M%S)"
+OWNER=$(sudo stat -c '%u:%g' "$LND_CONF")
+MODE=$(sudo stat -c '%a' "$LND_CONF")
 sudo sed -i '/^rpclisten=/d;/^tlsextraip=/d;/^tlsextradomain=/d' "$LND_CONF"
-sudo awk -v gw="$GATEWAY" '
+tmp=$(mktemp)
+awk -v gw="$GATEWAY" '
   BEGIN {added=0}
   /^[[:space:]]*\\[.*\\]/ && added==0 {
     print "[Application Options]"
@@ -102,7 +106,10 @@ sudo awk -v gw="$GATEWAY" '
       print "tlsextradomain=host.docker.internal"
     }
   }
-' "$LND_CONF" | sudo tee "$LND_CONF" >/dev/null
+' "$LND_CONF" > "$tmp"
+sudo mv "$tmp" "$LND_CONF"
+sudo chown "$OWNER" "$LND_CONF"
+sudo chmod "$MODE" "$LND_CONF"
 sudo rm -f /data/lnd/tls.cert /data/lnd/tls.key
 sudo systemctl restart lnd
 ```
