@@ -78,43 +78,6 @@ sudo visudo -cf /etc/sudoers.d/lightningos
 
 4) Allow LND gRPC from Docker (required by LNDg).
 **Important:** these lines must be outside sections like `[Bitcoind]`. Put them at the top of the file or inside `[Application Options]`.
-```bash
-GATEWAY=$(sudo docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
-LND_CONF=/data/lnd/lnd.conf
-sudo cp "$LND_CONF" "${LND_CONF}.bak.$(date +%F_%H%M%S)"
-OWNER=$(sudo stat -c '%u:%g' "$LND_CONF")
-MODE=$(sudo stat -c '%a' "$LND_CONF")
-sudo sed -i '/^rpclisten=/d;/^tlsextraip=/d;/^tlsextradomain=/d' "$LND_CONF"
-tmp=$(mktemp)
-awk -v gw="$GATEWAY" '
-  BEGIN {added=0}
-  /^[[:space:]]*\\[.*\\]/ && added==0 {
-    print "[Application Options]"
-    print "rpclisten=127.0.0.1:10009"
-    print "rpclisten=" gw ":10009"
-    print "tlsextraip=" gw
-    print "tlsextradomain=host.docker.internal"
-    added=1
-  }
-  {print}
-  END {
-    if (added==0) {
-      print "[Application Options]"
-      print "rpclisten=127.0.0.1:10009"
-      print "rpclisten=" gw ":10009"
-      print "tlsextraip=" gw
-      print "tlsextradomain=host.docker.internal"
-    }
-  }
-' "$LND_CONF" > "$tmp"
-sudo mv "$tmp" "$LND_CONF"
-sudo chown "$OWNER" "$LND_CONF"
-sudo chmod "$MODE" "$LND_CONF"
-sudo rm -f /data/lnd/tls.cert /data/lnd/tls.key
-sudo systemctl restart lnd
-```
-
-Manual alternative (no script):
 1) Find the docker0 gateway IP:
 ```bash
 ip -4 addr show docker0 | awk '/inet / {print $2}' | cut -d/ -f1
