@@ -48,6 +48,7 @@ sudo bash install_existing.sh
 ## Configuracao manual
 
 ## App Store (LNDg e outros apps)
+**Aviso:** Esta integracao de App Store em nodes existentes **nao foi totalmente testada** e pode apresentar problemas com alguns apps, mesmo seguindo os procedimentos abaixo.
 Para usar a App Store em nodes existentes (sem instalar o Bitcoin pelo LightningOS), siga estes passos:
 
 1) Garanta Docker ativo:
