@@ -107,9 +107,6 @@ func (s *Server) installLndg(ctx context.Context) error {
   if err := ensureDocker(ctx); err != nil {
     return err
   }
-  if err := ensureLndgGrpcAccess(ctx); err != nil {
-    return err
-  }
   paths := lndgAppPaths()
   if err := os.MkdirAll(paths.Root, 0750); err != nil {
     return fmt.Errorf("failed to create app directory: %w", err)
@@ -143,6 +140,9 @@ func (s *Server) installLndg(ctx context.Context) error {
   if err := runCompose(ctx, paths.Root, paths.ComposePath, "up", "-d", "lndg-db"); err != nil {
     return err
   }
+  if err := ensureLndgGrpcAccess(ctx, paths); err != nil {
+    return err
+  }
   if err := syncLndgDbPassword(ctx, paths); err != nil {
     return err
   }
@@ -165,9 +165,6 @@ func (s *Server) uninstallLndg(ctx context.Context) error {
 }
 
 func (s *Server) startLndg(ctx context.Context) error {
-  if err := ensureLndgGrpcAccess(ctx); err != nil {
-    return err
-  }
   paths := lndgAppPaths()
   if err := os.MkdirAll(paths.Root, 0750); err != nil {
     return fmt.Errorf("failed to create app directory: %w", err)
@@ -204,6 +201,9 @@ func (s *Server) startLndg(ctx context.Context) error {
     needsBuild = true
   }
   if err := runCompose(ctx, paths.Root, paths.ComposePath, "up", "-d", "lndg-db"); err != nil {
+    return err
+  }
+  if err := ensureLndgGrpcAccess(ctx, paths); err != nil {
     return err
   }
   if err := syncLndgDbPassword(ctx, paths); err != nil {
@@ -510,8 +510,8 @@ func syncLndgDbPassword(ctx context.Context, paths lndgPaths) error {
   return nil
 }
 
-func ensureLndgGrpcAccess(ctx context.Context) error {
-  gatewayIP, err := dockerGatewayIP(ctx)
+func ensureLndgGrpcAccess(ctx context.Context, paths lndgPaths) error {
+  gatewayIP, err := lndgGatewayIP(ctx, paths)
   if err != nil {
     return err
   }
@@ -555,6 +555,18 @@ func dockerGatewayIP(ctx context.Context) (string, error) {
     }
   }
   return "", errors.New("unable to determine docker bridge gateway IP")
+}
+
+func lndgGatewayIP(ctx context.Context, paths lndgPaths) (string, error) {
+  networkName := filepath.Base(paths.Root) + "_default"
+  out, err := system.RunCommandWithSudo(ctx, "docker", "network", "inspect", networkName, "--format", "{{(index .IPAM.Config 0).Gateway}}")
+  if err == nil {
+    ip := strings.TrimSpace(out)
+    if ip != "" && ip != "<no value>" {
+      return ip, nil
+    }
+  }
+  return dockerGatewayIP(ctx)
 }
 
 func updateLndGrpcOptions(lines []string, gateway string) ([]string, bool) {
