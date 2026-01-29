@@ -107,6 +107,9 @@ func (s *Server) installLndg(ctx context.Context) error {
   if err := ensureDocker(ctx); err != nil {
     return err
   }
+  if err := ensureLndgGrpcAccess(ctx); err != nil {
+    return err
+  }
   paths := lndgAppPaths()
   if err := os.MkdirAll(paths.Root, 0750); err != nil {
     return fmt.Errorf("failed to create app directory: %w", err)
@@ -140,9 +143,6 @@ func (s *Server) installLndg(ctx context.Context) error {
   if err := runCompose(ctx, paths.Root, paths.ComposePath, "up", "-d", "lndg-db"); err != nil {
     return err
   }
-  if err := ensureLndgGrpcAccess(ctx, paths); err != nil {
-    return err
-  }
   if err := syncLndgDbPassword(ctx, paths); err != nil {
     return err
   }
@@ -165,6 +165,9 @@ func (s *Server) uninstallLndg(ctx context.Context) error {
 }
 
 func (s *Server) startLndg(ctx context.Context) error {
+  if err := ensureLndgGrpcAccess(ctx); err != nil {
+    return err
+  }
   paths := lndgAppPaths()
   if err := os.MkdirAll(paths.Root, 0750); err != nil {
     return fmt.Errorf("failed to create app directory: %w", err)
@@ -201,9 +204,6 @@ func (s *Server) startLndg(ctx context.Context) error {
     needsBuild = true
   }
   if err := runCompose(ctx, paths.Root, paths.ComposePath, "up", "-d", "lndg-db"); err != nil {
-    return err
-  }
-  if err := ensureLndgGrpcAccess(ctx, paths); err != nil {
     return err
   }
   if err := syncLndgDbPassword(ctx, paths); err != nil {
@@ -510,8 +510,8 @@ func syncLndgDbPassword(ctx context.Context, paths lndgPaths) error {
   return nil
 }
 
-func ensureLndgGrpcAccess(ctx context.Context, paths lndgPaths) error {
-  gatewayIP, err := lndgGatewayIP(ctx, paths)
+func ensureLndgGrpcAccess(ctx context.Context) error {
+  gatewayIP, err := dockerGatewayIP(ctx)
   if err != nil {
     return err
   }
@@ -557,43 +557,48 @@ func dockerGatewayIP(ctx context.Context) (string, error) {
   return "", errors.New("unable to determine docker bridge gateway IP")
 }
 
-func lndgGatewayIP(ctx context.Context, paths lndgPaths) (string, error) {
-  // Prefer host-gateway IP (bridge/docker0), which is what host.docker.internal resolves to.
-  if ip, err := dockerGatewayIP(ctx); err == nil {
-    return ip, nil
-  }
-  networkName := filepath.Base(paths.Root) + "_default"
-  out, err := system.RunCommandWithSudo(ctx, "docker", "network", "inspect", networkName, "--format", "{{(index .IPAM.Config 0).Gateway}}")
-  if err == nil {
-    ip := strings.TrimSpace(out)
-    if ip != "" && ip != "<no value>" {
-      return ip, nil
+func updateLndGrpcOptions(lines []string, gateway string) ([]string, bool) {
+  firstSection := len(lines)
+  for i, line := range lines {
+    trimmed := strings.TrimSpace(line)
+    if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+      firstSection = i
+      break
     }
   }
-  return "", errors.New("unable to determine docker gateway IP")
-}
+  top := lines[:firstSection]
+  rest := lines[firstSection:]
 
-func updateLndGrpcOptions(lines []string, gateway string) ([]string, bool) {
   rpclistenOrder := []string{}
   rpclistenSet := map[string]bool{}
-  for _, line := range lines {
+  filteredTop := []string{}
+  for _, line := range top {
     trimmed := strings.TrimSpace(line)
+    if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+      filteredTop = append(filteredTop, line)
+      continue
+    }
+    if strings.HasPrefix(trimmed, "tlsextraip=") || strings.HasPrefix(trimmed, "tlsextradomain=") {
+      continue
+    }
     if strings.HasPrefix(trimmed, "rpclisten=") {
       value := strings.TrimSpace(strings.TrimPrefix(trimmed, "rpclisten="))
       if value != "" && !rpclistenSet[value] {
         rpclistenSet[value] = true
         rpclistenOrder = append(rpclistenOrder, value)
       }
+      continue
     }
+    filteredTop = append(filteredTop, line)
   }
 
-  cleaned := []string{}
-  for _, line := range lines {
+  filteredRest := []string{}
+  for _, line := range rest {
     trimmed := strings.TrimSpace(line)
     if strings.HasPrefix(trimmed, "tlsextraip=") || strings.HasPrefix(trimmed, "tlsextradomain=") || strings.HasPrefix(trimmed, "rpclisten=") {
       continue
     }
-    cleaned = append(cleaned, line)
+    filteredRest = append(filteredRest, line)
   }
 
   desiredOrder := []string{"127.0.0.1:10009", gateway + ":10009"}
@@ -604,42 +609,25 @@ func updateLndGrpcOptions(lines []string, gateway string) ([]string, bool) {
     }
   }
 
+  updated := append([]string{}, filteredTop...)
+  updated = append(updated, fmt.Sprintf("tlsextraip=%s", gateway))
+  updated = append(updated, "tlsextradomain=host.docker.internal")
+
   added := map[string]bool{}
-  inject := []string{
-    fmt.Sprintf("tlsextraip=%s", gateway),
-    "tlsextradomain=host.docker.internal",
-  }
   for _, value := range desiredOrder {
     if !added[value] {
-      inject = append(inject, "rpclisten="+value)
+      updated = append(updated, "rpclisten="+value)
       added[value] = true
     }
   }
   for _, value := range rpclistenOrder {
     if !added[value] {
-      inject = append(inject, "rpclisten="+value)
+      updated = append(updated, "rpclisten="+value)
       added[value] = true
     }
   }
 
-  appIdx := -1
-  for i, line := range cleaned {
-    trimmed := strings.TrimSpace(line)
-    if strings.EqualFold(trimmed, "[application options]") {
-      appIdx = i
-      break
-    }
-  }
-
-  var updated []string
-  if appIdx >= 0 {
-    updated = append(updated, cleaned[:appIdx+1]...)
-    updated = append(updated, inject...)
-    updated = append(updated, cleaned[appIdx+1:]...)
-  } else {
-    updated = append(updated, inject...)
-    updated = append(updated, cleaned...)
-  }
+  updated = append(updated, filteredRest...)
 
   changed := len(updated) != len(lines)
   if !changed {
