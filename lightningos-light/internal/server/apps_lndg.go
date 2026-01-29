@@ -583,7 +583,7 @@ func ensureLndgUfwAccess(ctx context.Context) error {
       continue
     }
     lastBridge = bridge
-    out, cmdErr := system.RunCommandWithSudo(ctx, "ufw", "--force", "allow", "in", "on", bridge, "to", "any", "port", "10009", "proto", "tcp")
+    out, cmdErr := system.RunCommandWithSudo(ctx, "ufw", "allow", "in", "on", bridge, "to", "any", "port", "10009", "proto", "tcp")
     lastAllowOut = strings.TrimSpace(out)
     if cmdErr != nil {
       time.Sleep(2 * time.Second)
