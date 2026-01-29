@@ -143,7 +143,9 @@ func (s *Server) installLndg(ctx context.Context) error {
   if err := runCompose(ctx, paths.Root, paths.ComposePath, "up", "-d", "lndg-db"); err != nil {
     return err
   }
-  _ = ensureLndgUfwAccess(ctx)
+  if err := ensureLndgUfwAccess(ctx); err != nil && s.logger != nil {
+    s.logger.Printf("lndg: ufw rule failed: %v", err)
+  }
   if err := syncLndgDbPassword(ctx, paths); err != nil {
     return err
   }
@@ -207,7 +209,9 @@ func (s *Server) startLndg(ctx context.Context) error {
   if err := runCompose(ctx, paths.Root, paths.ComposePath, "up", "-d", "lndg-db"); err != nil {
     return err
   }
-  _ = ensureLndgUfwAccess(ctx)
+  if err := ensureLndgUfwAccess(ctx); err != nil && s.logger != nil {
+    s.logger.Printf("lndg: ufw rule failed: %v", err)
+  }
   if err := syncLndgDbPassword(ctx, paths); err != nil {
     return err
   }
@@ -375,14 +379,16 @@ func ensureLndgEnv(ctx context.Context, paths lndgPaths) error {
     adminPassword := readEnvValue(paths.EnvPath, "LNDG_ADMIN_PASSWORD")
     if adminPassword == "" {
       adminPassword = readSecretFile(paths.AdminPasswordPath)
-      if adminPassword != "" {
-        if err := setEnvValue(paths.EnvPath, "LNDG_ADMIN_PASSWORD", adminPassword); err != nil {
-          return err
-        }
-      }
     }
     if adminPassword == "" {
-      return errors.New("LNDG_ADMIN_PASSWORD missing from .env")
+      var err error
+      adminPassword, err = randomToken(20)
+      if err != nil {
+        return err
+      }
+    }
+    if err := setEnvValue(paths.EnvPath, "LNDG_ADMIN_PASSWORD", adminPassword); err != nil {
+      return err
     }
     if readSecretFile(paths.AdminPasswordPath) != adminPassword {
       if err := writeFile(paths.AdminPasswordPath, adminPassword+"\n", 0600); err != nil {
@@ -393,14 +399,16 @@ func ensureLndgEnv(ctx context.Context, paths lndgPaths) error {
     dbPassword := readEnvValue(paths.EnvPath, "LNDG_DB_PASSWORD")
     if dbPassword == "" {
       dbPassword = readSecretFile(paths.DbPasswordPath)
-      if dbPassword != "" {
-        if err := setEnvValue(paths.EnvPath, "LNDG_DB_PASSWORD", dbPassword); err != nil {
-          return err
-        }
-      }
     }
     if dbPassword == "" {
-      return errors.New("LNDG_DB_PASSWORD missing from .env")
+      var err error
+      dbPassword, err = randomToken(24)
+      if err != nil {
+        return err
+      }
+    }
+    if err := setEnvValue(paths.EnvPath, "LNDG_DB_PASSWORD", dbPassword); err != nil {
+      return err
     }
     if readSecretFile(paths.DbPasswordPath) != dbPassword {
       if err := writeFile(paths.DbPasswordPath, dbPassword+"\n", 0600); err != nil {
@@ -568,8 +576,19 @@ func ensureLndgUfwAccess(ctx context.Context) error {
   if err != nil || bridge == "" {
     return err
   }
-  _, _ = system.RunCommandWithSudo(ctx, "ufw", "allow", "in", "on", bridge, "to", "any", "port", "10009", "proto", "tcp")
-  return nil
+  for attempt := 0; attempt < 5; attempt++ {
+    _, cmdErr := system.RunCommandWithSudo(ctx, "ufw", "allow", "in", "on", bridge, "to", "any", "port", "10009", "proto", "tcp")
+    if cmdErr != nil {
+      time.Sleep(2 * time.Second)
+      continue
+    }
+    verifyOut, verifyErr := system.RunCommandWithSudo(ctx, "ufw", "status")
+    if verifyErr == nil && strings.Contains(verifyOut, bridge) && strings.Contains(verifyOut, "10009/tcp") {
+      return nil
+    }
+    time.Sleep(2 * time.Second)
+  }
+  return fmt.Errorf("failed to apply ufw rule for %s:10009", bridge)
 }
 
 func lndgBridgeName(ctx context.Context) (string, error) {

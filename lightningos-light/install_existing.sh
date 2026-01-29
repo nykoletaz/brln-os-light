@@ -338,7 +338,7 @@ install_lnd_fix_perms_script() {
 
 configure_sudoers() {
   print_step "Configuring sudoers"
-  local systemctl_path apt_get_path apt_path dpkg_path docker_path docker_compose_path systemd_run_path smartctl_path
+  local systemctl_path apt_get_path apt_path dpkg_path docker_path docker_compose_path systemd_run_path smartctl_path ufw_path
   systemctl_path=$(command -v systemctl || true)
   apt_get_path=$(command -v apt-get || true)
   apt_path=$(command -v apt || true)
@@ -347,6 +347,7 @@ configure_sudoers() {
   docker_compose_path=$(command -v docker-compose || true)
   systemd_run_path=$(command -v systemd-run || true)
   smartctl_path=$(command -v smartctl || true)
+  ufw_path=$(command -v ufw || true)
   if [[ -z "$docker_path" ]]; then
     docker_path="/usr/bin/docker"
   fi
@@ -372,6 +373,7 @@ configure_sudoers() {
   [[ -n "$docker_path" ]] && app_cmds+=("${docker_path} *")
   [[ -n "$docker_compose_path" ]] && app_cmds+=("${docker_compose_path} *")
   [[ -n "$systemd_run_path" ]] && app_cmds+=("${systemd_run_path} *")
+  [[ -n "$ufw_path" ]] && app_cmds+=("${ufw_path} *")
   local app_cmds_line
   app_cmds_line=$(IFS=", "; echo "${app_cmds[*]}")
   if [[ -z "$app_cmds_line" ]]; then
