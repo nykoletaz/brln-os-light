@@ -10,6 +10,7 @@ import (
   "log"
   "math"
   "os"
+  "sort"
   "strconv"
   "strings"
   "sync"
@@ -21,6 +22,8 @@ import (
   "google.golang.org/grpc"
   "google.golang.org/grpc/credentials"
 )
+
+const recentOnchainWindowBlocks int64 = 20160
 
 type Client struct {
   cfg *config.Config
@@ -740,9 +743,16 @@ func (c *Client) ListOnchain(ctx context.Context, limit int) ([]RecentActivity, 
   defer conn.Close()
 
   client := lnrpc.NewLightningClient(conn)
+  var startHeight int32
+  if info, infoErr := client.GetInfo(ctx, &lnrpc.GetInfoRequest{}); infoErr == nil && info != nil && info.BlockHeight > 0 {
+    height := int64(info.BlockHeight)
+    if height > recentOnchainWindowBlocks {
+      startHeight = int32(height - recentOnchainWindowBlocks)
+    }
+  }
   req := &lnrpc.GetTransactionsRequest{
-    MaxTransactions: uint32(limit),
-    StartHeight:     0,
+    MaxTransactions: 0,
+    StartHeight:     startHeight,
     EndHeight:       -1,
   }
   resp, err := client.GetTransactions(ctx, req)
@@ -781,6 +791,13 @@ func (c *Client) ListOnchain(ctx context.Context, limit int) ([]RecentActivity, 
       Status: status,
       Txid: tx.TxHash,
     })
+  }
+
+  sort.Slice(items, func(i, j int) bool {
+    return items[i].Timestamp.After(items[j].Timestamp)
+  })
+  if len(items) > limit {
+    items = items[:limit]
   }
 
   return items, nil
