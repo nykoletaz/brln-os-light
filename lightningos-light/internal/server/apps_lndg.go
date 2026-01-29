@@ -574,6 +574,7 @@ func ensureLndgUfwAccess(ctx context.Context) error {
   }
   var lastAllowOut string
   var lastStatusOut string
+  var lastBridge string
   for attempt := 0; attempt < 5; attempt++ {
     bridge, bridgeErr := lndgBridgeName(ctx)
     if bridgeErr != nil || bridge == "" {
@@ -581,6 +582,7 @@ func ensureLndgUfwAccess(ctx context.Context) error {
       time.Sleep(2 * time.Second)
       continue
     }
+    lastBridge = bridge
     out, cmdErr := system.RunCommandWithSudo(ctx, "ufw", "--force", "allow", "in", "on", bridge, "to", "any", "port", "10009", "proto", "tcp")
     lastAllowOut = strings.TrimSpace(out)
     if cmdErr != nil {
@@ -603,12 +605,15 @@ func ensureLndgUfwAccess(ctx context.Context) error {
     time.Sleep(2 * time.Second)
   }
   if lastAllowOut != "" {
-    return fmt.Errorf("failed to apply ufw rule for %s:10009 (last ufw output: %s)", bridge, lastAllowOut)
+    return fmt.Errorf("failed to apply ufw rule for %s:10009 (last ufw output: %s)", lastBridge, lastAllowOut)
   }
   if lastStatusOut != "" {
-    return fmt.Errorf("failed to apply ufw rule for %s:10009 (last ufw status: %s)", bridge, lastStatusOut)
+    return fmt.Errorf("failed to apply ufw rule for %s:10009 (last ufw status: %s)", lastBridge, lastStatusOut)
   }
-  return fmt.Errorf("failed to apply ufw rule for %s:10009", bridge)
+  if err != nil {
+    return fmt.Errorf("failed to apply ufw rule for lndg bridge: %w", err)
+  }
+  return fmt.Errorf("failed to apply ufw rule for %s:10009", lastBridge)
 }
 
 func lndgBridgeName(ctx context.Context) (string, error) {
