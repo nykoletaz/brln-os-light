@@ -32,10 +32,10 @@ sudo ./install_existing.sh
 ```
 It asks about Go/npm (required for build), Postgres, terminal, and basic setup.
 If you opt into Postgres, the script creates the LightningOS roles/DB and fills secrets.env automatically.
-The script also writes the systemd units with the users you provide:
-- lightningos-manager: uses the Manager service user/group.
-- lightningos-reports: uses the same user/group as the manager.
-- lightningos-terminal: uses the terminal user you provide.
+The script also writes the systemd units with these users:
+- lightningos-manager: uses the `lightningos` user/group.
+- lightningos-reports: uses the same user/group (`lightningos`).
+- lightningos-terminal: runs as `lightningos`.
 For SupplementaryGroups, it only adds groups that exist on the host.
 
 If the script is not executable:
@@ -67,19 +67,19 @@ sudo systemctl status docker
 sudo systemctl enable docker
 ```
 
-2) Add the manager user to the docker group (example: admin) and re-login:
+2) Add the `lightningos` user to the docker group and re-login:
 ```bash
-sudo usermod -aG docker admin
+sudo usermod -aG docker lightningos
 ```
-If you don’t want to log out, run docker commands with sudo (e.g., `sudo docker ...`).
+If you don't want to log out, run docker commands with sudo (e.g., `sudo docker ...`).
 
-3) Enable passwordless sudo for the manager user (example: admin):
+3) Enable passwordless sudo for the `lightningos` user:
 ```bash
 sudo tee /etc/sudoers.d/lightningos >/dev/null <<'EOF'
-Defaults:admin !requiretty
-Cmnd_Alias LIGHTNINGOS_SYSTEM = /bin/systemctl restart lnd, /bin/systemctl restart lightningos-manager, /bin/systemctl restart postgresql, /usr/sbin/smartctl *
+Defaults:lightningos !requiretty
+Cmnd_Alias LIGHTNINGOS_SYSTEM = /bin/systemctl restart lnd, /bin/systemctl restart lightningos-manager, /bin/systemctl restart postgresql, /usr/local/sbin/lightningos-fix-lnd-perms, /usr/sbin/smartctl *
 Cmnd_Alias LIGHTNINGOS_APPS = /usr/bin/apt-get *, /usr/bin/apt *, /usr/bin/dpkg *, /usr/bin/docker *, /usr/bin/docker-compose *, /usr/bin/systemd-run *
-admin ALL=NOPASSWD: LIGHTNINGOS_SYSTEM, LIGHTNINGOS_APPS
+lightningos ALL=NOPASSWD: LIGHTNINGOS_SYSTEM, LIGHTNINGOS_APPS
 EOF
 sudo chmod 440 /etc/sudoers.d/lightningos
 sudo visudo -cf /etc/sudoers.d/lightningos
@@ -310,8 +310,8 @@ sudo cp templates/systemd/lightningos-reports.service \
 
 ### 3) Recommended adjustments
 Edit the lightningos-reports.service file and adjust it according to your environment:
-- User=admin
-- Group=admin
+- User=lightningos
+- Group=lightningos
 - SupplementaryGroups=systemd-journal (only if it exists)
 ```bash
 sudo ${EDITOR:-nano} /etc/systemd/system/lightningos-reports.service
@@ -332,8 +332,8 @@ sudo ${EDITOR:-nano} /etc/systemd/system/lightningos-manager.service
 ```
 
 2) Recommended edits:
-- User=admin
-- Group=admin
+- User=lightningos
+- Group=lightningos
 - SupplementaryGroups=lnd bitcoin systemd-journal docker (only groups that exist)
 
 3) Enable and start:
@@ -358,3 +358,4 @@ curl -k https://127.0.0.1:8443/api/lnd/status
 - Bitcoin RPC/ZMQ: wrong credentials or ports.
 - LND gRPC: port not 10009 or non-local bind.
 - If your Postgres service is not named "postgresql", create a systemd alias or expose that name on your distro.
+

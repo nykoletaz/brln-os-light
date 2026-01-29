@@ -32,10 +32,10 @@ sudo ./install_existing.sh
 ```
 Ele pergunta sobre Go/npm (necessarios para build), Postgres, terminal e ajustes basicos.
 Quando voce optar por Postgres, o script cria os usuarios e o banco do LightningOS e preenche o secrets.env automaticamente.
-O script tambem cria/atualiza os services do systemd com os usuarios informados:
-- lightningos-manager: usa o Manager service user/group escolhidos.
-- lightningos-reports: usa o mesmo user/group do manager.
-- lightningos-terminal: usa o usuario informado para o terminal.
+O script tambem cria/atualiza os services do systemd com estes usuarios:
+- lightningos-manager: usa o usuario/grupo `lightningos`.
+- lightningos-reports: usa o mesmo usuario/grupo (`lightningos`).
+- lightningos-terminal: roda como `lightningos`.
 Para SupplementaryGroups, o script so adiciona grupos que existem no host.
 
 Se o script nao estiver executavel:
@@ -67,19 +67,19 @@ sudo systemctl status docker
 sudo systemctl enable docker
 ```
 
-2) Adicione o usuario do manager ao grupo docker (ex: admin) e re-login:
+2) Adicione o usuario `lightningos` ao grupo docker e re-login:
 ```bash
-sudo usermod -aG docker admin
+sudo usermod -aG docker lightningos
 ```
 Se preferir nao fazer logout, use os comandos docker com sudo (ex.: `sudo docker ...`).
 
-3) Habilite sudo sem senha para o usuario do manager (ex: admin):
+3) Habilite sudo sem senha para o usuario `lightningos`:
 ```bash
 sudo tee /etc/sudoers.d/lightningos >/dev/null <<'EOF'
-Defaults:admin !requiretty
-Cmnd_Alias LIGHTNINGOS_SYSTEM = /bin/systemctl restart lnd, /bin/systemctl restart lightningos-manager, /bin/systemctl restart postgresql, /usr/sbin/smartctl *
+Defaults:lightningos !requiretty
+Cmnd_Alias LIGHTNINGOS_SYSTEM = /bin/systemctl restart lnd, /bin/systemctl restart lightningos-manager, /bin/systemctl restart postgresql, /usr/local/sbin/lightningos-fix-lnd-perms, /usr/sbin/smartctl *
 Cmnd_Alias LIGHTNINGOS_APPS = /usr/bin/apt-get *, /usr/bin/apt *, /usr/bin/dpkg *, /usr/bin/docker *, /usr/bin/docker-compose *, /usr/bin/systemd-run *
-admin ALL=NOPASSWD: LIGHTNINGOS_SYSTEM, LIGHTNINGOS_APPS
+lightningos ALL=NOPASSWD: LIGHTNINGOS_SYSTEM, LIGHTNINGOS_APPS
 EOF
 sudo chmod 440 /etc/sudoers.d/lightningos
 sudo visudo -cf /etc/sudoers.d/lightningos
@@ -360,8 +360,8 @@ sudo cp templates/systemd/lightningos-reports.service \
 
 ### 3) Ajustes recomendados
 Edite o arquivo lightningos-reports.service e ajuste conforme o seu ambiente:
-- User=admin
-- Group=admin
+- User=lightningos
+- Group=lightningos
 - SupplementaryGroups=systemd-journal (somente se existir)
 ```bash
 sudo ${EDITOR:-nano} /etc/systemd/system/lightningos-reports.service
@@ -382,8 +382,8 @@ sudo ${EDITOR:-nano} /etc/systemd/system/lightningos-manager.service
 ```
 
 2) Ajustes recomendados:
-- User=admin
-- Group=admin
+- User=lightningos
+- Group=lightningos
 - SupplementaryGroups=lnd bitcoin systemd-journal docker (somente os grupos que existirem)
 
 3) Habilite e inicie:
