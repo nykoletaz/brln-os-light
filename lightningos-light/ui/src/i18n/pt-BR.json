@@ -687,7 +687,8 @@
     "logFetchFailed": "Falha ao buscar logs do upgrade.",
     "logsTitle": "Logs do upgrade",
     "logsHint": "Os logs aparecem quando o upgrade iniciar.",
-    "noLogs": "Sem logs ainda."
+    "noLogs": "Sem logs ainda.",
+    "completed": "Upgrade concluído com sucesso."
   },
   "onchainHub": {
     "kicker": "ON-CHAIN HUB",

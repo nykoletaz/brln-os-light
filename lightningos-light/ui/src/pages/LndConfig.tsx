@@ -80,7 +80,9 @@ export default function LndConfig() {
         const data = await getLndUpgradeStatus()
         if (mounted) {
           setUpgrade(data)
-          if (upgradeLocked && data && data.running === false) {
+          if (data && data.running) {
+            setUpgradeLocked(true)
+          } else if (upgradeLocked) {
             setUpgradeLocked(false)
           }
         }
@@ -144,9 +146,7 @@ export default function LndConfig() {
     setUpgradeLogsStatus('')
     setUpgradeError(null)
     setUpgradeComplete(false)
-    if (upgrade?.running) {
-      setUpgradeLocked(true)
-    }
+    setUpgradeLocked(Boolean(upgrade?.running))
   }
 
   const closeUpgradeModal = () => {
@@ -436,6 +436,9 @@ export default function LndConfig() {
             <p className="mt-3 text-xs text-rose-200">{t('lndUpgrade.confirmWarning')}</p>
             {upgradeMessage && <p className="mt-3 text-sm text-brass">{upgradeMessage}</p>}
             {upgradeError && <p className="mt-2 text-sm text-rose-200">{upgradeError}</p>}
+            {upgradeComplete && !upgradeError && (
+              <p className="mt-2 text-sm text-emerald-200">{t('lndUpgrade.completed')}</p>
+            )}
 
             <div className="mt-4">
               <div className="flex items-center justify-between">
@@ -457,7 +460,7 @@ export default function LndConfig() {
                 type="button"
                 disabled={upgradeBusy || (upgradeLocked && !upgradeError && !upgradeComplete)}
               >
-                {t('common.cancel')}
+                {upgradeComplete || upgradeError ? t('common.close') : t('common.cancel')}
               </button>
               <button
                 className={`btn-secondary text-amber-200 border-amber-400/30 ${upgradeBusy ? 'opacity-60 pointer-events-none' : ''}`}

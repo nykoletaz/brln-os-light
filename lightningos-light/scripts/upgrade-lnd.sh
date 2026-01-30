@@ -218,6 +218,7 @@ for i in $(seq 1 20); do
     print_ok "LND is active."
     cleanup
     print_ok "Upgrade complete."
+    print_ok "Upgrade job finished; systemd will mark unit complete."
     exit 0
   fi
   echo "Waiting for LND... (${i}/20)"
