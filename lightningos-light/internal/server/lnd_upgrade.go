@@ -350,7 +350,7 @@ func ensureLndUpgradeScript(ctx context.Context) error {
 
   installCmd := fmt.Sprintf("mkdir -p %s && install -m 0755 %s %s", filepath.Dir(lndUpgradeScriptPath), tmpPath, lndUpgradeScriptPath)
   if _, err := runSystemd(ctx, "/bin/sh", "-c", installCmd); err != nil {
-    return err
+    return fmt.Errorf("systemd-run failed (check sudoers for lightningos): %w", err)
   }
   return nil
 }
