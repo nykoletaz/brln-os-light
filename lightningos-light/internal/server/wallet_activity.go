@@ -44,12 +44,18 @@ func (s *Server) recordWalletActivity(hash string) {
     }
   }
   store.Hashes = updated
-  _ = s.writeWalletActivityLocked(store)
+  if err := s.writeWalletActivityLocked(store); err != nil && s.logger != nil {
+    s.logger.Printf("wallet activity: failed to persist: %v", err)
+  }
 }
 
 func (s *Server) walletActivitySet() map[string]struct{} {
   s.walletActivityMu.Lock()
   defer s.walletActivityMu.Unlock()
+
+  if !s.walletActivityWritable() {
+    return map[string]struct{}{}
+  }
 
   store := s.readWalletActivityLocked()
   hashes := make(map[string]struct{}, len(store.Hashes))
@@ -61,6 +67,15 @@ func (s *Server) walletActivitySet() map[string]struct{} {
     hashes[normalized] = struct{}{}
   }
   return hashes
+}
+
+func (s *Server) walletActivityWritable() bool {
+  f, err := os.OpenFile(walletActivityPath, os.O_WRONLY|os.O_APPEND, 0)
+  if err != nil {
+    return false
+  }
+  _ = f.Close()
+  return true
 }
 
 func (s *Server) readWalletActivityLocked() walletActivityStore {

@@ -548,7 +548,6 @@
     "paymentRequestRequired": "Payment request obrigatório.",
     "paymentSent": "Pagamento enviado.",
     "recentActivity": "Atividade recente",
-    "recentActivityNote": "Mostramos apenas envios e recebimentos feitos pela carteira. Para outras entradas, veja Notificacoes.",
     "sendFunds": "Enviar fundos",
     "sendOnchain": "Enviar on-chain",
     "sending": "Enviando...",

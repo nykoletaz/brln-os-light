@@ -548,7 +548,6 @@
     "paymentRequestRequired": "Payment request required.",
     "paymentSent": "Payment sent.",
     "recentActivity": "Recent activity",
-    "recentActivityNote": "We only show sends and receives created by this wallet. For other entries, check Notifications.",
     "sendFunds": "Send funds",
     "sendOnchain": "Send on-chain",
     "sending": "Sending...",

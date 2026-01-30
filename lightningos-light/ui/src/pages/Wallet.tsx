@@ -680,7 +680,6 @@ export default function Wallet() {
 
       <div className="section-card">
         <h3 className="text-lg font-semibold">{t('wallet.recentActivity')}</h3>
-        <p className="mt-1 text-xs text-fog/50">{t('wallet.recentActivityNote')}</p>
         <div className="mt-4 max-h-[360px] overflow-y-auto pr-2">
           <div className="space-y-2 text-sm">
           {summaryError ? (
