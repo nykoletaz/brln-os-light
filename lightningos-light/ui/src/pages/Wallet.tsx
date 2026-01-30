@@ -244,9 +244,8 @@ export default function Wallet() {
     else if (type === 'payment') label = t('wallet.payment')
     else if (network === 'onchain') label = direction === 'out' ? t('wallet.onchainSend') : t('wallet.onchainDeposit')
     else if (type) label = type.charAt(0).toUpperCase() + type.slice(1)
-    if (network === 'lightning') return `? ${label}`
+    if (network === 'lightning') return `⚡ ${label}`
     return label
-  }
   }
 
   const orderedActivity = [...activity].sort((a: any, b: any) => {
