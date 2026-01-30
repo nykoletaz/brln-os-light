@@ -891,7 +891,7 @@ ADMIN_FILE="$DATA_DIR/lndg-admin.txt"
 mkdir -p "$DATA_DIR"
 
   if [ ! -f "$SETTINGS_FILE" ]; then
-  python initialize.py -d -net "$LNDG_NETWORK" -rpc "$LNDG_RPC_SERVER" -dir "$LNDG_LND_DIR" -u "$LNDG_ADMIN_USER" -pw "$LNDG_ADMIN_PASSWORD" -wn -f
+  python initialize.py -d -net "$LNDG_NETWORK" -rpc "$LNDG_RPC_SERVER" -dir "$LNDG_LND_DIR" -u "$LNDG_ADMIN_USER" --adminpw="$LNDG_ADMIN_PASSWORD" -wn -f
 fi
 
 python - <<'PY'
