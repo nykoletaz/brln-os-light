@@ -256,6 +256,7 @@
     "noLogs": "No logs yet.",
     "services": {
       "lnd": "LND",
+      "lndUpgrade": "LND upgrade",
       "manager": "Manager",
       "elements": "Elements",
       "peerswapd": "Peerswap",
@@ -653,6 +654,40 @@
     "switchingBitcoin": "Switching to {{target}} Bitcoin...",
     "title": "LND configuration",
     "toggleBitcoinSource": "Toggle bitcoin source"
+  },
+  "lndUpgrade": {
+    "title": "LND upgrade",
+    "subtitle": "Check for the latest official LND release and upgrade safely.",
+    "current": "Current version",
+    "latest": "Latest version",
+    "channel": "Channel",
+    "channels": {
+      "stable": "Stable",
+      "beta": "Beta / RC"
+    },
+    "checkedAt": "Last checked",
+    "checking": "Checking...",
+    "statusFailed": "Failed to check for updates.",
+    "statusError": "Update check error: {{error}}",
+    "updateAvailable": "A newer LND release is available.",
+    "upToDate": "You are on the latest LND version.",
+    "inProgress": "Upgrade in progress.",
+    "upgrade": "Upgrade",
+    "upgrading": "Upgrading...",
+    "viewLogs": "View logs",
+    "warning": "Upgrades restart LND. Ensure you have backups and stable power before proceeding.",
+    "confirmTitle": "Confirm LND upgrade?",
+    "confirmBody": "This will download and install {{version}} and restart the LND service.",
+    "confirmWarning": "If LND fails to start, the upgrade is rolled back automatically, but channel and fund safety is your responsibility.",
+    "confirmUpgrade": "Confirm upgrade",
+    "starting": "Starting upgrade...",
+    "started": "Upgrade started. Follow the logs below.",
+    "startFailed": "Failed to start upgrade.",
+    "loadingLogs": "Loading upgrade logs...",
+    "logFetchFailed": "Failed to fetch upgrade logs.",
+    "logsTitle": "Upgrade logs",
+    "logsHint": "Logs appear once the upgrade starts.",
+    "noLogs": "No logs yet."
   },
   "onchainHub": {
     "kicker": "ON-CHAIN HUB",

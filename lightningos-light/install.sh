@@ -26,6 +26,7 @@ UNATTENDED_NOTICE_SHOWN=0
 LND_DIR="/data/lnd"
 LND_CONF="${LND_DIR}/lnd.conf"
 LND_FIX_PERMS_SCRIPT="/usr/local/sbin/lightningos-fix-lnd-perms"
+LND_UPGRADE_SCRIPT="/usr/local/sbin/lightningos-upgrade-lnd"
 TERMINAL_SCRIPT="/usr/local/sbin/lightningos-terminal"
 TERMINAL_OPERATOR_USER="${TERMINAL_OPERATOR_USER:-losop}"
 
@@ -47,6 +48,34 @@ print_ok() {
 
 print_warn() {
   echo "[WARN] $1"
+}
+
+compare_versions() {
+  local a="$1"
+  local b="$2"
+  if command -v dpkg >/dev/null 2>&1; then
+    if dpkg --compare-versions "$a" lt "$b"; then
+      echo -1
+      return 0
+    fi
+    if dpkg --compare-versions "$a" gt "$b"; then
+      echo 1
+      return 0
+    fi
+    echo 0
+    return 0
+  fi
+  if [[ "$a" == "$b" ]]; then
+    echo 0
+    return 0
+  fi
+  local first
+  first=$(printf "%s\n%s\n" "$a" "$b" | sort -V | head -n1)
+  if [[ "$first" == "$a" ]]; then
+    echo -1
+  else
+    echo 1
+  fi
 }
 
 strip_crlf() {
@@ -634,6 +663,14 @@ install_helper_scripts() {
     print_warn "Missing helper script: $terminal_src"
   fi
 
+  local upgrade_src="$REPO_ROOT/scripts/upgrade-lnd.sh"
+  if [[ -f "$upgrade_src" ]]; then
+    mkdir -p "$(dirname "$LND_UPGRADE_SCRIPT")"
+    install -m 0755 "$upgrade_src" "$LND_UPGRADE_SCRIPT"
+  else
+    print_warn "Missing helper script: $upgrade_src"
+  fi
+
   print_ok "Helper scripts installed"
 }
 
@@ -921,8 +958,36 @@ update_notifications_admin_dsn() {
 install_lnd() {
   print_step "Installing LND ${LND_VERSION}"
   if [[ -x /usr/local/bin/lnd && -x /usr/local/bin/lncli ]]; then
-    print_ok "LND already installed"
-    return
+    local current
+    current=$(/usr/local/bin/lnd --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([\-\.][0-9A-Za-z\.-]+)?' | head -n1 || true)
+    if [[ -n "$current" && "$current" == "$LND_VERSION" ]]; then
+      print_ok "LND already installed (v${current})"
+      return
+    fi
+    if [[ -n "$current" ]]; then
+      local cmp
+      cmp=$(compare_versions "$current" "$LND_VERSION")
+      if [[ "$cmp" == "1" ]]; then
+        print_warn "Installed LND v${current} is newer than target v${LND_VERSION}; skipping downgrade."
+        return
+      fi
+      if [[ "$cmp" == "-1" ]]; then
+        if [[ -t 0 ]]; then
+          read -r -p "Upgrade LND from v${current} to v${LND_VERSION}? [y/N]: " reply
+          if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+            print_warn "Skipping LND upgrade."
+            return
+          fi
+        else
+          print_warn "Non-interactive mode; proceeding with LND upgrade to v${LND_VERSION}."
+        fi
+      else
+        print_ok "LND already installed (v${current})"
+        return
+      fi
+    else
+      print_warn "LND version mismatch (installed v${current:-unknown}, target v${LND_VERSION}); upgrading"
+    fi
   fi
 
   local tmp

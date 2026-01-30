@@ -1092,6 +1092,8 @@ func mapService(name string) string {
     return peerswapServiceName
   case "lightningos-psweb", "psweb":
     return pswebServiceName
+  case "lnd-upgrade", "lightningos-lnd-upgrade":
+    return lndUpgradeUnitName
   case "postgresql":
     return "postgresql"
   default:

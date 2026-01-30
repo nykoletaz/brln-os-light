@@ -61,6 +61,10 @@ export const setElementsMainchain = (payload: { source: 'local' | 'remote' }) =>
   request('/api/elements/mainchain', { method: 'POST', body: JSON.stringify(payload) })
 export const getLndStatus = () => request('/api/lnd/status')
 export const getLndConfig = () => request('/api/lnd/config')
+export const getLndUpgradeStatus = (force?: boolean) =>
+  request(`/api/lnd/upgrade/status${buildQuery({ force: force ? 1 : undefined })}`)
+export const startLndUpgrade = (payload: { target_version: string; download_url?: string }) =>
+  request('/api/lnd/upgrade', { method: 'POST', body: JSON.stringify(payload) })
 export const getWizardStatus = () => request('/api/wizard/status')
 
 export const postBitcoinRemote = (payload: { rpcuser: string; rpcpass: string }) =>
