@@ -324,12 +324,12 @@ func atoi(value string) (int, error) {
 }
 
 func ensureLndUpgradeScript(ctx context.Context) error {
-  info, err := os.Stat(lndUpgradeScriptPath)
-  if err == nil && info.Size() > 0 {
-    return nil
-  }
   if strings.TrimSpace(embeddedUpgradeScript) == "" {
     return errors.New("embedded upgrade script is empty")
+  }
+  existing, err := os.ReadFile(lndUpgradeScriptPath)
+  if err == nil && string(existing) == embeddedUpgradeScript {
+    return nil
   }
 
   tmpFile, err := os.CreateTemp("", "lightningos-upgrade-lnd-*.sh")

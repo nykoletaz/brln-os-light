@@ -53,29 +53,63 @@ print_warn() {
 compare_versions() {
   local a="$1"
   local b="$2"
-  if command -v dpkg >/dev/null 2>&1; then
-    if dpkg --compare-versions "$a" lt "$b"; then
-      echo -1
-      return 0
+  a="${a#v}"
+  b="${b#v}"
+  a="${a%%+*}"
+  b="${b%%+*}"
+
+  local a_main="${a%%-*}"
+  local b_main="${b%%-*}"
+  local a_pre=""
+  local b_pre=""
+  if [[ "$a" == *-* ]]; then
+    a_pre="${a#*-}"
+  fi
+  if [[ "$b" == *-* ]]; then
+    b_pre="${b#*-}"
+  fi
+
+  local a_major=0 a_minor=0 a_patch=0
+  local b_major=0 b_minor=0 b_patch=0
+  IFS='.' read -r a_major a_minor a_patch <<< "$a_main"
+  IFS='.' read -r b_major b_minor b_patch <<< "$b_main"
+
+  if [[ "$a_major" -lt "$b_major" ]]; then echo -1; return 0; fi
+  if [[ "$a_major" -gt "$b_major" ]]; then echo 1; return 0; fi
+  if [[ "$a_minor" -lt "$b_minor" ]]; then echo -1; return 0; fi
+  if [[ "$a_minor" -gt "$b_minor" ]]; then echo 1; return 0; fi
+  if [[ "$a_patch" -lt "$b_patch" ]]; then echo -1; return 0; fi
+  if [[ "$a_patch" -gt "$b_patch" ]]; then echo 1; return 0; fi
+
+  if [[ -z "$a_pre" && -z "$b_pre" ]]; then echo 0; return 0; fi
+  if [[ -z "$a_pre" && -n "$b_pre" ]]; then echo 1; return 0; fi
+  if [[ -n "$a_pre" && -z "$b_pre" ]]; then echo -1; return 0; fi
+
+  IFS='.' read -r -a a_parts <<< "$a_pre"
+  IFS='.' read -r -a b_parts <<< "$b_pre"
+  local i max
+  max=${#a_parts[@]}
+  if [[ ${#b_parts[@]} -gt $max ]]; then
+    max=${#b_parts[@]}
+  fi
+  for i in $(seq 0 $((max - 1))); do
+    if [[ $i -ge ${#a_parts[@]} ]]; then echo -1; return 0; fi
+    if [[ $i -ge ${#b_parts[@]} ]]; then echo 1; return 0; fi
+    local a_id="${a_parts[$i]}"
+    local b_id="${b_parts[$i]}"
+    if [[ "$a_id" =~ ^[0-9]+$ && "$b_id" =~ ^[0-9]+$ ]]; then
+      if [[ "$a_id" -lt "$b_id" ]]; then echo -1; return 0; fi
+      if [[ "$a_id" -gt "$b_id" ]]; then echo 1; return 0; fi
+    elif [[ "$a_id" =~ ^[0-9]+$ && ! "$b_id" =~ ^[0-9]+$ ]]; then
+      echo -1; return 0
+    elif [[ ! "$a_id" =~ ^[0-9]+$ && "$b_id" =~ ^[0-9]+$ ]]; then
+      echo 1; return 0
+    else
+      if [[ "$a_id" < "$b_id" ]]; then echo -1; return 0; fi
+      if [[ "$a_id" > "$b_id" ]]; then echo 1; return 0; fi
     fi
-    if dpkg --compare-versions "$a" gt "$b"; then
-      echo 1
-      return 0
-    fi
-    echo 0
-    return 0
-  fi
-  if [[ "$a" == "$b" ]]; then
-    echo 0
-    return 0
-  fi
-  local first
-  first=$(printf "%s\n%s\n" "$a" "$b" | sort -V | head -n1)
-  if [[ "$first" == "$a" ]]; then
-    echo -1
-  else
-    echo 1
-  fi
+  done
+  echo 0
 }
 
 strip_crlf() {

@@ -35,6 +35,20 @@ parse_version_from_output() {
   echo "$output" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([\-\.][0-9A-Za-z\.-]+)?' | head -n1 || true
 }
 
+base_version() {
+  local value="$1"
+  value="${value#v}"
+  echo "${value%%-*}"
+}
+
+parse_commit_from_output() {
+  local output="$1"
+  local commit
+  commit=$(echo "$output" | grep -Eo 'commit=[^ ]+' | head -n1 | cut -d= -f2- || true)
+  commit="${commit#v}"
+  echo "$commit"
+}
+
 VERSION=""
 URL=""
 
@@ -107,6 +121,7 @@ fi
 tmp_dir=""
 backup_lnd=""
 backup_lncli=""
+rollback_ready=0
 
 cleanup() {
   if [[ -n "$tmp_dir" && -d "$tmp_dir" ]]; then
@@ -122,10 +137,26 @@ rollback() {
   if [[ -n "$backup_lncli" && -f "$backup_lncli" ]]; then
     install -m 0755 "$backup_lncli" /usr/local/bin/lncli
   fi
-  systemctl start lnd >/dev/null 2>&1 || print_warn "Failed to restart LND after rollback."
+  if systemctl start lnd >/dev/null 2>&1; then
+    print_ok "LND restarted after rollback."
+  else
+    print_warn "Failed to restart LND after rollback."
+  fi
 }
 
-trap 'print_warn "Upgrade failed. Check ${LOG_FILE} for details."; rollback; cleanup' ERR
+on_exit() {
+  local code=$?
+  trap - EXIT
+  if [[ $code -ne 0 ]]; then
+    print_warn "Upgrade failed. Check ${LOG_FILE} for details."
+    if [[ $rollback_ready -eq 1 ]]; then
+      rollback
+    fi
+  fi
+  cleanup
+}
+
+trap on_exit EXIT
 
 print_step "Downloading LND tarball"
 tmp_dir=$(mktemp -d)
@@ -153,6 +184,7 @@ else
   backup_lncli=""
 fi
 print_ok "Backups created: ${backup_lnd}${backup_lncli:+, ${backup_lncli}}"
+rollback_ready=1
 
 print_step "Installing new binaries"
 install -m 0755 "$lnd_bin" /usr/local/bin/lnd
@@ -161,11 +193,19 @@ install -m 0755 "$lncli_bin" /usr/local/bin/lncli
 print_step "Verifying installed version"
 new_raw=$(/usr/local/bin/lnd --version 2>/dev/null || true)
 new_version=$(parse_version_from_output "$new_raw")
+new_commit=$(parse_commit_from_output "$new_raw")
 if [[ -z "$new_version" ]]; then
   die "Failed to detect new LND version."
 fi
 if [[ "$new_version" != "$VERSION" ]]; then
-  die "Version mismatch. Expected v${VERSION}, got v${new_version}"
+  target_base=$(base_version "$VERSION")
+  if [[ -n "$new_commit" && "$new_commit" == "$VERSION" ]]; then
+    print_warn "Installed version reports v${new_version} (commit v${new_commit}). Accepting commit match."
+  elif [[ "$VERSION" == *-* && "$new_version" == "$target_base" ]]; then
+    print_warn "Installed version reports v${new_version} (target v${VERSION}). Accepting pre-release normalization."
+  else
+    die "Version mismatch. Expected v${VERSION}, got v${new_version}"
+  fi
 fi
 print_ok "Installed LND v${new_version}"
 
