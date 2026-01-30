@@ -55,10 +55,10 @@ export default function LndConfig() {
       try {
         const res = await getLogs('lnd-upgrade', 200)
         if (!mounted) return
-        const lines = Array.isArray(res?.lines) ? res.lines : []
+        const lines: string[] = Array.isArray(res?.lines) ? res.lines : []
         setUpgradeLogs(lines)
-        const completed = lines.some((line) => line.includes('Upgrade complete.'))
-        const errorLine = [...lines].reverse().find((line) =>
+        const completed = lines.some((line: string) => line.includes('Upgrade complete.'))
+        const errorLine = [...lines].reverse().find((line: string) =>
           line.includes('[ERROR]') || line.includes('Upgrade failed')
         )
         if (completed) {
