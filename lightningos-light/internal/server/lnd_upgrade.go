@@ -140,7 +140,7 @@ func (s *Server) handleLNDUpgradeStart(w http.ResponseWriter, r *http.Request) {
     if s.logger != nil {
       s.logger.Printf("failed to install lnd upgrade script: %v", err)
     }
-    writeError(w, http.StatusInternalServerError, "failed to prepare upgrade script")
+    writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to prepare upgrade script: %v", err))
     return
   }
 
@@ -348,10 +348,8 @@ func ensureLndUpgradeScript(ctx context.Context) error {
   }
   defer os.Remove(tmpPath)
 
-  if _, err := system.RunCommandWithSudo(ctx, "mkdir", "-p", filepath.Dir(lndUpgradeScriptPath)); err != nil {
-    return err
-  }
-  if _, err := system.RunCommandWithSudo(ctx, "install", "-m", "0755", tmpPath, lndUpgradeScriptPath); err != nil {
+  installCmd := fmt.Sprintf("mkdir -p %s && install -m 0755 %s %s", filepath.Dir(lndUpgradeScriptPath), tmpPath, lndUpgradeScriptPath)
+  if _, err := runSystemd(ctx, "/bin/sh", "-c", installCmd); err != nil {
     return err
   }
   return nil

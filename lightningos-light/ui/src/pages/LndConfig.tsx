@@ -22,6 +22,9 @@ export default function LndConfig() {
   const [upgradeBusy, setUpgradeBusy] = useState(false)
   const [upgradeLogs, setUpgradeLogs] = useState<string[]>([])
   const [upgradeLogsStatus, setUpgradeLogsStatus] = useState('')
+  const [upgradeError, setUpgradeError] = useState<string | null>(null)
+  const [upgradeComplete, setUpgradeComplete] = useState(false)
+  const [upgradeLocked, setUpgradeLocked] = useState(false)
 
   useEffect(() => {
     getLndConfig().then((data: any) => {
@@ -52,7 +55,20 @@ export default function LndConfig() {
       try {
         const res = await getLogs('lnd-upgrade', 200)
         if (!mounted) return
-        setUpgradeLogs(Array.isArray(res?.lines) ? res.lines : [])
+        const lines = Array.isArray(res?.lines) ? res.lines : []
+        setUpgradeLogs(lines)
+        const completed = lines.some((line) => line.includes('Upgrade complete.'))
+        const errorLine = [...lines].reverse().find((line) =>
+          line.includes('[ERROR]') || line.includes('Upgrade failed')
+        )
+        if (completed) {
+          setUpgradeComplete(true)
+          setUpgradeLocked(false)
+        }
+        if (errorLine) {
+          setUpgradeError(errorLine)
+          setUpgradeLocked(false)
+        }
         setUpgradeLogsStatus('')
       } catch (err) {
         if (!mounted) return
@@ -64,6 +80,9 @@ export default function LndConfig() {
         const data = await getLndUpgradeStatus()
         if (mounted) {
           setUpgrade(data)
+          if (upgradeLocked && data && data.running === false) {
+            setUpgradeLocked(false)
+          }
         }
       } catch {
         // ignore status refresh errors during modal
@@ -79,7 +98,7 @@ export default function LndConfig() {
       mounted = false
       clearInterval(timer)
     }
-  }, [upgradeModalOpen, t])
+  }, [upgradeModalOpen, t, upgradeLocked])
 
   const isHexColor = (value: string) => /^#[0-9a-fA-F]{6}$/.test(value.trim())
 
@@ -123,16 +142,23 @@ export default function LndConfig() {
     setUpgradeModalOpen(true)
     setUpgradeLogs([])
     setUpgradeLogsStatus('')
+    setUpgradeError(null)
+    setUpgradeComplete(false)
+    if (upgrade?.running) {
+      setUpgradeLocked(true)
+    }
   }
 
   const closeUpgradeModal = () => {
-    if (upgradeBusy) return
+    if (upgradeBusy || (upgradeLocked && !upgradeError && !upgradeComplete)) return
     setUpgradeModalOpen(false)
   }
 
   const startUpgrade = async () => {
     if (!upgrade?.latest_version || upgradeBusy) return
     setUpgradeBusy(true)
+    setUpgradeError(null)
+    setUpgradeComplete(false)
     setUpgradeMessage(t('lndUpgrade.starting'))
     try {
       await startLndUpgrade({
@@ -141,8 +167,12 @@ export default function LndConfig() {
       })
       setUpgradeMessage(t('lndUpgrade.started'))
       setUpgradeModalOpen(true)
+      setUpgradeLocked(true)
     } catch (err) {
-      setUpgradeMessage(err instanceof Error ? err.message : t('lndUpgrade.startFailed'))
+      const message = err instanceof Error ? err.message : t('lndUpgrade.startFailed')
+      setUpgradeMessage(message)
+      setUpgradeError(message)
+      setUpgradeLocked(false)
     } finally {
       setUpgradeBusy(false)
       loadUpgradeStatus(true, true)
@@ -234,78 +264,6 @@ export default function LndConfig() {
       </div>
 
       <div className="section-card space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h3 className="text-lg font-semibold">{t('lndUpgrade.title')}</h3>
-            <p className="text-fog/60">{t('lndUpgrade.subtitle')}</p>
-          </div>
-          <button
-            className="btn-secondary"
-            onClick={() => loadUpgradeStatus(true)}
-            disabled={upgradeChecking}
-          >
-            {upgradeChecking ? t('lndUpgrade.checking') : t('common.refresh')}
-          </button>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 text-sm">
-          <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-ink/40 px-4 py-3">
-            <span className="text-fog/70">{t('lndUpgrade.current')}</span>
-            <span className="font-mono text-fog">{formatVersion(upgrade?.current_version)}</span>
-          </div>
-          <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-ink/40 px-4 py-3">
-            <span className="text-fog/70">{t('lndUpgrade.latest')}</span>
-            <span className="font-mono text-fog">{formatVersion(upgrade?.latest_version)}</span>
-          </div>
-          <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-ink/40 px-4 py-3">
-            <span className="text-fog/70">{t('lndUpgrade.channel')}</span>
-            <span className="text-fog/90">
-              {upgrade?.latest_channel
-                ? t(`lndUpgrade.channels.${upgrade.latest_channel}`)
-                : t('common.na')}
-            </span>
-          </div>
-          <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-ink/40 px-4 py-3">
-            <span className="text-fog/70">{t('lndUpgrade.checkedAt')}</span>
-            <span className="text-fog/90">{formatCheckedAt(upgrade?.checked_at) || t('common.na')}</span>
-          </div>
-        </div>
-
-        {upgrade?.error && (
-          <p className="text-sm text-rose-200">{t('lndUpgrade.statusError', { error: upgrade.error })}</p>
-        )}
-
-        {!upgrade?.error && (
-          <p className="text-sm text-fog/70">
-            {upgrade?.running
-              ? t('lndUpgrade.inProgress')
-              : upgrade?.update_available
-                ? t('lndUpgrade.updateAvailable')
-                : t('lndUpgrade.upToDate')}
-          </p>
-        )}
-
-        {upgradeMessage && <p className="text-sm text-brass">{upgradeMessage}</p>}
-
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            className="btn-primary"
-            onClick={openUpgradeModal}
-            disabled={!upgrade?.update_available || upgrade?.running}
-          >
-            {upgrade?.running ? t('lndUpgrade.upgrading') : t('lndUpgrade.upgrade')}
-          </button>
-          {upgrade?.running && (
-            <button className="btn-secondary" onClick={openUpgradeModal}>
-              {t('lndUpgrade.viewLogs')}
-            </button>
-          )}
-        </div>
-
-        <p className="text-xs text-fog/50">{t('lndUpgrade.warning')}</p>
-      </div>
-
-      <div className="section-card space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold">{t('lndConfig.basicSettings')}</h3>
           <button className="btn-secondary" onClick={() => setAdvanced((v) => !v)}>
@@ -384,22 +342,100 @@ export default function LndConfig() {
         </div>
       )}
 
+      <div className="section-card space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-semibold">{t('lndUpgrade.title')}</h3>
+            <p className="text-fog/60">{t('lndUpgrade.subtitle')}</p>
+          </div>
+          <button
+            className="btn-secondary"
+            onClick={() => loadUpgradeStatus(true)}
+            disabled={upgradeChecking}
+          >
+            {upgradeChecking ? t('lndUpgrade.checking') : t('common.refresh')}
+          </button>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 text-sm">
+          <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-ink/40 px-4 py-3">
+            <span className="text-fog/70">{t('lndUpgrade.current')}</span>
+            <span className="font-mono text-fog">{formatVersion(upgrade?.current_version)}</span>
+          </div>
+          <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-ink/40 px-4 py-3">
+            <span className="text-fog/70">{t('lndUpgrade.latest')}</span>
+            <span className="font-mono text-fog">{formatVersion(upgrade?.latest_version)}</span>
+          </div>
+          <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-ink/40 px-4 py-3">
+            <span className="text-fog/70">{t('lndUpgrade.channel')}</span>
+            <span className="text-fog/90">
+              {upgrade?.latest_channel
+                ? t(`lndUpgrade.channels.${upgrade.latest_channel}`)
+                : t('common.na')}
+            </span>
+          </div>
+          <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-ink/40 px-4 py-3">
+            <span className="text-fog/70">{t('lndUpgrade.checkedAt')}</span>
+            <span className="text-fog/90">{formatCheckedAt(upgrade?.checked_at) || t('common.na')}</span>
+          </div>
+        </div>
+
+        {upgrade?.error && (
+          <p className="text-sm text-rose-200">{t('lndUpgrade.statusError', { error: upgrade.error })}</p>
+        )}
+
+        {!upgrade?.error && (
+          <p className="text-sm text-fog/70">
+            {upgrade?.running
+              ? t('lndUpgrade.inProgress')
+              : upgrade?.update_available
+                ? t('lndUpgrade.updateAvailable')
+                : t('lndUpgrade.upToDate')}
+          </p>
+        )}
+
+        {upgradeMessage && <p className="text-sm text-brass">{upgradeMessage}</p>}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            className="btn-primary"
+            onClick={openUpgradeModal}
+            disabled={!upgrade?.update_available || upgrade?.running}
+          >
+            {upgrade?.running ? t('lndUpgrade.upgrading') : t('lndUpgrade.upgrade')}
+          </button>
+          {upgrade?.running && (
+            <button className="btn-secondary" onClick={openUpgradeModal}>
+              {t('lndUpgrade.viewLogs')}
+            </button>
+          )}
+        </div>
+
+        <p className="text-xs text-fog/50">{t('lndUpgrade.warning')}</p>
+      </div>
+
       {!config && <p className="text-fog/60">{t('lndConfig.loadingConfig')}</p>}
 
       {upgradeModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={closeUpgradeModal} aria-hidden="true" />
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={closeUpgradeModal}
+            aria-hidden="true"
+          />
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="lnd-upgrade-title"
-            className="relative z-10 w-full max-w-2xl rounded-3xl border border-white/10 bg-slate/95 p-6 shadow-panel"
+            className="relative z-10 w-full max-w-3xl rounded-3xl border border-white/10 bg-slate/95 p-6 shadow-panel"
           >
             <h4 id="lnd-upgrade-title" className="text-lg font-semibold">{t('lndUpgrade.confirmTitle')}</h4>
             <p className="mt-2 text-sm text-fog/70">
               {t('lndUpgrade.confirmBody', { version: formatVersion(upgrade?.latest_version) })}
             </p>
             <p className="mt-3 text-xs text-rose-200">{t('lndUpgrade.confirmWarning')}</p>
+            {upgradeMessage && <p className="mt-3 text-sm text-brass">{upgradeMessage}</p>}
+            {upgradeError && <p className="mt-2 text-sm text-rose-200">{upgradeError}</p>}
 
             <div className="mt-4">
               <div className="flex items-center justify-between">
@@ -409,16 +445,17 @@ export default function LndConfig() {
                 </span>
               </div>
               {upgradeLogsStatus && <p className="mt-2 text-xs text-brass">{upgradeLogsStatus}</p>}
-              <div className="mt-2 max-h-[240px] overflow-y-auto rounded-2xl border border-white/10 bg-ink/70 p-3 text-xs font-mono whitespace-pre-wrap">
+              <div className="mt-2 max-h-[320px] overflow-y-auto rounded-2xl border border-white/10 bg-ink/70 p-3 text-xs font-mono whitespace-pre-wrap">
                 {upgradeLogs.length ? upgradeLogs.join('\n') : t('lndUpgrade.noLogs')}
               </div>
             </div>
 
             <div className="mt-5 flex items-center justify-end gap-3">
               <button
-                className={`btn-secondary ${upgradeBusy ? 'opacity-60 pointer-events-none' : ''}`}
+                className={`btn-secondary ${(upgradeBusy || (upgradeLocked && !upgradeError && !upgradeComplete)) ? 'opacity-60 pointer-events-none' : ''}`}
                 onClick={closeUpgradeModal}
                 type="button"
+                disabled={upgradeBusy || (upgradeLocked && !upgradeError && !upgradeComplete)}
               >
                 {t('common.cancel')}
               </button>
