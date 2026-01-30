@@ -10,7 +10,7 @@ import (
 const (
   walletActivityPath = "/var/lib/lightningos/wallet-activity.json"
   walletActivityLimit = 200
-  walletActivityFetchLimit = 500
+  walletActivityFetchLimit = 1000
 )
 
 type walletActivityStore struct {

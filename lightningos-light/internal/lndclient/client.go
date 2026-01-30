@@ -668,7 +668,7 @@ func (c *Client) ListRecent(ctx context.Context, limit int) ([]RecentActivity, e
       if isSelfPayment(ctx, pubkey, client, pay) {
         continue
       }
-      isKeysend := strings.TrimSpace(pay.PaymentRequest) == ""
+      isKeysend := isKeysendPayment(pay)
       items = append(items, RecentActivity{
         Type: "payment",
         Network: "lightning",
@@ -732,6 +732,42 @@ func rebalanceRouteFromPayment(pay *lnrpc.Payment) *lnrpc.Route {
     }
   }
   return nil
+}
+
+func hasKeysendRecord(records map[uint64][]byte) bool {
+  if len(records) == 0 {
+    return false
+  }
+  if _, ok := records[KeysendPreimageRecord]; ok {
+    return true
+  }
+  if _, ok := records[KeysendMessageRecord]; ok {
+    return true
+  }
+  return false
+}
+
+func isKeysendPayment(pay *lnrpc.Payment) bool {
+  if pay == nil {
+    return false
+  }
+  if hasKeysendRecord(pay.FirstHopCustomRecords) {
+    return true
+  }
+  for _, attempt := range pay.Htlcs {
+    if attempt == nil || attempt.Route == nil {
+      continue
+    }
+    for _, hop := range attempt.Route.Hops {
+      if hop == nil {
+        continue
+      }
+      if hasKeysendRecord(hop.CustomRecords) {
+        return true
+      }
+    }
+  }
+  return false
 }
 
 func (c *Client) ListOnchain(ctx context.Context, limit int) ([]RecentActivity, error) {
