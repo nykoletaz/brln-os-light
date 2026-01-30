@@ -50,6 +50,23 @@ print_warn() {
   echo "[WARN] $1"
 }
 
+extract_lnd_version() {
+  local output="$1"
+  local version commit
+  version=$(echo "$output" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([\-\.][0-9A-Za-z\.-]+)?' | head -n1 || true)
+  commit=$(echo "$output" | grep -Eo 'commit=[^ ]+' | head -n1 | cut -d= -f2- || true)
+  commit="${commit#v}"
+  if [[ -z "$version" && -n "$commit" ]]; then
+    echo "$commit"
+    return
+  fi
+  if [[ -n "$commit" && "$commit" == *-* && "$version" != *-* ]]; then
+    echo "$commit"
+    return
+  fi
+  echo "$version"
+}
+
 compare_versions() {
   local a="$1"
   local b="$2"
@@ -311,6 +328,7 @@ wait_for_apt_locks() {
 apt_get() {
   local attempt
   local log
+  local repaired=0
   log=$(mktemp)
   for attempt in $(seq 1 5); do
     if ! wait_for_apt_locks; then
@@ -319,6 +337,15 @@ apt_get() {
     if apt-get "$@" 2>&1 | tee "$log"; then
       rm -f "$log"
       return 0
+    fi
+    if grep -q "dpkg was interrupted" "$log"; then
+      if [[ "$repaired" -eq 0 ]]; then
+        print_warn "dpkg was interrupted; running dpkg --configure -a"
+        dpkg --configure -a || true
+        repaired=1
+        sleep 2
+        continue
+      fi
     fi
     if grep -q "Could not get lock" "$log"; then
       print_warn "apt lock busy; waiting before retry"
@@ -993,7 +1020,7 @@ install_lnd() {
   print_step "Installing LND ${LND_VERSION}"
   if [[ -x /usr/local/bin/lnd && -x /usr/local/bin/lncli ]]; then
     local current
-    current=$(/usr/local/bin/lnd --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([\-\.][0-9A-Za-z\.-]+)?' | head -n1 || true)
+    current=$(extract_lnd_version "$(/usr/local/bin/lnd --version 2>/dev/null || true)")
     if [[ -n "$current" && "$current" == "$LND_VERSION" ]]; then
       print_ok "LND already installed (v${current})"
       return

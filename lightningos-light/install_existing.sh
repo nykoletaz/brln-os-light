@@ -12,6 +12,7 @@ GOTTY_VERSION="${GOTTY_VERSION:-1.0.1}"
 GOTTY_URL="https://github.com/yudai/gotty/releases/download/v${GOTTY_VERSION}/gotty_linux_amd64.tar.gz"
 POSTGRES_VERSION="${POSTGRES_VERSION:-latest}"
 LND_FIX_PERMS_SCRIPT="/usr/local/sbin/lightningos-fix-lnd-perms"
+LND_UPGRADE_SCRIPT="/usr/local/sbin/lightningos-upgrade-lnd"
 
 CURRENT_STEP=""
 LOG_FILE="/var/log/lightningos-install-existing.log"
@@ -336,6 +337,17 @@ install_lnd_fix_perms_script() {
   fi
 }
 
+install_lnd_upgrade_script() {
+  local src="$REPO_ROOT/scripts/upgrade-lnd.sh"
+  if [[ -f "$src" ]]; then
+    mkdir -p "$(dirname "$LND_UPGRADE_SCRIPT")"
+    install -m 0755 "$src" "$LND_UPGRADE_SCRIPT"
+    print_ok "LND upgrade helper installed"
+  else
+    print_warn "Missing helper script: $src"
+  fi
+}
+
 configure_sudoers() {
   print_step "Configuring sudoers"
   local systemctl_path apt_get_path apt_path dpkg_path docker_path docker_compose_path systemd_run_path smartctl_path ufw_path
@@ -365,7 +377,7 @@ configure_sudoers() {
     return
   fi
   local system_cmds
-  system_cmds="${systemctl_path} restart lnd, ${systemctl_path} restart lightningos-manager, ${systemctl_path} restart postgresql, ${systemctl_path} reboot, ${systemctl_path} poweroff, ${LND_FIX_PERMS_SCRIPT}, ${smartctl_path} *"
+  system_cmds="${systemctl_path} restart lnd, ${systemctl_path} restart lightningos-manager, ${systemctl_path} restart postgresql, ${systemctl_path} reboot, ${systemctl_path} poweroff, ${LND_FIX_PERMS_SCRIPT}, ${LND_UPGRADE_SCRIPT}, ${smartctl_path} *"
   local app_cmds=()
   [[ -n "$apt_get_path" ]] && app_cmds+=("${apt_get_path} *")
   [[ -n "$apt_path" ]] && app_cmds+=("${apt_path} *")
@@ -1141,6 +1153,7 @@ main() {
     fi
   fi
   install_lnd_fix_perms_script
+  install_lnd_upgrade_script
   configure_sudoers
   ensure_manager_service "$manager_user" "$manager_group"
   if [[ -n "$LND_USER" && -n "$LND_GROUP" ]]; then
