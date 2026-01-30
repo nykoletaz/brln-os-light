@@ -78,6 +78,9 @@ export const unlockWallet = (payload: { wallet_password: string }) =>
 export const restartService = (payload: { service: string }) =>
   request('/api/actions/restart', { method: 'POST', body: JSON.stringify(payload) })
 
+export const runSystemAction = (payload: { action: 'reboot' | 'shutdown' }) =>
+  request('/api/actions/system', { method: 'POST', body: JSON.stringify(payload) })
+
 export const getLogs = (service: string, lines: number) =>
   request(`/api/logs?service=${service}&lines=${lines}`)
 

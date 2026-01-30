@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getBitcoinActive, getDisk, getLndStatus, getPostgres, getSystem, restartService } from '../api'
+import { getBitcoinActive, getDisk, getLndStatus, getPostgres, getSystem, restartService, runSystemAction } from '../api'
 import { getLocale } from '../i18n'
 
 export default function Dashboard() {
@@ -16,6 +16,9 @@ export default function Dashboard() {
   const [postgres, setPostgres] = useState<any>(null)
   const [lnd, setLnd] = useState<any>(null)
   const [status, setStatus] = useState<'loading' | 'ok' | 'unavailable'>('loading')
+  const [systemAction, setSystemAction] = useState<'restart' | 'shutdown' | null>(null)
+  const [systemActionBusy, setSystemActionBusy] = useState(false)
+  const [systemActionError, setSystemActionError] = useState<string | null>(null)
 
   const wearWarnThreshold = 75
   const tempWarnThreshold = 70
@@ -88,6 +91,16 @@ export default function Dashboard() {
   const lndInfoAge = Number(lnd?.info_age_seconds || 0)
   const lndInfoStaleTooLong = lndInfoStale && lndInfoAge > 900
   const postgresDatabases = Array.isArray(postgres?.databases) ? postgres.databases : []
+  const systemActionIsShutdown = systemAction === 'shutdown'
+  const systemActionTitle = systemActionIsShutdown
+    ? t('dashboard.confirmShutdownTitle')
+    : t('dashboard.confirmRestartTitle')
+  const systemActionBody = systemActionIsShutdown
+    ? t('dashboard.confirmShutdownBody')
+    : t('dashboard.confirmRestartBody')
+  const systemActionButtonClass = systemActionIsShutdown
+    ? 'text-rose-200 border-rose-400/30'
+    : 'text-amber-200 border-amber-400/30'
 
   useEffect(() => {
     let mounted = true
@@ -124,6 +137,31 @@ export default function Dashboard() {
     await restartService({ service })
   }
 
+  const openSystemAction = (action: 'restart' | 'shutdown') => {
+    setSystemAction(action)
+    setSystemActionError(null)
+  }
+
+  const closeSystemAction = () => {
+    if (systemActionBusy) return
+    setSystemAction(null)
+    setSystemActionError(null)
+  }
+
+  const confirmSystemAction = async () => {
+    if (!systemAction) return
+    setSystemActionBusy(true)
+    setSystemActionError(null)
+    try {
+      await runSystemAction({ action: systemAction === 'restart' ? 'reboot' : 'shutdown' })
+      setSystemAction(null)
+    } catch (err) {
+      setSystemActionError(err instanceof Error ? err.message : t('common.fail'))
+    } finally {
+      setSystemActionBusy(false)
+    }
+  }
+
   return (
     <section className="space-y-6">
       <div className="section-card">
@@ -135,9 +173,30 @@ export default function Dashboard() {
               <Badge label={statusLabel} tone={overallTone} />
             </div>
           </div>
-          <div className="flex gap-2">
-            <button className="btn-secondary" onClick={() => restart('lnd')}>{t('dashboard.restartLnd')}</button>
-            <button className="btn-secondary" onClick={() => restart('lightningos-manager')}>{t('dashboard.restartManager')}</button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="btn-secondary" onClick={() => restart('lnd')} type="button">
+              {t('dashboard.restartLnd')}
+            </button>
+            <button className="btn-secondary" onClick={() => restart('lightningos-manager')} type="button">
+              {t('dashboard.restartManager')}
+            </button>
+            <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-2 py-1">
+              <span className="text-[10px] uppercase tracking-[0.2em] text-fog/50">{t('dashboard.systemActions')}</span>
+              <button
+                className="btn-secondary text-xs px-3 py-1.5 text-amber-200 border-amber-400/30"
+                onClick={() => openSystemAction('restart')}
+                type="button"
+              >
+                {t('dashboard.safeRestart')}
+              </button>
+              <button
+                className="btn-secondary text-xs px-3 py-1.5 text-rose-200 border-rose-400/30"
+                onClick={() => openSystemAction('shutdown')}
+                type="button"
+              >
+                {t('dashboard.safeShutdown')}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -401,6 +460,41 @@ export default function Dashboard() {
           <p className="text-fog/60 mt-4">{t('dashboard.noDiskData')}</p>
         )}
       </div>
+
+      {systemAction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={closeSystemAction} aria-hidden="true" />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="system-action-title"
+            className="relative z-10 w-full max-w-md rounded-3xl border border-white/10 bg-slate/95 p-6 shadow-panel"
+          >
+            <h4 id="system-action-title" className="text-lg font-semibold">{systemActionTitle}</h4>
+            <p className="mt-2 text-sm text-fog/70">{systemActionBody}</p>
+            {systemActionError && (
+              <p className="mt-3 text-sm text-rose-200">{systemActionError}</p>
+            )}
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button
+                className={`btn-secondary ${systemActionBusy ? 'opacity-60 pointer-events-none' : ''}`}
+                onClick={closeSystemAction}
+                type="button"
+                autoFocus
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                className={`btn-secondary ${systemActionButtonClass} ${systemActionBusy ? 'opacity-60 pointer-events-none' : ''}`}
+                onClick={confirmSystemAction}
+                type="button"
+              >
+                {t('common.ok')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }

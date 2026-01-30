@@ -1048,6 +1048,38 @@ func (s *Server) handleRestart(w http.ResponseWriter, r *http.Request) {
   writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+func (s *Server) handleSystemAction(w http.ResponseWriter, r *http.Request) {
+  var req struct {
+    Action string `json:"action"`
+  }
+  if err := readJSON(r, &req); err != nil {
+    writeError(w, http.StatusBadRequest, "invalid json")
+    return
+  }
+
+  action := strings.ToLower(strings.TrimSpace(req.Action))
+  switch action {
+  case "restart":
+    action = "reboot"
+  case "shutdown":
+    action = "poweroff"
+  }
+  if action != "reboot" && action != "poweroff" {
+    writeError(w, http.StatusBadRequest, "unsupported action")
+    return
+  }
+
+  ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+  defer cancel()
+
+  if err := system.SystemctlPower(ctx, action); err != nil {
+    writeError(w, http.StatusInternalServerError, "system action failed")
+    return
+  }
+
+  writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func mapService(name string) string {
   switch name {
   case "lnd":

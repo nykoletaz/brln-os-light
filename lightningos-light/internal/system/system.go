@@ -285,6 +285,17 @@ func SystemctlRestart(ctx context.Context, service string) error {
   return fmt.Errorf("systemctl restart failed: %w; sudo restart failed: %v", err, sudoErr)
 }
 
+func SystemctlPower(ctx context.Context, action string) error {
+  if action != "reboot" && action != "poweroff" {
+    return fmt.Errorf("unsupported system action")
+  }
+  systemctl := systemctlPath()
+  if _, err := RunCommandWithSudo(ctx, systemctl, action); err != nil {
+    return fmt.Errorf("systemctl %s failed: %w", action, err)
+  }
+  return nil
+}
+
 func JournalTail(ctx context.Context, service string, lines int) ([]string, error) {
   if lines <= 0 {
     lines = 200
