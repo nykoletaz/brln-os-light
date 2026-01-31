@@ -50,6 +50,96 @@ print_warn() {
   echo "[WARN] $1"
 }
 
+get_lightningos_version() {
+  local version_file="$REPO_ROOT/ui/public/version.txt"
+  local version="unknown"
+  if [[ -f "$version_file" ]]; then
+    version=$(head -n1 "$version_file" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  fi
+  if [[ -z "$version" ]]; then
+    version="unknown"
+  fi
+  echo "$version"
+}
+
+print_lightningos_banner() {
+  cat <<'EOF'
+■     ■■■■■ ■■■■■ ■   ■ ■■■■■ ■   ■ ■■■■■ ■   ■ ■■■■■ □□□□□ □□□□□
+■       ■   ■     ■   ■   ■   ■■  ■   ■   ■■  ■ ■     □   □ □
+■       ■   ■     ■   ■   ■   ■ ■ ■   ■   ■ ■ ■ ■     □   □ □
+■       ■   ■ ■■■ ■■■■■   ■   ■  ■■   ■   ■  ■■ ■ ■■■ □   □ □□□□□
+■       ■   ■   ■ ■   ■   ■   ■   ■   ■   ■   ■ ■   ■ □   □     □
+■       ■   ■   ■ ■   ■   ■   ■   ■   ■   ■   ■ ■   ■ □   □     □
+■■■■■ ■■■■■ ■■■■■ ■   ■   ■   ■   ■ ■■■■■ ■   ■ ■■■■■ □□□□□ □□□□□
+EOF
+}
+
+get_mit_terms() {
+  local license_file="$REPO_ROOT/../LICENSE"
+  if [[ -f "$license_file" ]]; then
+    awk 'BEGIN{p=0} /^MIT License \\(English\\)/{p=1} /^MIT License \\(Portuguese\\)/{p=0} p{print}' "$license_file"
+    return
+  fi
+  cat <<'EOF'
+MIT License (English)
+
+Copyright (c) 2026 BRLN
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+EOF
+}
+
+confirm_mit_license() {
+  local accepted="${ACCEPT_MIT_LICENSE:-}"
+  if [[ -n "$accepted" ]]; then
+    case "$accepted" in
+      1|y|Y|yes|YES|true|TRUE) return 0 ;;
+      0|n|N|no|NO|false|FALSE) echo "MIT License not accepted."; exit 1 ;;
+    esac
+  fi
+  if [[ ! -t 0 ]]; then
+    echo "Non-interactive mode detected."
+    echo "Set ACCEPT_MIT_LICENSE=1 to proceed."
+    exit 1
+  fi
+  while true; do
+    read -r -p "Do you want to continue with the installation? [y/N]: " reply
+    reply="${reply:-N}"
+    case "$reply" in
+      [Yy]*) return 0 ;;
+      [Nn]*) echo "Installation cancelled."; exit 1 ;;
+    esac
+  done
+}
+
+show_welcome_and_license() {
+  local version
+  version=$(get_lightningos_version)
+  print_lightningos_banner
+  echo "Version: ${version}"
+  echo "Created by BRLN - https://br-ln.com"
+  echo ""
+  get_mit_terms
+  echo ""
+  confirm_mit_license
+}
+
 extract_lnd_version() {
   local output="$1"
   local version commit
@@ -1320,6 +1410,7 @@ verify_manager_listener() {
 }
 
 main() {
+  show_welcome_and_license
   require_root
   print_step "LightningOS Light installation starting"
   ensure_operator_user
