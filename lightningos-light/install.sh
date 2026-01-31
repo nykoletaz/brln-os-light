@@ -83,7 +83,7 @@ get_mit_terms() {
   cat <<'EOF'
 MIT License (English)
 
-Copyright (c) 2026 BRLN
+Copyright (c) 2026 BR⚡LN
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -133,7 +133,7 @@ show_welcome_and_license() {
   version=$(get_lightningos_version)
   print_lightningos_banner
   echo "Version: ${version}"
-  echo "Created by BRLN - https://br-ln.com"
+  echo "Created by BR⚡LN - https://br-ln.com"
   echo ""
   get_mit_terms
   echo ""
