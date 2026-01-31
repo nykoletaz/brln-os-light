@@ -51,6 +51,24 @@ cd lightningos-light
 sudo ./install.sh
 ```
 
+### Install via curl (bootstrap)
+This pulls the repo (or runs `git pull` if it already exists), then runs `lightningos-light/install.sh`.
+```bash
+curl -fsSL https://raw.githubusercontent.com/jvxis/brln-os-light/main/lo_bootstrap.sh | sudo ACCEPT_MIT_LICENSE=1 bash
+```
+
+Optional overrides:
+```bash
+# Use a different clone location
+curl -fsSL https://raw.githubusercontent.com/jvxis/brln-os-light/main/lo_bootstrap.sh | sudo BRLN_DIR=/opt/brln-os-light bash
+
+# Pin a branch/tag
+curl -fsSL https://raw.githubusercontent.com/jvxis/brln-os-light/main/lo_bootstrap.sh | sudo BRLN_BRANCH=main bash
+
+# Use a different repo URL
+curl -fsSL https://raw.githubusercontent.com/jvxis/brln-os-light/main/lo_bootstrap.sh | sudo REPO_URL=https://github.com/jvxis/brln-os-light bash
+```
+
 UFW note (App Store/LNDg):
 If LNDg fails to reach LND gRPC and UFW is enabled, Docker-to-host traffic can be blocked.
 Run these checks and allow the bridge interface used by the LNDg network:
