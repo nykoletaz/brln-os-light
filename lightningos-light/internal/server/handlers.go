@@ -33,6 +33,8 @@ const (
   boostPeersDefaultLimit = 25
   boostPeersMaxLimit = 100
   lndRPCTimeout = 15 * time.Second
+  lndConnectTimeout = 30 * time.Second
+  lndOpenChannelTimeout = 60 * time.Second
   lndWarmupPeriod = 90 * time.Second
 )
 
@@ -1262,10 +1264,10 @@ func (s *Server) handleLNConnectPeer(w http.ResponseWriter, r *http.Request) {
     perm = *req.Perm
   }
 
-  ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
+  ctx, cancel := context.WithTimeout(r.Context(), lndConnectTimeout)
   defer cancel()
 
-  if err := s.lnd.ConnectPeer(ctx, pubkey, host, perm); err != nil {
+  if err := s.lnd.ConnectPeerWithTimeout(ctx, pubkey, host, perm, uint32(lndConnectTimeout/time.Second)); err != nil {
     writeError(w, http.StatusInternalServerError, peerConnectErrorMessage(err))
     return
   }
@@ -1567,15 +1569,18 @@ func (s *Server) handleLNOpenChannel(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
-  defer cancel()
-
-  if err := s.lnd.ConnectPeer(ctx, pubkey, host, false); err != nil && !isAlreadyConnected(err) {
+  connectCtx, connectCancel := context.WithTimeout(r.Context(), lndConnectTimeout)
+  if err := s.lnd.ConnectPeerWithTimeout(connectCtx, pubkey, host, false, uint32(lndConnectTimeout/time.Second)); err != nil && !isAlreadyConnected(err) {
+    connectCancel()
     writeError(w, http.StatusInternalServerError, lndRPCErrorMessage(err))
     return
   }
+  connectCancel()
 
-  channelPoint, err := s.lnd.OpenChannel(ctx, pubkey, req.LocalFundingSat, req.CloseAddress, req.Private, req.SatPerVbyte)
+  openCtx, openCancel := context.WithTimeout(r.Context(), lndOpenChannelTimeout)
+  defer openCancel()
+
+  channelPoint, err := s.lnd.OpenChannel(openCtx, pubkey, req.LocalFundingSat, req.CloseAddress, req.Private, req.SatPerVbyte)
   if err != nil {
     writeError(w, http.StatusInternalServerError, lndDetailedErrorMessage(err))
     return

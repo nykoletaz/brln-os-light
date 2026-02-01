@@ -47,6 +47,7 @@ const (
   statusCacheErr = 45 * time.Second
   statusCacheTimeout = 60 * time.Second
   maxGRPCMsgSize = 32 * 1024 * 1024
+  defaultConnectPeerTimeoutSec = 8
 )
 
 type macaroonCredential struct {
@@ -1198,6 +1199,10 @@ func (c *Client) ListPeers(ctx context.Context) ([]PeerInfo, error) {
 }
 
 func (c *Client) ConnectPeer(ctx context.Context, pubkey string, host string, perm bool) error {
+  return c.ConnectPeerWithTimeout(ctx, pubkey, host, perm, defaultConnectPeerTimeoutSec)
+}
+
+func (c *Client) ConnectPeerWithTimeout(ctx context.Context, pubkey string, host string, perm bool, timeoutSec uint32) error {
   conn, err := c.dial(ctx, true)
   if err != nil {
     return err
@@ -1205,13 +1210,16 @@ func (c *Client) ConnectPeer(ctx context.Context, pubkey string, host string, pe
   defer conn.Close()
 
   client := lnrpc.NewLightningClient(conn)
+  if timeoutSec == 0 {
+    timeoutSec = defaultConnectPeerTimeoutSec
+  }
   _, err = client.ConnectPeer(ctx, &lnrpc.ConnectPeerRequest{
     Addr: &lnrpc.LightningAddress{
       Pubkey: pubkey,
       Host: host,
     },
     Perm: perm,
-    Timeout: 8,
+    Timeout: timeoutSec,
   })
   return err
 }
