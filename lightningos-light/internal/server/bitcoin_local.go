@@ -110,6 +110,29 @@ func (s *Server) handleBitcoinLocalStatus(w http.ResponseWriter, r *http.Request
     DataDir: paths.DataDir,
   }
   if !fileExists(paths.ComposePath) {
+    ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+    defer cancel()
+    cfg, _, err := readBitcoinLocalRPCConfig(ctx)
+    if err != nil {
+      writeJSON(w, http.StatusOK, resp)
+      return
+    }
+    info, rpcErr := fetchBitcoinInfo(ctx, cfg.Host, cfg.User, cfg.Pass)
+    if rpcErr != nil {
+      resp.RPCOk = false
+      writeJSON(w, http.StatusOK, resp)
+      return
+    }
+    resp.RPCOk = true
+    resp.Chain = info.Chain
+    resp.Blocks = info.Blocks
+    resp.Headers = info.Headers
+    resp.VerificationProgress = info.VerificationProgress
+    resp.InitialBlockDownload = info.InitialBlockDownload
+    if netInfo, netErr := fetchBitcoinNetworkInfo(ctx, cfg.Host, cfg.User, cfg.Pass); netErr == nil {
+      resp.Version = netInfo.Version
+      resp.Subversion = netInfo.Subversion
+    }
     writeJSON(w, http.StatusOK, resp)
     return
   }
@@ -694,4 +717,29 @@ func rpcAllowListContains(lines []string, value string) bool {
 
 func roundGB(value float64) float64 {
   return math.Round(value*100) / 100
+}
+
+func (s *Server) bitcoinLocalReady(ctx context.Context) (bool, string) {
+  cfg, _, err := readBitcoinLocalRPCConfig(ctx)
+  if err != nil {
+    msg := strings.ToLower(err.Error())
+    if strings.Contains(msg, "not installed") {
+      return false, "not_installed"
+    }
+    return false, "rpc_unavailable"
+  }
+  info, err := fetchBitcoinInfo(ctx, cfg.Host, cfg.User, cfg.Pass)
+  if err != nil {
+    return false, "rpc_unavailable"
+  }
+  if info.InitialBlockDownload {
+    return false, "syncing"
+  }
+  if info.VerificationProgress < 0.9999 {
+    return false, "syncing"
+  }
+  if info.Headers > 0 && info.Blocks < info.Headers {
+    return false, "syncing"
+  }
+  return true, "ready"
 }

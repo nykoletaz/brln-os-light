@@ -1,6 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getBitcoinSource, getLndConfig, getLndUpgradeStatus, getLogs, setBitcoinSource, startLndUpgrade, updateLndConfig, updateLndRawConfig } from '../api'
+import { getBitcoinLocalStatus, getBitcoinSource, getLndConfig, getLndUpgradeStatus, getLogs, setBitcoinSource, startLndUpgrade, updateLndConfig, updateLndRawConfig } from '../api'
+
+type BitcoinLocalStatus = {
+  installed?: boolean
+  status?: string
+  rpc_ok?: boolean
+  blocks?: number
+  headers?: number
+  verification_progress?: number
+  initial_block_download?: boolean
+}
 
 export default function LndConfig() {
   const { t } = useTranslation()
@@ -14,6 +24,7 @@ export default function LndConfig() {
   const [advanced, setAdvanced] = useState(false)
   const [status, setStatus] = useState('')
   const [bitcoinSource, setBitcoinSourceState] = useState<'remote' | 'local'>('remote')
+  const [bitcoinLocalStatus, setBitcoinLocalStatus] = useState<BitcoinLocalStatus | null>(null)
   const [sourceBusy, setSourceBusy] = useState(false)
   const [upgrade, setUpgrade] = useState<any>(null)
   const [upgradeMessage, setUpgradeMessage] = useState('')
@@ -25,6 +36,16 @@ export default function LndConfig() {
   const [upgradeError, setUpgradeError] = useState<string | null>(null)
   const [upgradeComplete, setUpgradeComplete] = useState(false)
   const [upgradeLocked, setUpgradeLocked] = useState(false)
+
+  const loadLocalStatus = () => {
+    getBitcoinLocalStatus()
+      .then((data: BitcoinLocalStatus) => {
+        setBitcoinLocalStatus(data)
+      })
+      .catch(() => {
+        setBitcoinLocalStatus(null)
+      })
+  }
 
   useEffect(() => {
     getLndConfig().then((data: any) => {
@@ -45,6 +66,12 @@ export default function LndConfig() {
       }
     }).catch(() => null)
     loadUpgradeStatus()
+  }, [])
+
+  useEffect(() => {
+    loadLocalStatus()
+    const timer = setInterval(loadLocalStatus, 10000)
+    return () => clearInterval(timer)
   }, [])
 
   useEffect(() => {
@@ -116,6 +143,22 @@ export default function LndConfig() {
     if (Number.isNaN(parsed.getTime())) return ''
     return parsed.toLocaleString()
   }
+
+  const localReady = useMemo(() => {
+    if (bitcoinLocalStatus?.rpc_ok !== true) return false
+    if (bitcoinLocalStatus?.initial_block_download !== false) return false
+    const progress = bitcoinLocalStatus?.verification_progress
+    if (typeof progress !== 'number' || progress < 0.9999) return false
+    const headers = bitcoinLocalStatus?.headers
+    const blocks = bitcoinLocalStatus?.blocks
+    if (typeof headers === 'number' && headers > 0) {
+      if (typeof blocks !== 'number' || blocks < headers) return false
+    }
+    return true
+  }, [bitcoinLocalStatus])
+
+  const localToggleBlocked = bitcoinSource === 'remote' && !localReady
+  const toggleDisabled = sourceBusy || localToggleBlocked
 
   const loadUpgradeStatus = async (force = false, silent = false) => {
     if (!force && upgradeChecking) return
@@ -218,7 +261,7 @@ export default function LndConfig() {
   }
 
   const handleToggleSource = async () => {
-    if (sourceBusy) return
+    if (sourceBusy || localToggleBlocked) return
     const next = bitcoinSource === 'remote' ? 'local' : 'remote'
     const targetLabel = next === 'local' ? t('common.local') : t('common.remote')
     setSourceBusy(true)
@@ -246,11 +289,12 @@ export default function LndConfig() {
           <div className="flex flex-col items-end gap-2">
             <span className="text-xs text-fog/60">{t('lndConfig.bitcoinSource')}</span>
             <button
-              className={`relative flex h-9 w-32 items-center rounded-full border border-white/10 bg-ink/60 px-2 transition ${sourceBusy ? 'opacity-70' : 'hover:border-white/30'}`}
+              className={`relative flex h-9 w-32 items-center rounded-full border border-white/10 bg-ink/60 px-2 transition ${toggleDisabled ? 'opacity-70 cursor-not-allowed' : 'hover:border-white/30'}`}
               onClick={handleToggleSource}
               type="button"
-              disabled={sourceBusy}
+              disabled={toggleDisabled}
               aria-label={t('lndConfig.toggleBitcoinSource')}
+              title={localToggleBlocked ? t('lndConfig.localBitcoinRequired') : undefined}
             >
               <span
                 className={`absolute top-1 h-7 w-14 rounded-full bg-glow shadow transition-all ${bitcoinSource === 'local' ? 'left-[68px]' : 'left-[6px]'}`}
@@ -258,6 +302,9 @@ export default function LndConfig() {
               <span className={`relative z-10 flex-1 text-center text-xs ${bitcoinSource === 'remote' ? 'text-ink' : 'text-fog/60'}`}>{t('common.remote')}</span>
               <span className={`relative z-10 flex-1 text-center text-xs ${bitcoinSource === 'local' ? 'text-ink' : 'text-fog/60'}`}>{t('common.local')}</span>
             </button>
+            {localToggleBlocked && (
+              <span className="text-xs text-brass">{t('lndConfig.localBitcoinRequired')}</span>
+            )}
           </div>
         </div>
         {status && <p className="text-sm text-brass mt-4">{status}</p>}

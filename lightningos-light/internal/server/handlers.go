@@ -439,6 +439,15 @@ func (s *Server) handleBitcoinSourcePost(w http.ResponseWriter, r *http.Request)
     writeError(w, http.StatusBadRequest, "source must be local or remote")
     return
   }
+  if source == "local" {
+    readyCtx, readyCancel := context.WithTimeout(r.Context(), 6*time.Second)
+    defer readyCancel()
+    ready, _ := s.bitcoinLocalReady(readyCtx)
+    if !ready {
+      writeError(w, http.StatusBadRequest, "local bitcoin is not fully synced")
+      return
+    }
+  }
 
   remoteUser, remotePass := readBitcoinSecrets()
   if remoteUser == "" || remotePass == "" {
@@ -621,11 +630,25 @@ func (s *Server) bitcoinLocalStatusActive(ctx context.Context) (bitcoinStatus, e
 func readBitcoinLocalRPCConfig(ctx context.Context) (bitcoinRPCConfig, bool, error) {
   paths := bitcoinCoreAppPaths()
   if !fileExists(paths.ComposePath) {
-    if cfg, ok := readBitcoinConfRPCConfig(paths.ConfigPath); ok {
+    configCandidates := []string{
+      paths.ConfigPath,
+      "/etc/bitcoin/bitcoin.conf",
+      "/var/lib/bitcoind/bitcoin.conf",
+      "/home/bitcoin/.bitcoin/bitcoin.conf",
+      "/root/.bitcoin/bitcoin.conf",
+    }
+    for _, candidate := range configCandidates {
+      if cfg, ok := readBitcoinConfRPCConfig(candidate); ok {
+        return cfg, false, nil
+      }
+    }
+    if cfg, ok := readBitcoinTaggedRPCConfigFromLNDConf("local"); ok {
       return cfg, false, nil
     }
     if cfg, ok := readBitcoindRPCConfigFromLNDConf(); ok {
-      return cfg, false, nil
+      if isLocalRPCHost(cfg.Host) {
+        return cfg, false, nil
+      }
     }
     return bitcoinRPCConfig{}, false, errors.New("bitcoin core is not installed")
   }
@@ -734,6 +757,82 @@ func readBitcoindRPCConfigFromLNDConf() (bitcoinRPCConfig, bool) {
     key := strings.TrimSpace(parts[0])
     val := strings.TrimSpace(parts[1])
 
+    switch key {
+    case "bitcoind.rpchost":
+      if val != "" {
+        host := strings.TrimPrefix(val, "tcp://")
+        if !strings.Contains(host, ":") {
+          host = host + ":8332"
+        }
+        cfg.Host = host
+      }
+    case "bitcoind.rpcuser":
+      cfg.User = val
+    case "bitcoind.rpcpass":
+      cfg.Pass = val
+    case "bitcoind.zmqpubrawblock":
+      cfg.ZMQBlock = normalizeLocalZMQ(val, cfg.ZMQBlock)
+    case "bitcoind.zmqpubrawtx":
+      cfg.ZMQTx = normalizeLocalZMQ(val, cfg.ZMQTx)
+    }
+  }
+
+  if strings.TrimSpace(cfg.Host) == "" {
+    return bitcoinRPCConfig{}, false
+  }
+  if strings.TrimSpace(cfg.User) == "" || strings.TrimSpace(cfg.Pass) == "" {
+    return bitcoinRPCConfig{}, false
+  }
+  return cfg, true
+}
+
+func readBitcoinTaggedRPCConfigFromLNDConf(tag string) (bitcoinRPCConfig, bool) {
+  raw, err := os.ReadFile(lndConfPath)
+  if err != nil {
+    return bitcoinRPCConfig{}, false
+  }
+  lines := strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
+
+  inBitcoind := false
+  inTarget := false
+  cfg := bitcoinRPCConfig{
+    Host: "127.0.0.1:8332",
+    ZMQBlock: "tcp://127.0.0.1:28332",
+    ZMQTx: "tcp://127.0.0.1:28333",
+  }
+
+  for _, line := range lines {
+    trimmed := strings.TrimSpace(line)
+    if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+      inBitcoind = strings.EqualFold(trimmed, "[Bitcoind]")
+      inTarget = false
+      continue
+    }
+    if !inBitcoind {
+      continue
+    }
+    if trimmed == "" {
+      continue
+    }
+    marker := strings.TrimSpace(strings.TrimLeft(trimmed, "#;"))
+    if strings.EqualFold(marker, "LightningOS Bitcoin Remote") {
+      inTarget = strings.EqualFold(tag, "remote")
+      continue
+    }
+    if strings.EqualFold(marker, "LightningOS Bitcoin Local") {
+      inTarget = strings.EqualFold(tag, "local")
+      continue
+    }
+    if !inTarget {
+      continue
+    }
+    clean := strings.TrimSpace(strings.TrimLeft(trimmed, "#;"))
+    parts := strings.SplitN(clean, "=", 2)
+    if len(parts) != 2 {
+      continue
+    }
+    key := strings.TrimSpace(parts[0])
+    val := strings.TrimSpace(parts[1])
     switch key {
     case "bitcoind.rpchost":
       if val != "" {

@@ -650,6 +650,7 @@
     "savingAdvanced": "Salvando config avançada...",
     "showAdvanced": "Mostrar avançado",
     "subtitle": "Edite valores suportados em /data/lnd/lnd.conf.",
+    "localBitcoinRequired": "Bitcoin Local precisa estar totalmente sincronizado para trocar.",
     "switchFailed": "Falha ao trocar a fonte do Bitcoin.",
     "switchingBitcoin": "Trocando para Bitcoin {{target}}...",
     "title": "Configuração do LND",
