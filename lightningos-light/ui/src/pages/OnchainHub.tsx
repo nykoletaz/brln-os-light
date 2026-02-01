@@ -421,55 +421,55 @@ export default function OnchainHub() {
           </div>
 
           <div className="onchain-table">
-            <div className="onchain-table-scroll">
-              <div className="onchain-table-head">
-                <span>{t('onchainHub.amount')}</span>
-                <span>{t('onchainHub.confirmations')}</span>
-                <span>{t('onchainHub.address')}</span>
-                <span>{t('onchainHub.outpoint')}</span>
-              </div>
-              {utxoLoading && <p className="text-sm text-fog/60">{t('onchainHub.loadingUtxos')}</p>}
-              {utxoError && <p className="text-sm text-ember">{utxoError}</p>}
-              {!utxoLoading && !utxoError && utxoFiltered.length === 0 && (
-                <p className="text-sm text-fog/60">{t('onchainHub.emptyUtxos')}</p>
-              )}
-              <div className="onchain-table-body">
-                {utxoFiltered.map((item) => (
-                  <div key={`${item.txid}-${item.vout}`} className={clsx('onchain-row', 'py-3')}>
-                    <div>
-                      <p className="text-sm text-fog">{formatSats(item.amount_sat)} sats</p>
-                      <p className="text-xs text-fog/50">{item.address_type || '-'}</p>
-                    </div>
-                    <div>
-                      <span className={clsx('onchain-badge', item.confirmations > 0 ? 'onchain-badge--ok' : 'onchain-badge--warn')}>
-                        {item.confirmations > 0 ? item.confirmations.toLocaleString(locale) : t('onchainHub.pending')}
-                      </span>
-                    </div>
-                    <div className="text-xs text-fog/70 break-all">{item.address || '-'}</div>
-                    <div className="flex items-center gap-2 text-xs text-fog/70 break-all">
-                      {item.txid ? (
-                        <a
-                          className="onchain-link"
-                          href={`${explorerBase}/tx/${item.txid}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={t('onchainHub.viewExternal')}
-                        >
-                          {item.outpoint || item.txid}
-                        </a>
-                      ) : (
-                        <button
-                          type="button"
-                          className="onchain-link"
-                          onClick={() => copyToClipboard(item.outpoint)}
-                        >
-                          {item.outpoint || '-'}
-                        </button>
-                      )}
-                    </div>
+            <div className="onchain-table-head">
+              <span>{t('onchainHub.amount')}</span>
+              <span>{t('onchainHub.confirmations')}</span>
+              <span>{t('onchainHub.address')}</span>
+              <span>{t('onchainHub.outpoint')}</span>
+            </div>
+            {utxoLoading && <p className="text-sm text-fog/60">{t('onchainHub.loadingUtxos')}</p>}
+            {utxoError && <p className="text-sm text-ember">{utxoError}</p>}
+            {!utxoLoading && !utxoError && utxoFiltered.length === 0 && (
+              <p className="text-sm text-fog/60">{t('onchainHub.emptyUtxos')}</p>
+            )}
+            <div className="onchain-table-body">
+              {utxoFiltered.map((item) => (
+                <div key={`${item.txid}-${item.vout}`} className={clsx('onchain-row', 'py-3')}>
+                  <div className="onchain-cell" data-label={t('onchainHub.amount')}>
+                    <p className="text-sm text-fog">{formatSats(item.amount_sat)} sats</p>
+                    <p className="text-xs text-fog/50">{item.address_type || '-'}</p>
                   </div>
-                ))}
-              </div>
+                  <div className="onchain-cell" data-label={t('onchainHub.confirmations')}>
+                    <span className={clsx('onchain-badge', item.confirmations > 0 ? 'onchain-badge--ok' : 'onchain-badge--warn')}>
+                      {item.confirmations > 0 ? item.confirmations.toLocaleString(locale) : t('onchainHub.pending')}
+                    </span>
+                  </div>
+                  <div className="onchain-cell text-xs text-fog/70 break-all" data-label={t('onchainHub.address')}>
+                    {item.address || '-'}
+                  </div>
+                  <div className="onchain-cell text-xs text-fog/70 break-all" data-label={t('onchainHub.outpoint')}>
+                    {item.txid ? (
+                      <a
+                        className="onchain-link"
+                        href={`${explorerBase}/tx/${item.txid}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={t('onchainHub.viewExternal')}
+                      >
+                        {item.outpoint || item.txid}
+                      </a>
+                    ) : (
+                      <button
+                        type="button"
+                        className="onchain-link"
+                        onClick={() => copyToClipboard(item.outpoint)}
+                      >
+                        {item.outpoint || '-'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -544,65 +544,69 @@ export default function OnchainHub() {
           </div>
 
           <div className="onchain-table">
-            <div className="onchain-table-scroll">
-              <div className="onchain-table-head onchain-table-head--tx">
-                <span>{t('onchainHub.type')}</span>
-                <span>{t('onchainHub.amount')}</span>
-                <span>{t('onchainHub.fee')}</span>
-                <span>{t('onchainHub.confirmations')}</span>
-                <span>{t('onchainHub.address')}</span>
-                <span>{t('onchainHub.txid')}</span>
-              </div>
-              {txLoading && <p className="text-sm text-fog/60">{t('onchainHub.loadingTransactions')}</p>}
-              {txError && <p className="text-sm text-ember">{txError}</p>}
-              {!txLoading && !txError && txFiltered.length === 0 && (
-                <p className="text-sm text-fog/60">{t('onchainHub.emptyTransactions')}</p>
-              )}
-              <div className="onchain-table-body">
-                {txFiltered.map((item) => (
-                  <div key={item.txid} className={clsx('onchain-row onchain-row--tx', 'py-3')}>
-                    <div className="flex items-center gap-2">
+            <div className="onchain-table-head onchain-table-head--tx">
+              <span>{t('onchainHub.type')}</span>
+              <span>{t('onchainHub.amount')}</span>
+              <span>{t('onchainHub.fee')}</span>
+              <span>{t('onchainHub.confirmations')}</span>
+              <span>{t('onchainHub.address')}</span>
+              <span>{t('onchainHub.txid')}</span>
+            </div>
+            {txLoading && <p className="text-sm text-fog/60">{t('onchainHub.loadingTransactions')}</p>}
+            {txError && <p className="text-sm text-ember">{txError}</p>}
+            {!txLoading && !txError && txFiltered.length === 0 && (
+              <p className="text-sm text-fog/60">{t('onchainHub.emptyTransactions')}</p>
+            )}
+            <div className="onchain-table-body">
+              {txFiltered.map((item) => (
+                <div key={item.txid} className={clsx('onchain-row onchain-row--tx', 'py-3')}>
+                  <div className="onchain-cell" data-label={t('onchainHub.type')}>
+                    <div className="onchain-cell-inline">
                       <span className={clsx('onchain-dot', item.direction === 'in' ? 'onchain-dot--in' : 'onchain-dot--out')} />
                       <div>
                         <p className="text-sm text-fog">{item.direction === 'in' ? t('onchainHub.inbound') : t('onchainHub.outbound')}</p>
                         <p className="text-xs text-fog/50">{formatTimestamp(item.timestamp)}</p>
                       </div>
                     </div>
-                    <div className="text-sm text-fog">{formatSats(item.amount_sat)} sats</div>
-                    <div className="text-xs text-fog/60">{item.fee_sat ? `${formatSats(item.fee_sat)} sats` : '-'}</div>
-                    <div>
-                      <span className={clsx('onchain-badge', item.confirmations > 0 ? 'onchain-badge--ok' : 'onchain-badge--warn')}>
-                        {item.confirmations > 0 ? item.confirmations.toLocaleString(locale) : t('onchainHub.pending')}
-                      </span>
-                    </div>
-                    <div className="onchain-addresses text-xs text-fog/70">
-                      {item.addresses && item.addresses.length ? (
-                        <>
-                          {item.addresses.slice(0, 3).map((addr) => (
-                            <span key={addr}>{addr}</span>
-                          ))}
-                          {item.addresses.length > 3 && (
-                            <span className="text-fog/50">+{item.addresses.length - 3} {t('onchainHub.more')}</span>
-                          )}
-                        </>
-                      ) : (
-                        <span>-</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-fog/70 break-all">
-                      <a
-                        className="onchain-link"
-                        href={`${explorerBase}/tx/${item.txid}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={t('onchainHub.viewExternal')}
-                      >
-                        {item.txid}
-                      </a>
-                    </div>
                   </div>
-                ))}
-              </div>
+                  <div className="onchain-cell text-sm text-fog" data-label={t('onchainHub.amount')}>
+                    {formatSats(item.amount_sat)} sats
+                  </div>
+                  <div className="onchain-cell text-xs text-fog/60" data-label={t('onchainHub.fee')}>
+                    {item.fee_sat ? `${formatSats(item.fee_sat)} sats` : '-'}
+                  </div>
+                  <div className="onchain-cell" data-label={t('onchainHub.confirmations')}>
+                    <span className={clsx('onchain-badge', item.confirmations > 0 ? 'onchain-badge--ok' : 'onchain-badge--warn')}>
+                      {item.confirmations > 0 ? item.confirmations.toLocaleString(locale) : t('onchainHub.pending')}
+                    </span>
+                  </div>
+                  <div className="onchain-cell onchain-addresses text-xs text-fog/70" data-label={t('onchainHub.address')}>
+                    {item.addresses && item.addresses.length ? (
+                      <>
+                        {item.addresses.slice(0, 3).map((addr) => (
+                          <span key={addr}>{addr}</span>
+                        ))}
+                        {item.addresses.length > 3 && (
+                          <span className="text-fog/50">+{item.addresses.length - 3} {t('onchainHub.more')}</span>
+                        )}
+                      </>
+                    ) : (
+                      <span>-</span>
+                    )}
+                  </div>
+                  <div className="onchain-cell text-xs text-fog/70 break-all" data-label={t('onchainHub.txid')}>
+                    <a
+                      className="onchain-link"
+                      href={`${explorerBase}/tx/${item.txid}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={t('onchainHub.viewExternal')}
+                    >
+                      {item.txid}
+                    </a>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
