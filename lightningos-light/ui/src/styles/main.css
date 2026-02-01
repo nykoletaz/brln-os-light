@@ -469,6 +469,14 @@ html[data-theme="light"] .hover\\:text-rose-200:hover {
   gap: 12px;
 }
 
+.onchain-table-scroll {
+  display: grid;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
 .onchain-table-head {
   display: grid;
   grid-template-columns: 1.1fr 0.6fr 1.4fr 1.4fr;
@@ -489,7 +497,8 @@ html[data-theme="light"] .hover\\:text-rose-200:hover {
   display: grid;
   gap: 10px;
   max-height: 520px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: visible;
   padding-right: 4px;
 }
 
@@ -546,4 +555,47 @@ html[data-theme="light"] .hover\\:text-rose-200:hover {
 
 .onchain-dot--out {
   background: rgb(var(--color-ember) / 0.7);
+}
+
+@media (max-width: 640px) {
+  .section-card {
+    padding: 1.25rem;
+  }
+
+  .onchain-kpi p {
+    font-size: 0.6rem;
+  }
+
+  .onchain-kpi h3 {
+    font-size: 1rem;
+  }
+
+  .onchain-pill {
+    padding: 0.4rem 0.6rem;
+  }
+
+  .onchain-table-head {
+    font-size: 10px;
+    gap: 8px;
+    min-width: 620px;
+  }
+
+  .onchain-table-head--tx {
+    min-width: 860px;
+  }
+
+  .onchain-row {
+    gap: 8px;
+    min-width: 620px;
+    padding: 10px 12px;
+  }
+
+  .onchain-row--tx {
+    min-width: 860px;
+  }
+
+  .onchain-badge {
+    font-size: 9px;
+    padding: 2px 6px;
+  }
 }

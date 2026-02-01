@@ -529,20 +529,20 @@ export default function LightningOps() {
             <h2 className="text-2xl font-semibold">{t('lightningOps.title')}</h2>
             <p className="text-fog/60">{t('lightningOps.subtitle')}</p>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="rounded-full border border-white/10 bg-ink/60 px-4 py-2 text-xs text-fog/70">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="rounded-full border border-white/10 bg-ink/60 px-3 py-1.5 text-[11px] text-fog/70 sm:text-xs sm:px-4 sm:py-2">
               {t('lightningOps.active')}: <span className="text-fog">{activeCount}</span>
             </div>
-            <div className="rounded-full border border-white/10 bg-ink/60 px-4 py-2 text-xs text-fog/70">
+            <div className="rounded-full border border-white/10 bg-ink/60 px-3 py-1.5 text-[11px] text-fog/70 sm:text-xs sm:px-4 sm:py-2">
               {t('lightningOps.inactive')}: <span className="text-fog">{inactiveCount}</span>
             </div>
-            <div className="rounded-full border border-glow/30 bg-glow/10 px-4 py-2 text-xs text-glow">
+            <div className="rounded-full border border-glow/30 bg-glow/10 px-3 py-1.5 text-[11px] text-glow sm:text-xs sm:px-4 sm:py-2">
               {t('lightningOps.opening')}: <span className="text-fog">{pendingOpenCount}</span>
             </div>
-            <div className="rounded-full border border-ember/30 bg-ember/10 px-4 py-2 text-xs text-ember">
+            <div className="rounded-full border border-ember/30 bg-ember/10 px-3 py-1.5 text-[11px] text-ember sm:text-xs sm:px-4 sm:py-2">
               {t('lightningOps.closing')}: <span className="text-fog">{pendingCloseCount}</span>
             </div>
-            <button className="btn-secondary text-xs px-3 py-2" onClick={load}>
+            <button className="btn-secondary text-[11px] px-3 py-2 sm:text-xs" onClick={load}>
               {t('common.refresh')}
             </button>
           </div>
@@ -687,11 +687,11 @@ export default function LightningOps() {
             <option value="remote">{t('lightningOps.sortByRemote')}</option>
             <option value="alias">{t('lightningOps.sortByPeer')}</option>
             </select>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button className="btn-secondary text-xs px-3 py-2" onClick={() => setSortDir(sortDir === 'desc' ? 'asc' : 'desc')}>
               {sortDir === 'desc' ? t('lightningOps.sortDesc') : t('lightningOps.sortAsc')}
               </button>
-              <label className="flex items-center gap-2 text-xs text-fog/70">
+              <label className="flex items-center gap-2 text-[11px] text-fog/70 sm:text-xs">
                 <input type="checkbox" checked={showPrivate} onChange={(e) => setShowPrivate(e.target.checked)} />
               {t('lightningOps.showPrivate')}
               </label>
