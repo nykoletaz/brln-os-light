@@ -47,7 +47,7 @@ const (
   statusCacheErr = 45 * time.Second
   statusCacheTimeout = 60 * time.Second
   maxGRPCMsgSize = 32 * 1024 * 1024
-  defaultConnectPeerTimeoutSec = 8
+  defaultConnectPeerTimeoutSec = uint64(8)
 )
 
 type macaroonCredential struct {
@@ -1202,7 +1202,7 @@ func (c *Client) ConnectPeer(ctx context.Context, pubkey string, host string, pe
   return c.ConnectPeerWithTimeout(ctx, pubkey, host, perm, defaultConnectPeerTimeoutSec)
 }
 
-func (c *Client) ConnectPeerWithTimeout(ctx context.Context, pubkey string, host string, perm bool, timeoutSec uint32) error {
+func (c *Client) ConnectPeerWithTimeout(ctx context.Context, pubkey string, host string, perm bool, timeoutSec uint64) error {
   conn, err := c.dial(ctx, true)
   if err != nil {
     return err

@@ -1267,7 +1267,7 @@ func (s *Server) handleLNConnectPeer(w http.ResponseWriter, r *http.Request) {
   ctx, cancel := context.WithTimeout(r.Context(), lndConnectTimeout)
   defer cancel()
 
-  if err := s.lnd.ConnectPeerWithTimeout(ctx, pubkey, host, perm, uint32(lndConnectTimeout/time.Second)); err != nil {
+  if err := s.lnd.ConnectPeerWithTimeout(ctx, pubkey, host, perm, uint64(lndConnectTimeout/time.Second)); err != nil {
     writeError(w, http.StatusInternalServerError, peerConnectErrorMessage(err))
     return
   }
@@ -1570,7 +1570,7 @@ func (s *Server) handleLNOpenChannel(w http.ResponseWriter, r *http.Request) {
   }
 
   connectCtx, connectCancel := context.WithTimeout(r.Context(), lndConnectTimeout)
-  if err := s.lnd.ConnectPeerWithTimeout(connectCtx, pubkey, host, false, uint32(lndConnectTimeout/time.Second)); err != nil && !isAlreadyConnected(err) {
+  if err := s.lnd.ConnectPeerWithTimeout(connectCtx, pubkey, host, false, uint64(lndConnectTimeout/time.Second)); err != nil && !isAlreadyConnected(err) {
     connectCancel()
     writeError(w, http.StatusInternalServerError, lndRPCErrorMessage(err))
     return
