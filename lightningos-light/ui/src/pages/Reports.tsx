@@ -75,6 +75,7 @@ const rangeOptions: RangeKey[] = ['d-1', 'month', '3m', '6m', '12m', 'all']
 
 const COLORS = {
   net: '#34d399',
+  netNegative: '#f87171',
   revenue: '#38bdf8',
   cost: '#f59e0b',
   onchain: '#22c55e',
@@ -269,7 +270,11 @@ export default function Reports() {
     return [
       { name: t('reports.revenue'), value: live.forward_fee_revenue_sats, color: COLORS.revenue },
       { name: t('reports.cost'), value: live.rebalance_fee_cost_sats, color: COLORS.cost },
-      { name: t('reports.net'), value: live.net_routing_profit_sats, color: COLORS.net }
+      {
+        name: t('reports.net'),
+        value: live.net_routing_profit_sats,
+        color: live.net_routing_profit_sats < 0 ? COLORS.netNegative : COLORS.net
+      }
     ]
   }, [live, t])
 
