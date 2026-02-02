@@ -219,6 +219,18 @@ compare_versions() {
   echo 0
 }
 
+is_rc_version() {
+  local version="$1"
+  version="${version#v}"
+  if [[ -z "$version" ]]; then
+    return 1
+  fi
+  if [[ "$version" =~ (^|[.-])rc[0-9]+ ]]; then
+    return 0
+  fi
+  return 1
+}
+
 strip_crlf() {
   local target="$1"
   if [[ -f "$target" ]]; then
@@ -1128,8 +1140,19 @@ install_lnd() {
             print_warn "Skipping LND upgrade."
             return
           fi
+          if is_rc_version "$LND_VERSION"; then
+            print_warn "Target LND version v${LND_VERSION} is a release candidate (RC)."
+            read -r -p "Proceed with RC upgrade? [y/N]: " reply
+            if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+              print_warn "Skipping LND upgrade."
+              return
+            fi
+          fi
         else
           print_warn "Non-interactive mode; proceeding with LND upgrade to v${LND_VERSION}."
+          if is_rc_version "$LND_VERSION"; then
+            print_warn "Target LND version v${LND_VERSION} is a release candidate (RC). Proceeding without extra confirmation."
+          fi
         fi
       else
         print_ok "LND already installed (v${current})"

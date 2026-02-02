@@ -36,6 +36,7 @@ export default function LndConfig() {
   const [upgradeError, setUpgradeError] = useState<string | null>(null)
   const [upgradeComplete, setUpgradeComplete] = useState(false)
   const [upgradeLocked, setUpgradeLocked] = useState(false)
+  const [upgradeRcConfirm, setUpgradeRcConfirm] = useState(false)
 
   const loadLocalStatus = () => {
     getBitcoinLocalStatus()
@@ -137,6 +138,11 @@ export default function LndConfig() {
     return `v${trimmed}`
   }
 
+  const isRcVersion = (value?: string) => {
+    if (!value) return false
+    return /(^|[.-])rc[0-9]+/i.test(value)
+  }
+
   const formatCheckedAt = (value?: string) => {
     if (!value) return ''
     const parsed = new Date(value)
@@ -190,15 +196,21 @@ export default function LndConfig() {
     setUpgradeError(null)
     setUpgradeComplete(false)
     setUpgradeLocked(Boolean(upgrade?.running))
+    setUpgradeRcConfirm(false)
   }
 
   const closeUpgradeModal = () => {
     if (upgradeBusy || (upgradeLocked && !upgradeError && !upgradeComplete)) return
     setUpgradeModalOpen(false)
+    setUpgradeRcConfirm(false)
   }
 
   const startUpgrade = async () => {
     if (!upgrade?.latest_version || upgradeBusy) return
+    if (isRcVersion(upgrade.latest_version) && !upgradeRcConfirm) {
+      setUpgradeRcConfirm(true)
+      return
+    }
     setUpgradeBusy(true)
     setUpgradeError(null)
     setUpgradeComplete(false)
@@ -481,6 +493,19 @@ export default function LndConfig() {
               {t('lndUpgrade.confirmBody', { version: formatVersion(upgrade?.latest_version) })}
             </p>
             <p className="mt-3 text-xs text-rose-200">{t('lndUpgrade.confirmWarning')}</p>
+            {isRcVersion(upgrade?.latest_version) && (
+              <>
+                <p className="mt-3 text-xs text-rose-200">
+                  {t('lndUpgrade.rcWarning', { version: formatVersion(upgrade?.latest_version) })}
+                </p>
+                {!upgradeRcConfirm && (
+                  <p className="mt-2 text-xs text-amber-200">{t('lndUpgrade.rcConfirmHint')}</p>
+                )}
+                {upgradeRcConfirm && (
+                  <p className="mt-2 text-xs text-amber-200">{t('lndUpgrade.rcConfirmReady')}</p>
+                )}
+              </>
+            )}
             {upgradeMessage && <p className="mt-3 text-sm text-brass">{upgradeMessage}</p>}
             {upgradeError && <p className="mt-2 text-sm text-rose-200">{upgradeError}</p>}
             {upgradeComplete && !upgradeError && (
@@ -515,7 +540,11 @@ export default function LndConfig() {
                 type="button"
                 disabled={!upgrade?.update_available || upgrade?.running}
               >
-                {upgradeBusy ? t('lndUpgrade.upgrading') : t('lndUpgrade.confirmUpgrade')}
+                {upgradeBusy
+                  ? t('lndUpgrade.upgrading')
+                  : (isRcVersion(upgrade?.latest_version) && upgradeRcConfirm
+                    ? t('lndUpgrade.rcConfirmUpgrade')
+                    : t('lndUpgrade.confirmUpgrade'))}
               </button>
             </div>
           </div>
