@@ -1782,6 +1782,35 @@ func (s *Server) handleLNUpdateFees(w http.ResponseWriter, r *http.Request) {
   writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (s *Server) handleLNUpdateChanStatus(w http.ResponseWriter, r *http.Request) {
+  var req struct {
+    ChannelPoint string `json:"channel_point"`
+    Enabled *bool `json:"enabled"`
+  }
+  if err := readJSON(r, &req); err != nil {
+    writeError(w, http.StatusBadRequest, "invalid json")
+    return
+  }
+  if strings.TrimSpace(req.ChannelPoint) == "" {
+    writeError(w, http.StatusBadRequest, "channel_point required")
+    return
+  }
+  if req.Enabled == nil {
+    writeError(w, http.StatusBadRequest, "enabled required")
+    return
+  }
+
+  ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
+  defer cancel()
+
+  if err := s.lnd.UpdateChanStatus(ctx, req.ChannelPoint, *req.Enabled); err != nil {
+    writeError(w, http.StatusInternalServerError, lndDetailedErrorMessage(err))
+    return
+  }
+
+  writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func (s *Server) handleLNChannelFees(w http.ResponseWriter, r *http.Request) {
   channelPoint := strings.TrimSpace(r.URL.Query().Get("channel_point"))
   if channelPoint == "" {

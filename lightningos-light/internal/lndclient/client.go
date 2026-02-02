@@ -14,10 +14,11 @@ import (
   "strconv"
   "strings"
   "sync"
-  "time"
+	"time"
 
-  "lightningos-light/internal/config"
-  "lightningos-light/lnrpc"
+	"lightningos-light/internal/config"
+	"lightningos-light/lnrpc"
+	"lightningos-light/lnrpc/routerrpc"
 
   "google.golang.org/grpc"
   "google.golang.org/grpc/credentials"
@@ -1007,6 +1008,7 @@ func (c *Client) ListChannels(ctx context.Context) ([]ChannelInfo, error) {
       RemotePubkey: ch.RemotePubkey,
       PeerAlias: ch.PeerAlias,
       Active: ch.Active,
+      ChanStatusFlags: ch.ChanStatusFlags,
       Private: ch.Private,
       CapacitySat: ch.Capacity,
       LocalBalanceSat: ch.LocalBalance,
@@ -1343,6 +1345,31 @@ func (c *Client) UpdateChannelFees(ctx context.Context, channelPoint string, app
   return err
 }
 
+func (c *Client) UpdateChanStatus(ctx context.Context, channelPoint string, enable bool) error {
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return err
+  }
+  defer conn.Close()
+
+  cp, err := parseChannelPoint(channelPoint)
+  if err != nil {
+    return err
+  }
+
+  action := routerrpc.ChanStatusAction_ENABLE
+  if !enable {
+    action = routerrpc.ChanStatusAction_DISABLE
+  }
+
+  client := routerrpc.NewRouterClient(conn)
+  _, err = client.UpdateChanStatus(ctx, &routerrpc.UpdateChanStatusRequest{
+    ChanPoint: cp,
+    Action: action,
+  })
+  return err
+}
+
 func isWalletLocked(err error) bool {
   msg := strings.ToLower(err.Error())
   return strings.Contains(msg, "wallet locked") || strings.Contains(msg, "unlock")
@@ -1460,6 +1487,7 @@ type ChannelInfo struct {
   RemotePubkey string `json:"remote_pubkey"`
   PeerAlias string `json:"peer_alias"`
   Active bool `json:"active"`
+  ChanStatusFlags string `json:"chan_status_flags,omitempty"`
   Private bool `json:"private"`
   CapacitySat int64 `json:"capacity_sat"`
   LocalBalanceSat int64 `json:"local_balance_sat"`
