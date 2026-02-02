@@ -9,6 +9,7 @@ type Channel = {
   peer_alias: string
   active: boolean
   chan_status_flags?: string
+  local_disabled?: boolean
   private: boolean
   capacity_sat: number
   local_balance_sat: number
@@ -542,7 +543,7 @@ export default function LightningOps() {
   const handleToggleChanStatus = async (channel: Channel) => {
     if (!channel.channel_point || chanStatusBusy) return
     if (!channel.active) return
-    const enable = isLocalChanDisabled(channel.chan_status_flags)
+    const enable = channel.local_disabled ?? isLocalChanDisabled(channel.chan_status_flags)
     setChanStatusBusy(channel.channel_point)
     setChanStatusMessage(enable ? t('lightningOps.channelEnabling') : t('lightningOps.channelDisabling'))
     try {
@@ -832,7 +833,7 @@ export default function LightningOps() {
           <div className="max-h-[520px] overflow-y-auto pr-2">
             <div className="grid gap-3">
               {filteredChannels.map((ch) => {
-                const localDisabled = isLocalChanDisabled(ch.chan_status_flags)
+                const localDisabled = ch.local_disabled ?? isLocalChanDisabled(ch.chan_status_flags)
                 const statusBusy = chanStatusBusy === ch.channel_point
                 const showToggle = ch.active
                 const cardClass = localDisabled && ch.active

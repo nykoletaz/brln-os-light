@@ -264,7 +264,7 @@ func (c *ChanStatusHealer) tick() {
     if !ch.Active {
       continue
     }
-    if !isLocalChanDisabled(ch.ChanStatusFlags) {
+    if !isChanLocallyDisabled(ch) {
       continue
     }
     if strings.TrimSpace(ch.ChannelPoint) == "" {
@@ -321,6 +321,13 @@ func (c *ChanStatusHealer) recordSuccess(updated int) {
   if c.logger != nil && updated > 0 {
     c.logger.Printf("chan-heal: enabled %d channel(s)", updated)
   }
+}
+
+func isChanLocallyDisabled(ch lndclient.ChannelInfo) bool {
+  if ch.LocalDisabled {
+    return true
+  }
+  return isLocalChanDisabled(ch.ChanStatusFlags)
 }
 
 func isLocalChanDisabled(flags string) bool {

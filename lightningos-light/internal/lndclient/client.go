@@ -980,6 +980,7 @@ func (c *Client) ListChannels(ctx context.Context) ([]ChannelInfo, error) {
     var baseFeeMsat *int64
     var feeRatePpm *int64
     var inboundFeeRatePpm *int64
+    localDisabled := isLocalChanDisabledFlags(ch.ChanStatusFlags)
 
     if !ch.Private {
       if edge, err := client.GetChanInfo(ctx, &lnrpc.ChanInfoRequest{ChanId: ch.ChanId}); err == nil {
@@ -998,6 +999,9 @@ func (c *Client) ListChannels(ctx context.Context) ([]ChannelInfo, error) {
           baseFeeMsat = &base
           feeRatePpm = &rate
           inboundFeeRatePpm = &inbound
+          if policy.Disabled {
+            localDisabled = true
+          }
         }
       }
     }
@@ -1009,6 +1013,7 @@ func (c *Client) ListChannels(ctx context.Context) ([]ChannelInfo, error) {
       PeerAlias: ch.PeerAlias,
       Active: ch.Active,
       ChanStatusFlags: ch.ChanStatusFlags,
+      LocalDisabled: localDisabled,
       Private: ch.Private,
       CapacitySat: ch.Capacity,
       LocalBalanceSat: ch.LocalBalance,
@@ -1383,6 +1388,17 @@ func isTimeoutError(err error) bool {
   return strings.Contains(msg, "deadline exceeded") || strings.Contains(msg, "context deadline exceeded")
 }
 
+func isLocalChanDisabledFlags(flags string) bool {
+  trimmed := strings.TrimSpace(flags)
+  if trimmed == "" {
+    return false
+  }
+  normalized := strings.ToLower(trimmed)
+  return (strings.Contains(normalized, "local") && strings.Contains(normalized, "disabled")) ||
+    strings.Contains(normalized, "localchandisabled") ||
+    strings.Contains(normalized, "local_chan_disabled")
+}
+
 func channelPointString(cp *lnrpc.ChannelPoint) string {
   if cp == nil {
     return ""
@@ -1488,6 +1504,7 @@ type ChannelInfo struct {
   PeerAlias string `json:"peer_alias"`
   Active bool `json:"active"`
   ChanStatusFlags string `json:"chan_status_flags,omitempty"`
+  LocalDisabled bool `json:"local_disabled,omitempty"`
   Private bool `json:"private"`
   CapacitySat int64 `json:"capacity_sat"`
   LocalBalanceSat int64 `json:"local_balance_sat"`
