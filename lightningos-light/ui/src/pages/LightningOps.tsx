@@ -166,7 +166,9 @@ export default function LightningOps() {
   const isLocalChanDisabled = (flags?: string) => {
     if (!flags) return false
     const normalized = flags.toLowerCase()
-    return normalized.includes('localchandisabled') || normalized.includes('local_chan_disabled')
+    return (normalized.includes('local') && normalized.includes('disabled')) ||
+      normalized.includes('localchandisabled') ||
+      normalized.includes('local_chan_disabled')
   }
 
   const ambossTone = (): 'ok' | 'warn' | 'muted' => {
@@ -539,6 +541,7 @@ export default function LightningOps() {
 
   const handleToggleChanStatus = async (channel: Channel) => {
     if (!channel.channel_point || chanStatusBusy) return
+    if (!channel.active) return
     const enable = isLocalChanDisabled(channel.chan_status_flags)
     setChanStatusBusy(channel.channel_point)
     setChanStatusMessage(enable ? t('lightningOps.channelEnabling') : t('lightningOps.channelDisabling'))
@@ -831,8 +834,12 @@ export default function LightningOps() {
               {filteredChannels.map((ch) => {
                 const localDisabled = isLocalChanDisabled(ch.chan_status_flags)
                 const statusBusy = chanStatusBusy === ch.channel_point
+                const showToggle = ch.active
+                const cardClass = localDisabled && ch.active
+                  ? 'rounded-2xl border border-ember/40 bg-ember/10 p-4'
+                  : 'rounded-2xl border border-white/10 bg-ink/60 p-4'
                 return (
-                  <div key={ch.channel_point} className="rounded-2xl border border-white/10 bg-ink/60 p-4">
+                  <div key={ch.channel_point} className={cardClass}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         {ch.remote_pubkey ? (
@@ -855,14 +862,16 @@ export default function LightningOps() {
                         <span className={`rounded-full px-3 py-1 text-xs ${ch.active ? 'bg-glow/20 text-glow' : 'bg-ember/20 text-ember'}`}>
                           {ch.active ? t('common.active') : t('common.inactive')}
                         </span>
-                        <button
-                          className={`btn-secondary text-xs px-3 py-1 ${statusBusy ? 'opacity-60 pointer-events-none' : ''}`}
-                          type="button"
-                          onClick={() => handleToggleChanStatus(ch)}
-                          disabled={statusBusy}
-                        >
-                          {localDisabled ? t('lightningOps.enableChannel') : t('lightningOps.disableChannel')}
-                        </button>
+                        {showToggle && (
+                          <button
+                            className={`btn-secondary text-xs px-3 py-1 ${statusBusy ? 'opacity-60 pointer-events-none' : ''}`}
+                            type="button"
+                            onClick={() => handleToggleChanStatus(ch)}
+                            disabled={statusBusy}
+                          >
+                            {localDisabled ? t('lightningOps.enableChannel') : t('lightningOps.disableChannel')}
+                          </button>
+                        )}
                       </div>
                     </div>
                     <div className="mt-3 grid gap-3 lg:grid-cols-5 text-xs text-fog/70">
@@ -890,7 +899,7 @@ export default function LightningOps() {
                     <div className="mt-2 text-xs text-fog/50">
                       {ch.private ? t('lightningOps.privateChannel') : t('lightningOps.publicChannel')}
                     </div>
-                    {localDisabled && (
+                    {localDisabled && ch.active && (
                       <div className="mt-2 text-xs text-amber-200">{t('lightningOps.localDisabled')}</div>
                     )}
                   </div>

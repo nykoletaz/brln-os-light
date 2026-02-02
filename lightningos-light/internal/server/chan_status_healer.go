@@ -261,6 +261,9 @@ func (c *ChanStatusHealer) tick() {
   updated := 0
   var lastErr error
   for _, ch := range channels {
+    if !ch.Active {
+      continue
+    }
     if !isLocalChanDisabled(ch.ChanStatusFlags) {
       continue
     }
@@ -326,7 +329,8 @@ func isLocalChanDisabled(flags string) bool {
     return false
   }
   normalized := strings.ToLower(trimmed)
-  return strings.Contains(normalized, "localchandisabled") ||
+  return (strings.Contains(normalized, "local") && strings.Contains(normalized, "disabled")) ||
+    strings.Contains(normalized, "localchandisabled") ||
     strings.Contains(normalized, "local_chan_disabled")
 }
 

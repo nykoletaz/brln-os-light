@@ -152,13 +152,15 @@ export default function LndConfig() {
 
   const localReady = useMemo(() => {
     if (bitcoinLocalStatus?.rpc_ok !== true) return false
-    if (bitcoinLocalStatus?.initial_block_download !== false) return false
+    if (bitcoinLocalStatus?.initial_block_download === true) return false
     const progress = bitcoinLocalStatus?.verification_progress
-    if (typeof progress !== 'number' || progress < 0.9999) return false
     const headers = bitcoinLocalStatus?.headers
     const blocks = bitcoinLocalStatus?.blocks
+    if (typeof progress === 'number' && progress < 0.9999) return false
     if (typeof headers === 'number' && headers > 0) {
       if (typeof blocks !== 'number' || blocks < headers) return false
+    } else if (typeof progress !== 'number') {
+      return false
     }
     return true
   }, [bitcoinLocalStatus])
