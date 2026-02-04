@@ -151,6 +151,7 @@ Schedule:
 - `lightningos-reports.timer` runs `lightningos-reports.service` at `00:00` local time.
 - Manual run: `lightningos-manager reports-run --date YYYY-MM-DD` (defaults to yesterday).
 - Backfill: `lightningos-manager reports-backfill --from YYYY-MM-DD --to YYYY-MM-DD` (default max 730 days; use `--max-days N` to override).
+- Optional timezone pin: set `REPORTS_TIMEZONE=America/Sao_Paulo` in `/etc/lightningos/secrets.env` to force daily, backfill, and live reports to use the same IANA timezone.
 
 Stored table: `reports_daily`
 - `report_date` (DATE, local day)
