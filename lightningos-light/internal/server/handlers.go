@@ -2571,11 +2571,16 @@ type bitcoinInfo struct {
   VerificationProgress float64 `json:"verificationprogress"`
   InitialBlockDownload bool `json:"initialblockdownload"`
   BestBlockHash string `json:"bestblockhash"`
+  Pruned bool `json:"pruned"`
+  PruneHeight int64 `json:"pruneheight"`
+  PruneTargetSize int64 `json:"prune_target_size"`
+  SizeOnDisk int64 `json:"size_on_disk"`
 }
 
 type bitcoinNetworkInfo struct {
   Version int `json:"version"`
   Subversion string `json:"subversion"`
+  Connections int `json:"connections"`
 }
 
 type bitcoinRPCResponse struct {

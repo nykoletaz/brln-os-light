@@ -133,9 +133,14 @@ func (s *Server) handleBitcoinLocalStatus(w http.ResponseWriter, r *http.Request
     resp.Headers = info.Headers
     resp.VerificationProgress = info.VerificationProgress
     resp.InitialBlockDownload = info.InitialBlockDownload
+    resp.Pruned = info.Pruned
+    resp.PruneHeight = info.PruneHeight
+    resp.PruneTargetSize = info.PruneTargetSize
+    resp.SizeOnDisk = info.SizeOnDisk
     if netInfo, netErr := fetchBitcoinNetworkInfo(ctx, cfg.Host, cfg.User, cfg.Pass); netErr == nil {
       resp.Version = netInfo.Version
       resp.Subversion = netInfo.Subversion
+      resp.Connections = netInfo.Connections
     }
     writeJSON(w, http.StatusOK, resp)
     return
