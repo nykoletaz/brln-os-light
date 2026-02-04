@@ -96,7 +96,7 @@ Notes:
 - You can override LND URL with `LND_URL=...` or version with `LND_VERSION=...`.
 - The installer will generate a Postgres role and update `LND_PG_DSN` in `/etc/lightningos/secrets.env`.
 - The UI version label comes from `ui/public/version.txt`.
-- PostgreSQL uses the PGDG repository by default. Set `POSTGRES_VERSION=16` (or another major) to override.
+- PostgreSQL uses the PGDG repository by default. Set `POSTGRES_VERSION=18` (or another major) to override.
 - Tor uses the Tor Project repository when available. If your Ubuntu codename is unsupported, it falls back to `jammy`.
 
 ## Installer permissions (what `install.sh` enforces)
@@ -149,8 +149,8 @@ Daily routing reports are computed at midnight local time and stored in Postgres
 
 Schedule:
 - `lightningos-reports.timer` runs `lightningos-reports.service` at `00:00` local time.
-- Manual run: `lightningos-manager reports-run --date YYYY-MM-DD` (defaults to yesterday).
-- Backfill: `lightningos-manager reports-backfill --from YYYY-MM-DD --to YYYY-MM-DD` (default max 730 days; use `--max-days N` to override).
+- Manual run: `/opt/lightningos/manager/lightningos-manager reports-run --date YYYY-MM-DD` (defaults to yesterday).
+- Backfill: `/opt/lightningos/manager/lightningos-manager reports-backfill --from YYYY-MM-DD --to YYYY-MM-DD` (default max 730 days; use `--max-days N` to override).
 - Optional timezone pin: set `REPORTS_TIMEZONE=America/Sao_Paulo` in `/etc/lightningos/secrets.env` to force daily, backfill, and live reports to use the same IANA timezone.
 
 Stored table: `reports_daily`

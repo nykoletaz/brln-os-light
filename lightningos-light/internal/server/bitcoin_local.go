@@ -30,6 +30,7 @@ const (
 type bitcoinLocalStatus struct {
   Installed bool `json:"installed"`
   Status string `json:"status"`
+  Source string `json:"source"`
   DataDir string `json:"data_dir"`
   RPCOk bool `json:"rpc_ok"`
   Connections int `json:"connections,omitempty"`
@@ -107,6 +108,7 @@ func (s *Server) handleBitcoinLocalStatus(w http.ResponseWriter, r *http.Request
   resp := bitcoinLocalStatus{
     Installed: false,
     Status: "not_installed",
+    Source: "none",
     DataDir: paths.DataDir,
   }
   if !fileExists(paths.ComposePath) {
@@ -117,6 +119,8 @@ func (s *Server) handleBitcoinLocalStatus(w http.ResponseWriter, r *http.Request
       writeJSON(w, http.StatusOK, resp)
       return
     }
+    resp.Source = "external"
+    resp.Status = "external"
     info, rpcErr := fetchBitcoinInfo(ctx, cfg.Host, cfg.User, cfg.Pass)
     if rpcErr != nil {
       resp.RPCOk = false
@@ -137,6 +141,7 @@ func (s *Server) handleBitcoinLocalStatus(w http.ResponseWriter, r *http.Request
     return
   }
   resp.Installed = true
+  resp.Source = "app"
 
   ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
   defer cancel()
