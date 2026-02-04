@@ -639,7 +639,7 @@ configure_sudoers() {
     return
   fi
   local system_cmds
-  system_cmds="${systemctl_path} restart lnd, ${systemctl_path} restart lightningos-manager, ${systemctl_path} restart postgresql, ${systemctl_path} reboot, ${systemctl_path} poweroff, ${LND_FIX_PERMS_SCRIPT}, ${smartctl_path} *"
+  system_cmds="${systemctl_path} restart lnd, ${systemctl_path} restart lightningos-manager, ${systemctl_path} restart postgresql, ${systemctl_path} is-active lightningos-lnd-upgrade, ${systemctl_path} reboot, ${systemctl_path} poweroff, ${LND_FIX_PERMS_SCRIPT}, ${smartctl_path} *"
   local app_cmds=()
   [[ -n "$apt_get_path" ]] && app_cmds+=("${apt_get_path} *")
   [[ -n "$apt_path" ]] && app_cmds+=("${apt_path} *")

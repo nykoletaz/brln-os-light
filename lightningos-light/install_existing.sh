@@ -467,7 +467,7 @@ configure_sudoers() {
     return
   fi
   local system_cmds
-  system_cmds="${systemctl_path} restart lnd, ${systemctl_path} restart lightningos-manager, ${systemctl_path} restart postgresql, ${systemctl_path} reboot, ${systemctl_path} poweroff, ${LND_FIX_PERMS_SCRIPT}, ${LND_UPGRADE_SCRIPT}, ${smartctl_path} *"
+  system_cmds="${systemctl_path} restart lnd, ${systemctl_path} restart lightningos-manager, ${systemctl_path} restart postgresql, ${systemctl_path} is-active lightningos-lnd-upgrade, ${systemctl_path} reboot, ${systemctl_path} poweroff, ${LND_FIX_PERMS_SCRIPT}, ${LND_UPGRADE_SCRIPT}, ${smartctl_path} *"
   local app_cmds=()
   [[ -n "$apt_get_path" ]] && app_cmds+=("${apt_get_path} *")
   [[ -n "$apt_path" ]] && app_cmds+=("${apt_path} *")
@@ -907,9 +907,14 @@ fix_lnd_permissions() {
   fi
 
   local chain_dir="${lnd_dir}/data/chain/bitcoin/mainnet"
+  local lnd_conf="${lnd_dir}/lnd.conf"
   if [[ -d "$lnd_dir" ]]; then
     chown "$lnd_user:$lnd_group" "$lnd_dir"
     chmod 750 "$lnd_dir"
+  fi
+  if [[ -f "$lnd_conf" ]]; then
+    chown "$lnd_user:$lnd_group" "$lnd_conf"
+    chmod 660 "$lnd_conf"
   fi
   for dir in "$lnd_dir/data" "$lnd_dir/data/chain" "$lnd_dir/data/chain/bitcoin" "$chain_dir"; do
     if [[ -d "$dir" ]]; then
