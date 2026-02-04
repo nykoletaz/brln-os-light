@@ -28,7 +28,8 @@ type Server struct {
   chanHealer *ChanStatusHealer
   reports *reports.Service
   reportsErr string
-  reportsOnce sync.Once
+  reportsMu sync.Mutex
+  reportsInitAt time.Time
   lndRestartMu sync.RWMutex
   lastLNDRestart time.Time
   walletActivityMu sync.Mutex
