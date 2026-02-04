@@ -291,6 +291,7 @@ export default function BitcoinLocal() {
   const baselinePercent = (baselineCount / maxCadence) * 100
   const cadenceTotal = cadenceCounts.reduce((sum, count) => sum + count, 0)
   const cadenceAvg = cadenceHours > 0 ? cadenceTotal / cadenceHours : 0
+  const cadenceGridClass = managedByApp ? 'grid gap-6 lg:grid-cols-2' : 'grid gap-6'
   const lastBlockTime = typeof status?.best_block_time === 'number' ? status.best_block_time * 1000 : null
   const lastBlockAgeSec = lastBlockTime ? Math.max(0, (Date.now() - lastBlockTime) / 1000) : null
   const lastBlockLabel = lastBlockTime
@@ -470,9 +471,10 @@ export default function BitcoinLocal() {
             </div>
           </div>
 
-          {managedByApp && (
-            <div className="grid gap-6 lg:grid-cols-2">
-            <div className="section-card space-y-4">
+          {(managedByApp || externalDetected) && (
+            <div className={cadenceGridClass}>
+            {managedByApp && (
+              <div className="section-card space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <h3 className="text-lg font-semibold">{t('bitcoinLocal.storageConfig')}</h3>
@@ -538,7 +540,8 @@ export default function BitcoinLocal() {
                   {t('bitcoinLocal.pruneRestartNote')}
                 </span>
               </div>
-            </div>
+              </div>
+            )}
 
             <div className="section-card space-y-4">
               <div className="flex items-start justify-between gap-4">
