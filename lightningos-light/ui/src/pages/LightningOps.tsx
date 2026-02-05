@@ -709,41 +709,57 @@ export default function LightningOps() {
                 </div>
                 {pendingOpen.length ? (
                   <div className="mt-3 space-y-3">
-                    {pendingOpen.map((ch) => (
-                      <div key={ch.channel_point} className="rounded-xl border border-white/10 bg-ink/70 p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            {ch.remote_pubkey ? (
-                              <a
-                                className="text-xs text-fog/70 hover:text-fog break-all"
-                                href={ambossURL(ch.remote_pubkey)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                              >
-                                {ch.peer_alias || ch.remote_pubkey}
-                              </a>
-                            ) : (
-                              <p className="text-xs text-fog/70">{ch.peer_alias || t('lightningOps.unknownPeer')}</p>
-                            )}
-                            <p className="text-[11px] text-fog/50 break-all">{t('lightningOps.pointLabel', { point: ch.channel_point })}</p>
+                    {pendingOpen.map((ch) => {
+                      const pointLink = mempoolLink(ch.channel_point)
+                      return (
+                        <div key={ch.channel_point} className="rounded-xl border border-white/10 bg-ink/70 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              {ch.remote_pubkey ? (
+                                <a
+                                  className="text-xs text-fog/70 hover:text-fog break-all"
+                                  href={ambossURL(ch.remote_pubkey)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  {ch.peer_alias || ch.remote_pubkey}
+                                </a>
+                              ) : (
+                                <p className="text-xs text-fog/70">{ch.peer_alias || t('lightningOps.unknownPeer')}</p>
+                              )}
+                              {pointLink ? (
+                                <a
+                                  className="text-[11px] text-emerald-200 hover:text-emerald-100 break-all"
+                                  href={pointLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  {t('lightningOps.pointLabel', { point: ch.channel_point })}
+                                </a>
+                              ) : (
+                                <p className="text-[11px] text-fog/50 break-all">
+                                  {t('lightningOps.pointLabel', { point: ch.channel_point })}
+                                </p>
+                              )}
+                            </div>
+                            <span className="rounded-full px-2 py-1 text-[11px] bg-glow/20 text-glow">
+                              {pendingStatusLabel(ch.status)}
+                            </span>
                           </div>
-                          <span className="rounded-full px-2 py-1 text-[11px] bg-glow/20 text-glow">
-                            {pendingStatusLabel(ch.status)}
-                          </span>
-                        </div>
-                        <div className="mt-2 grid gap-2 lg:grid-cols-2 text-[11px] text-fog/60">
-                          <div>{t('lightningOps.capacityLabel', { value: ch.capacity_sat })}</div>
-                          {typeof ch.confirmations_until_active === 'number' && (
-                            <div>{t('lightningOps.confirmationsLabel', { count: ch.confirmations_until_active })}</div>
+                          <div className="mt-2 grid gap-2 lg:grid-cols-2 text-[11px] text-fog/60">
+                            <div>{t('lightningOps.capacityLabel', { value: ch.capacity_sat })}</div>
+                            {typeof ch.confirmations_until_active === 'number' && (
+                              <div>{t('lightningOps.confirmationsLabel', { count: ch.confirmations_until_active })}</div>
+                            )}
+                          </div>
+                          {ch.private !== undefined && (
+                            <p className="mt-2 text-[11px] text-fog/50">
+                              {ch.private ? t('lightningOps.privateChannel') : t('lightningOps.publicChannel')}
+                            </p>
                           )}
                         </div>
-                        {ch.private !== undefined && (
-                          <p className="mt-2 text-[11px] text-fog/50">
-                            {ch.private ? t('lightningOps.privateChannel') : t('lightningOps.publicChannel')}
-                          </p>
-                        )}
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : (
                   <p className="mt-3 text-xs text-fog/60">{t('lightningOps.noChannelsOpening')}</p>
@@ -756,39 +772,55 @@ export default function LightningOps() {
                 </div>
                 {pendingClose.length ? (
                   <div className="mt-3 space-y-3">
-                    {pendingClose.map((ch) => (
-                      <div key={ch.channel_point} className="rounded-xl border border-white/10 bg-ink/70 p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            {ch.remote_pubkey ? (
-                              <a
-                                className="text-xs text-fog/70 hover:text-fog break-all"
-                                href={ambossURL(ch.remote_pubkey)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                              >
-                                {ch.peer_alias || ch.remote_pubkey}
-                              </a>
-                            ) : (
-                              <p className="text-xs text-fog/70">{ch.peer_alias || t('lightningOps.unknownPeer')}</p>
-                            )}
-                            <p className="text-[11px] text-fog/50 break-all">{t('lightningOps.pointLabel', { point: ch.channel_point })}</p>
+                    {pendingClose.map((ch) => {
+                      const pointLink = mempoolLink(ch.channel_point)
+                      return (
+                        <div key={ch.channel_point} className="rounded-xl border border-white/10 bg-ink/70 p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              {ch.remote_pubkey ? (
+                                <a
+                                  className="text-xs text-fog/70 hover:text-fog break-all"
+                                  href={ambossURL(ch.remote_pubkey)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  {ch.peer_alias || ch.remote_pubkey}
+                                </a>
+                              ) : (
+                                <p className="text-xs text-fog/70">{ch.peer_alias || t('lightningOps.unknownPeer')}</p>
+                              )}
+                              {pointLink ? (
+                                <a
+                                  className="text-[11px] text-emerald-200 hover:text-emerald-100 break-all"
+                                  href={pointLink}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  {t('lightningOps.pointLabel', { point: ch.channel_point })}
+                                </a>
+                              ) : (
+                                <p className="text-[11px] text-fog/50 break-all">
+                                  {t('lightningOps.pointLabel', { point: ch.channel_point })}
+                                </p>
+                              )}
+                            </div>
+                            <span className="rounded-full px-2 py-1 text-[11px] bg-ember/20 text-ember">
+                              {pendingStatusLabel(ch.status)}
+                            </span>
                           </div>
-                          <span className="rounded-full px-2 py-1 text-[11px] bg-ember/20 text-ember">
-                            {pendingStatusLabel(ch.status)}
-                          </span>
-                        </div>
-                        <div className="mt-2 grid gap-2 lg:grid-cols-2 text-[11px] text-fog/60">
-                          <div>{t('lightningOps.capacityLabel', { value: ch.capacity_sat })}</div>
-                          {typeof ch.blocks_til_maturity === 'number' && (
-                            <div>{t('lightningOps.blocksToMaturity', { count: ch.blocks_til_maturity })}</div>
+                          <div className="mt-2 grid gap-2 lg:grid-cols-2 text-[11px] text-fog/60">
+                            <div>{t('lightningOps.capacityLabel', { value: ch.capacity_sat })}</div>
+                            {typeof ch.blocks_til_maturity === 'number' && (
+                              <div>{t('lightningOps.blocksToMaturity', { count: ch.blocks_til_maturity })}</div>
+                            )}
+                          </div>
+                          {ch.closing_txid && (
+                            <p className="mt-2 text-[11px] text-fog/50 break-all">{t('lightningOps.closingTx', { txid: ch.closing_txid })}</p>
                           )}
                         </div>
-                        {ch.closing_txid && (
-                          <p className="mt-2 text-[11px] text-fog/50 break-all">{t('lightningOps.closingTx', { txid: ch.closing_txid })}</p>
-                        )}
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : (
                   <p className="mt-3 text-xs text-fog/60">{t('lightningOps.noChannelsClosing')}</p>
