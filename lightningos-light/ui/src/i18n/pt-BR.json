@@ -873,7 +873,7 @@
     "pingMs": "{{value}} ms",
     "pingSeconds": "{{value}} s",
     "pointCapacity": "Point: {{point}} | Capacity: {{capacity}} sats",
-    "pointLabel": "Point: {{point}}",
+    "pointLabel": "Channel point: {{point}}",
     "privateChannel": "Canal privado",
     "pubkeyLabel": "Pubkey: {{pubkey}}",
     "publicChannel": "Canal público",

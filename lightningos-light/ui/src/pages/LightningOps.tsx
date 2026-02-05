@@ -729,7 +729,7 @@ export default function LightningOps() {
                               )}
                               {pointLink ? (
                                 <a
-                                  className="text-[11px] text-emerald-200 hover:text-emerald-100 break-all"
+                                  className="mt-1 block text-[11px] text-emerald-200 hover:text-emerald-100 break-all"
                                   href={pointLink}
                                   target="_blank"
                                   rel="noopener noreferrer"
@@ -737,7 +737,7 @@ export default function LightningOps() {
                                   {t('lightningOps.pointLabel', { point: ch.channel_point })}
                                 </a>
                               ) : (
-                                <p className="text-[11px] text-fog/50 break-all">
+                                <p className="mt-1 text-[11px] text-fog/50 break-all">
                                   {t('lightningOps.pointLabel', { point: ch.channel_point })}
                                 </p>
                               )}
@@ -792,7 +792,7 @@ export default function LightningOps() {
                               )}
                               {pointLink ? (
                                 <a
-                                  className="text-[11px] text-emerald-200 hover:text-emerald-100 break-all"
+                                  className="mt-1 block text-[11px] text-emerald-200 hover:text-emerald-100 break-all"
                                   href={pointLink}
                                   target="_blank"
                                   rel="noopener noreferrer"
@@ -800,7 +800,7 @@ export default function LightningOps() {
                                   {t('lightningOps.pointLabel', { point: ch.channel_point })}
                                 </a>
                               ) : (
-                                <p className="text-[11px] text-fog/50 break-all">
+                                <p className="mt-1 text-[11px] text-fog/50 break-all">
                                   {t('lightningOps.pointLabel', { point: ch.channel_point })}
                                 </p>
                               )}
