@@ -715,11 +715,15 @@ export default function RebalanceCenter() {
             </thead>
             <tbody>
               {sortedChannels.map((ch) => {
-                const highlight = ch.eligible_as_target
+                const meetsRoi = !config || config.roi_min <= 0 || ch.roi_estimate >= config.roi_min
+                const isAutoTarget = ch.eligible_as_target && ch.auto_enabled && meetsRoi
+                const highlight = isAutoTarget
                   ? 'bg-rose-500/10'
-                  : ch.eligible_as_source
-                    ? 'bg-emerald-500/10'
-                    : ''
+                  : ch.eligible_as_target
+                    ? 'bg-amber-500/10'
+                    : ch.eligible_as_source
+                      ? 'bg-emerald-500/10'
+                      : ''
                 return (
                   <tr key={ch.channel_point || String(ch.channel_id)} className={`border-t border-white/5 ${highlight}`}>
                     <td className="py-3">
