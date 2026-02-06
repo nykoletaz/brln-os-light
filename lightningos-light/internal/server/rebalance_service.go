@@ -74,7 +74,7 @@ type RebalanceChannel struct {
   LocalPct float64 `json:"local_pct"`
   RemotePct float64 `json:"remote_pct"`
   OutgoingFeePpm int64 `json:"outgoing_fee_ppm"`
-  PeerInboundFeePpm int64 `json:"peer_inbound_fee_ppm"`
+  PeerFeeRatePpm int64 `json:"peer_fee_rate_ppm"`
   SpreadPpm int64 `json:"spread_ppm"`
   TargetOutboundPct float64 `json:"target_outbound_pct"`
   TargetAmountSat int64 `json:"target_amount_sat"`
@@ -450,7 +450,7 @@ func (s *RebalanceService) runAutoScan() {
     if remaining <= 0 {
       break
     }
-    estimatedCost := estimateMaxCost(target.Channel.TargetAmountSat, target.Channel.OutgoingFeePpm, cfg.EconRatio, target.Channel.PeerInboundFeePpm)
+    estimatedCost := estimateMaxCost(target.Channel.TargetAmountSat, target.Channel.OutgoingFeePpm, cfg.EconRatio, target.Channel.PeerFeeRatePpm)
     if estimatedCost > remaining {
       continue
     }
@@ -570,7 +570,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       }
       snapshot.TargetAmountSat = amount
       deficitPct := snapshot.TargetOutboundPct - snapshot.LocalPct
-      snapshot.EligibleAsTarget = snapshot.Active && deficitPct > cfg.DeadbandPct && snapshot.OutgoingFeePpm > snapshot.PeerInboundFeePpm
+      snapshot.EligibleAsTarget = snapshot.Active && deficitPct > cfg.DeadbandPct && snapshot.OutgoingFeePpm > snapshot.PeerFeeRatePpm
     }
     channelSnapshots = append(channelSnapshots, snapshot)
   }
@@ -616,7 +616,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     return sources[i].MaxSourceSat > sources[j].MaxSourceSat
   })
 
-  maxFeePpm := calcMaxFeePpm(targetSnapshot.OutgoingFeePpm, targetSnapshot.PeerInboundFeePpm, cfg.EconRatio)
+  maxFeePpm := calcMaxFeePpm(targetSnapshot.OutgoingFeePpm, targetSnapshot.PeerFeeRatePpm, cfg.EconRatio)
   if maxFeePpm <= 0 {
     s.finishJob(jobID, "failed", "fee spread not positive")
     return
@@ -808,20 +808,17 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
   }
 
   outgoingFee := int64(0)
-  peerInbound := int64(0)
+  peerFeeRate := int64(0)
   if ch.FeeRatePpm != nil {
     outgoingFee = *ch.FeeRatePpm
-  }
-  if ch.InboundFeeRatePpm != nil {
-    peerInbound = *ch.InboundFeeRatePpm
   }
   policies, err := s.lnd.GetChannelPolicies(ctx, ch.ChannelID)
   if err == nil {
     outgoingFee = policies.Local.FeeRatePpm
-    peerInbound = policies.Local.InboundFeeRatePpm
+    peerFeeRate = policies.Remote.FeeRatePpm
   }
 
-  spread := outgoingFee - peerInbound
+  spread := outgoingFee - peerFeeRate
   target := setting.TargetOutboundPct
   if target <= 0 {
     target = rebalanceDefaultTargetOutboundPct
@@ -845,7 +842,7 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
 
   eligibleTarget := false
   deficitPct := target - localPct
-  if ch.Active && deficitPct > cfg.DeadbandPct && outgoingFee > peerInbound {
+  if ch.Active && deficitPct > cfg.DeadbandPct && outgoingFee > peerFeeRate {
     eligibleTarget = true
   }
 
@@ -882,7 +879,7 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
 
   roiEstimate := 0.0
   targetAmount := computeDeficitAmount(ch, target)
-  estCost := estimateMaxCost(targetAmount, outgoingFee, cfg.EconRatio, peerInbound)
+  estCost := estimateMaxCost(targetAmount, outgoingFee, cfg.EconRatio, peerFeeRate)
   if estCost > 0 && revenue7dSat > 0 {
     roiEstimate = float64(revenue7dSat) / float64(estCost)
   }
@@ -900,7 +897,7 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
     LocalPct: localPct,
     RemotePct: remotePct,
     OutgoingFeePpm: outgoingFee,
-    PeerInboundFeePpm: peerInbound,
+    PeerFeeRatePpm: peerFeeRate,
     SpreadPpm: spread,
     TargetOutboundPct: target,
     TargetAmountSat: targetAmount,
@@ -944,8 +941,8 @@ func filterSources(channels []RebalanceChannel, targetID uint64) []RebalanceChan
   return sources
 }
 
-func calcMaxFeePpm(outgoingFeePpm int64, peerInboundFeePpm int64, econRatio float64) int64 {
-  spread := outgoingFeePpm - peerInboundFeePpm
+func calcMaxFeePpm(outgoingFeePpm int64, peerFeeRatePpm int64, econRatio float64) int64 {
+  spread := outgoingFeePpm - peerFeeRatePpm
   if spread <= 0 {
     return 0
   }
@@ -959,8 +956,8 @@ func calcMaxFeePpm(outgoingFeePpm int64, peerInboundFeePpm int64, econRatio floa
   return scaled
 }
 
-func estimateMaxCost(amountSat int64, outgoingFeePpm int64, econRatio float64, peerInboundFeePpm int64) int64 {
-  maxFeePpm := calcMaxFeePpm(outgoingFeePpm, peerInboundFeePpm, econRatio)
+func estimateMaxCost(amountSat int64, outgoingFeePpm int64, econRatio float64, peerFeeRatePpm int64) int64 {
+  maxFeePpm := calcMaxFeePpm(outgoingFeePpm, peerFeeRatePpm, econRatio)
   if maxFeePpm <= 0 || amountSat <= 0 {
     return 0
   }

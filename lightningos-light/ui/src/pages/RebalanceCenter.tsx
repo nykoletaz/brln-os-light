@@ -57,7 +57,7 @@ type RebalanceChannel = {
   local_pct: number
   remote_pct: number
   outgoing_fee_ppm: number
-  peer_inbound_fee_ppm: number
+  peer_fee_rate_ppm: number
   spread_ppm: number
   target_outbound_pct: number
   target_amount_sat: number
@@ -550,7 +550,7 @@ export default function RebalanceCenter() {
                   <td className="py-3">
                     <div>
                       {t('rebalanceCenter.channels.feeOut', { value: ch.outgoing_fee_ppm })} ·{' '}
-                      {t('rebalanceCenter.channels.feePeerIn', { value: ch.peer_inbound_fee_ppm })}
+                      {t('rebalanceCenter.channels.feePeer', { value: ch.peer_fee_rate_ppm })}
                     </div>
                     <div className="text-xs text-fog/50">{t('rebalanceCenter.channels.spread', { value: ch.spread_ppm })}</div>
                   </td>
