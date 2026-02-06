@@ -7,6 +7,7 @@ import (
   "fmt"
   "net/http"
   "strconv"
+  "strings"
   "time"
 )
 
@@ -221,21 +222,26 @@ func (s *Server) handleRebalanceRun(w http.ResponseWriter, r *http.Request) {
     writeError(w, http.StatusBadRequest, "invalid json")
     return
   }
-  if payload.ChannelID == 0 {
-    writeError(w, http.StatusBadRequest, "channel_id required")
+  if payload.ChannelID == 0 && strings.TrimSpace(payload.ChannelPoint) == "" {
+    writeError(w, http.StatusBadRequest, "channel_id or channel_point required")
     return
   }
   ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
   defer cancel()
+  resolvedID, resolvedPoint, err := s.rebalance.ResolveChannel(ctx, payload.ChannelID, payload.ChannelPoint)
+  if err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
   targetPct := payload.TargetOutboundPct
   if targetPct != nil {
     if *targetPct <= 0 || *targetPct > 100 {
       writeError(w, http.StatusBadRequest, "target_outbound_pct must be 1-100")
       return
     }
-    _ = s.rebalance.SetChannelTarget(ctx, payload.ChannelID, payload.ChannelPoint, *targetPct)
+    _ = s.rebalance.SetChannelTarget(ctx, resolvedID, resolvedPoint, *targetPct)
   }
-  jobID, err := s.rebalance.startJob(payload.ChannelID, "manual", "")
+  jobID, err := s.rebalance.startJob(resolvedID, "manual", "")
   if err != nil {
     writeError(w, http.StatusInternalServerError, err.Error())
     return
@@ -271,8 +277,8 @@ func (s *Server) handleRebalanceChannelTarget(w http.ResponseWriter, r *http.Req
     writeError(w, http.StatusBadRequest, "invalid json")
     return
   }
-  if payload.ChannelID == 0 {
-    writeError(w, http.StatusBadRequest, "channel_id required")
+  if payload.ChannelID == 0 && strings.TrimSpace(payload.ChannelPoint) == "" {
+    writeError(w, http.StatusBadRequest, "channel_id or channel_point required")
     return
   }
   targetPct := payload.TargetOutboundPct
@@ -282,7 +288,12 @@ func (s *Server) handleRebalanceChannelTarget(w http.ResponseWriter, r *http.Req
   }
   ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
   defer cancel()
-  if err := s.rebalance.SetChannelTarget(ctx, payload.ChannelID, payload.ChannelPoint, *targetPct); err != nil {
+  resolvedID, resolvedPoint, err := s.rebalance.ResolveChannel(ctx, payload.ChannelID, payload.ChannelPoint)
+  if err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
+  if err := s.rebalance.SetChannelTarget(ctx, resolvedID, resolvedPoint, *targetPct); err != nil {
     writeError(w, http.StatusInternalServerError, err.Error())
     return
   }

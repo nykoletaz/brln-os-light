@@ -222,6 +222,32 @@ func (s *RebalanceService) Start() {
   go s.runAutoLoop()
 }
 
+func (s *RebalanceService) ResolveChannel(ctx context.Context, channelID uint64, channelPoint string) (uint64, string, error) {
+  if s.lnd == nil {
+    return 0, "", errors.New("lnd unavailable")
+  }
+  channels, err := s.lnd.ListChannels(ctx)
+  if err != nil {
+    return 0, "", err
+  }
+  if channelID != 0 {
+    for _, ch := range channels {
+      if ch.ChannelID == channelID {
+        return ch.ChannelID, ch.ChannelPoint, nil
+      }
+    }
+  }
+  trimmed := strings.TrimSpace(channelPoint)
+  if trimmed != "" {
+    for _, ch := range channels {
+      if strings.EqualFold(ch.ChannelPoint, trimmed) {
+        return ch.ChannelID, ch.ChannelPoint, nil
+      }
+    }
+  }
+  return 0, "", errors.New("channel not found")
+}
+
 func (s *RebalanceService) Stop() {
   s.mu.Lock()
   if !s.started {
@@ -783,10 +809,16 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
 
   outgoingFee := int64(0)
   peerInbound := int64(0)
+  if ch.FeeRatePpm != nil {
+    outgoingFee = *ch.FeeRatePpm
+  }
+  if ch.InboundFeeRatePpm != nil {
+    peerInbound = *ch.InboundFeeRatePpm
+  }
   policies, err := s.lnd.GetChannelPolicies(ctx, ch.ChannelID)
   if err == nil {
     outgoingFee = policies.Local.FeeRatePpm
-    peerInbound = policies.Remote.InboundFeeRatePpm
+    peerInbound = policies.Local.InboundFeeRatePpm
   }
 
   spread := outgoingFee - peerInbound

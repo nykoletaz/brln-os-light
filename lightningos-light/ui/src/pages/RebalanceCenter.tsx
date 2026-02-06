@@ -124,6 +124,10 @@ export default function RebalanceCenter() {
 
   const formatSats = (value: number) => `${formatter.format(Math.round(value))} sats`
   const formatPct = (value: number) => `${pctFormatter.format(value)}%`
+  const sortedChannels = useMemo(
+    () => [...channels].sort((a, b) => a.local_pct - b.local_pct),
+    [channels]
+  )
 
   const loadAll = async () => {
     try {
@@ -533,7 +537,7 @@ export default function RebalanceCenter() {
               </tr>
             </thead>
             <tbody>
-              {channels.map((ch) => (
+              {sortedChannels.map((ch) => (
                 <tr key={ch.channel_id} className="border-t border-white/5">
                   <td className="py-3">
                     <div className="text-fog">{ch.peer_alias || ch.remote_pubkey}</div>

@@ -971,7 +971,7 @@
       "criticalMode": "Libera parcialmente quando faltam fontes.",
       "unlockDays": "Dias para liberar a liquidez protegida.",
       "criticalRelease": "Percentual liberado por ciclo crítico.",
-      "criticalCycles": "Numero de ciclos críticos antes de liberar."
+      "criticalCycles": "Número de ciclos críticos antes de liberar."
     },
     "channels": {
       "title": "Workbench de Canais",
@@ -983,7 +983,7 @@
       "feePeerIn": "Peer in {{value}} ppm",
       "target": "Alvo outbound",
       "protected": "Protegido",
-      "actions": "Acoes",
+      "actions": "Ações",
       "spread": "Spread {{value}} ppm",
       "amount": "Liquidez local a adicionar: {{value}}",
       "payback": "Payback {{value}}%",
