@@ -667,12 +667,19 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       }
 
       feeLimitMsat := ppmToFeeLimitMsat(sendAmount, feePpm)
-      if _, err := s.lnd.QueryRoute(ctx, selfPubkey, sendAmount, source.ChannelID, targetSnapshot.RemotePubkey, feeLimitMsat); err != nil {
+      var probeFeeMsat int64
+      if route, err := s.lnd.QueryRoute(ctx, selfPubkey, sendAmount, source.ChannelID, targetSnapshot.RemotePubkey, feeLimitMsat); err != nil {
         if step == feeSteps {
           attemptIndex++
           _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, sendAmount, feePpm, 0, "failed", "", err.Error())
         }
         continue
+      } else if route != nil {
+        if route.TotalFeesMsat > 0 {
+          probeFeeMsat = route.TotalFeesMsat
+        } else if route.TotalFees > 0 {
+          probeFeeMsat = route.TotalFees * 1000
+        }
       }
 
       paymentReq, paymentHash, err := s.createRebalanceInvoice(ctx, sendAmount, jobID, source.ChannelID, targetChannelID)
@@ -711,6 +718,9 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
         } else if feeSatSum > 0 {
           feePaidSat = feeSatSum
         }
+      }
+      if feePaidSat == 0 && probeFeeMsat > 0 {
+        feePaidSat = int64(math.Ceil(float64(probeFeeMsat) / 1000.0))
       }
       attemptIndex++
       _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, sendAmount, feePpm, feePaidSat, "succeeded", paymentHash, "")

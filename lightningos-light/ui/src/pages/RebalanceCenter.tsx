@@ -664,66 +664,70 @@ export default function RebalanceCenter() {
         <div className="section-card space-y-4">
           <h3 className="text-lg font-semibold">{t('rebalanceCenter.queue.title')}</h3>
           {queueJobs.length === 0 && <p className="text-sm text-fog/60">{t('rebalanceCenter.queue.empty')}</p>}
-          {queueJobs.map((job) => (
-            <div key={job.id} className="rounded-2xl border border-white/10 bg-ink/60 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-fog">#{job.id} {job.source}</p>
-                  <p className="text-xs text-fog/70">{job.target_peer_alias || job.target_channel_point}</p>
-                  <p className="text-xs text-fog/50">{job.target_channel_point}</p>
+          <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
+            {queueJobs.map((job) => (
+              <div key={job.id} className="rounded-2xl border border-white/10 bg-ink/60 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-fog">#{job.id} {job.source}</p>
+                    <p className="text-xs text-fog/70">{t('rebalanceCenter.queue.targetLabel', { value: job.target_peer_alias || job.target_channel_point })}</p>
+                    <p className="text-xs text-fog/50">{job.target_channel_point}</p>
+                  </div>
+                  <span className={`text-xs uppercase tracking-wide ${statusClass(job.status)}`}>{job.status}</span>
                 </div>
-                <span className={`text-xs uppercase tracking-wide ${statusClass(job.status)}`}>{job.status}</span>
+                <div className="mt-2 text-xs text-fog/50">
+                  {t('rebalanceCenter.queue.target', { value: formatPct(job.target_outbound_pct) })}
+                </div>
+                {job.status === 'partial' && parseRemaining(job.reason) !== null && (
+                  <div className="mt-1 text-xs text-amber-200">
+                    {t('rebalanceCenter.queue.remaining', { value: formatSats(parseRemaining(job.reason) || 0) })}
+                  </div>
+                )}
+                {job.reason && job.status !== 'partial' && (
+                  <div className="mt-1 text-xs text-amber-200">{job.reason}</div>
+                )}
+                {queueAttempts.filter((attempt) => attempt.job_id === job.id).map((attempt) => (
+                  <div key={attempt.id} className="mt-2 text-xs text-fog/60">
+                    {t('rebalanceCenter.queue.attempt', {
+                      index: attempt.attempt_index,
+                      amount: formatSats(attempt.amount_sat),
+                      fee: attempt.fee_limit_ppm
+                    })}
+                  </div>
+                ))}
               </div>
-              <div className="mt-2 text-xs text-fog/50">
-                {t('rebalanceCenter.queue.target', { value: formatPct(job.target_outbound_pct) })}
-              </div>
-              {job.status === 'partial' && parseRemaining(job.reason) !== null && (
-                <div className="mt-1 text-xs text-amber-200">
-                  {t('rebalanceCenter.queue.remaining', { value: formatSats(parseRemaining(job.reason) || 0) })}
-                </div>
-              )}
-              {job.reason && job.status !== 'partial' && (
-                <div className="mt-1 text-xs text-amber-200">{job.reason}</div>
-              )}
-              {queueAttempts.filter((attempt) => attempt.job_id === job.id).map((attempt) => (
-                <div key={attempt.id} className="mt-2 text-xs text-fog/60">
-                  {t('rebalanceCenter.queue.attempt', {
-                    index: attempt.attempt_index,
-                    amount: formatSats(attempt.amount_sat),
-                    fee: attempt.fee_limit_ppm
-                  })}
-                </div>
-              ))}
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
         <div className="section-card space-y-4">
           <h3 className="text-lg font-semibold">{t('rebalanceCenter.history.title')}</h3>
           {historyJobs.length === 0 && <p className="text-sm text-fog/60">{t('rebalanceCenter.history.empty')}</p>}
-          {historyJobs.map((job) => (
-            <div key={job.id} className="rounded-2xl border border-white/10 bg-ink/60 p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-fog">#{job.id} {job.source}</p>
-                  <p className="text-xs text-fog/70">{job.target_peer_alias || job.target_channel_point}</p>
-                  <p className="text-xs text-fog/50">{job.target_channel_point}</p>
+          <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
+            {historyJobs.map((job) => (
+              <div key={job.id} className="rounded-2xl border border-white/10 bg-ink/60 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-fog">#{job.id} {job.source}</p>
+                    <p className="text-xs text-fog/70">{t('rebalanceCenter.history.targetLabel', { value: job.target_peer_alias || job.target_channel_point })}</p>
+                    <p className="text-xs text-fog/50">{job.target_channel_point}</p>
+                  </div>
+                  <span className={`text-xs uppercase tracking-wide ${statusClass(job.status)}`}>{job.status}</span>
                 </div>
-                <span className={`text-xs uppercase tracking-wide ${statusClass(job.status)}`}>{job.status}</span>
-              </div>
-              <div className="mt-2 text-xs text-fog/50">
-                {t('rebalanceCenter.history.target', { value: formatPct(job.target_outbound_pct) })}
-              </div>
-              {job.status === 'partial' && parseRemaining(job.reason) !== null && (
-                <div className="mt-1 text-xs text-amber-200">
-                  {t('rebalanceCenter.history.remaining', { value: formatSats(parseRemaining(job.reason) || 0) })}
+                <div className="mt-2 text-xs text-fog/50">
+                  {t('rebalanceCenter.history.target', { value: formatPct(job.target_outbound_pct) })}
                 </div>
-              )}
-              {job.reason && job.status !== 'partial' && (
-                <div className="mt-1 text-xs text-amber-200">{job.reason}</div>
-              )}
-            </div>
-          ))}
+                {job.status === 'partial' && parseRemaining(job.reason) !== null && (
+                  <div className="mt-1 text-xs text-amber-200">
+                    {t('rebalanceCenter.history.remaining', { value: formatSats(parseRemaining(job.reason) || 0) })}
+                  </div>
+                )}
+                {job.reason && job.status !== 'partial' && (
+                  <div className="mt-1 text-xs text-amber-200">{job.reason}</div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </section>

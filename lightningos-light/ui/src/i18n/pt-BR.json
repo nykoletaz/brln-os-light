@@ -1006,6 +1006,7 @@
     "queue": {
       "title": "Fila ativa",
       "empty": "Nenhum rebalance ativo.",
+      "targetLabel": "Para {{value}}",
       "target": "Alvo outbound: {{value}}",
       "remaining": "Restante: {{value}}",
       "attempt": "Tentativa {{index}} - {{amount}} - fee cap {{fee}} ppm"
@@ -1013,6 +1014,7 @@
     "history": {
       "title": "Histórico recente",
       "empty": "Sem rebalances concluídos.",
+      "targetLabel": "Para {{value}}",
       "target": "Alvo outbound: {{value}}",
       "remaining": "Restante: {{value}}"
     }

@@ -1006,6 +1006,7 @@
     "queue": {
       "title": "Active Queue",
       "empty": "No active rebalances.",
+      "targetLabel": "In {{value}}",
       "target": "Target outbound: {{value}}",
       "remaining": "Remaining: {{value}}",
       "attempt": "Attempt {{index}} · {{amount}} · fee cap {{fee}} ppm"
@@ -1013,6 +1014,7 @@
     "history": {
       "title": "Recent History",
       "empty": "No completed rebalances yet.",
+      "targetLabel": "In {{value}}",
       "target": "Target outbound: {{value}}",
       "remaining": "Remaining: {{value}}"
     }
