@@ -1944,6 +1944,7 @@ func (s *RebalanceService) Queue(ctx context.Context) ([]RebalanceJob, []Rebalan
   if s.db == nil {
     return jobs, attempts, nil
   }
+  s.cleanupStaleJobs(ctx)
   aliasMap := map[uint64]string{}
   if s.lnd != nil {
     if channels, err := s.lnd.ListChannels(ctx); err == nil {
@@ -2024,6 +2025,26 @@ order by started_at desc
   }
 
   return jobs, attempts, nil
+}
+
+func (s *RebalanceService) cleanupStaleJobs(ctx context.Context) {
+  if s.db == nil {
+    return
+  }
+  cfg, err := s.loadConfig(ctx)
+  if err != nil {
+    cfg = defaultRebalanceConfig()
+  }
+  timeoutSec := cfg.RebalanceTimeoutSec
+  if timeoutSec <= 0 {
+    timeoutSec = 600
+  }
+  cutoff := time.Now().Add(-time.Duration(timeoutSec) * time.Second)
+  _, _ = s.db.Exec(ctx, `
+update rebalance_jobs
+set status='failed', reason='timeout', completed_at=now()
+where status in ('running','queued') and created_at < $1
+`, cutoff)
 }
 
 func (s *RebalanceService) History(ctx context.Context, limit int) ([]RebalanceJob, []RebalanceAttempt, error) {
