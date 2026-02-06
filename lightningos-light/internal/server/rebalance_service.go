@@ -415,28 +415,24 @@ func (s *RebalanceService) runAutoScan() {
   candidates := []rebalanceTarget{}
   eligibleSources := 0
   totalAvailable := int64(0)
-  for _, ch := range channels {
-    setting := settings[ch.ChannelID]
-    targetPct := setting.TargetOutboundPct
-    autoEnabled := setting.AutoEnabled
-    if targetPct <= 0 {
-      targetPct = rebalanceDefaultTargetOutboundPct
-    }
-    if !autoEnabled {
-      continue
-    }
+    for _, ch := range channels {
+      setting := settings[ch.ChannelID]
+      targetPct := setting.TargetOutboundPct
+      if targetPct <= 0 {
+        targetPct = rebalanceDefaultTargetOutboundPct
+      }
 
-    snapshot := s.buildChannelSnapshot(ctx, cfg, criticalActive, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], exclusions[ch.ChannelID])
-    if snapshot.EligibleAsSource {
-      eligibleSources++
-      totalAvailable += snapshot.MaxSourceSat
+      snapshot := s.buildChannelSnapshot(ctx, cfg, criticalActive, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], exclusions[ch.ChannelID])
+      if snapshot.EligibleAsSource {
+        eligibleSources++
+        totalAvailable += snapshot.MaxSourceSat
+      }
+      if setting.AutoEnabled && snapshot.EligibleAsTarget && (cfg.ROIMin <= 0 || snapshot.ROIEstimate >= cfg.ROIMin) {
+        candidates = append(candidates, rebalanceTarget{
+          Channel: snapshot,
+        })
+      }
     }
-    if snapshot.EligibleAsTarget && (cfg.ROIMin <= 0 || snapshot.ROIEstimate >= cfg.ROIMin) {
-      candidates = append(candidates, rebalanceTarget{
-        Channel: snapshot,
-      })
-    }
-  }
 
   if eligibleSources == 0 ||
     (cfg.CriticalMinSources > 0 && eligibleSources < cfg.CriticalMinSources) ||
@@ -1878,6 +1874,12 @@ where report_date >= current_date - interval '6 days'
     roi = float64(revenue) / float64(cost)
   }
 
+  eligibleSources := 0
+  targetsNeeding := 0
+  if s.lnd != nil {
+    eligibleSources, targetsNeeding = s.computeEligibilityCounts(ctx, cfg)
+  }
+
   s.mu.Lock()
   lastScan := s.lastScan
   lastScanStatus := s.lastScanStatus
@@ -1893,6 +1895,8 @@ where report_date >= current_date - interval '6 days'
     Effectiveness7d: effectiveness,
     ROI7d: roi,
     LastScanStatus: lastScanStatus,
+    EligibleSources: eligibleSources,
+    TargetsNeeding: targetsNeeding,
   }
   if !lastScan.IsZero() {
     overview.LastScanAt = lastScan.UTC().Format(time.RFC3339)
@@ -1936,6 +1940,40 @@ func (s *RebalanceService) Channels(ctx context.Context) ([]RebalanceChannel, er
     result = append(result, snapshot)
   }
   return result, nil
+}
+
+func (s *RebalanceService) computeEligibilityCounts(ctx context.Context, cfg RebalanceConfig) (int, int) {
+  if s.lnd == nil {
+    return 0, 0
+  }
+  settings, _ := s.loadChannelSettings(ctx)
+  exclusions, _ := s.loadExclusions(ctx)
+  ledger, _ := s.loadLedger(ctx)
+  _ = s.applyForwardDeltas(ctx, ledger)
+
+  channels, err := s.lnd.ListChannels(ctx)
+  if err != nil {
+    return 0, 0
+  }
+  revenueByChannel, _ := s.fetchChannelRevenue7d(ctx)
+
+  s.mu.Lock()
+  criticalActive := cfg.CriticalCycles > 0 && s.criticalMissCount >= cfg.CriticalCycles
+  s.mu.Unlock()
+
+  eligibleSources := 0
+  targetsNeeding := 0
+  for _, ch := range channels {
+    setting := settings[ch.ChannelID]
+    snapshot := s.buildChannelSnapshot(ctx, cfg, criticalActive, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], exclusions[ch.ChannelID])
+    if snapshot.EligibleAsSource {
+      eligibleSources++
+    }
+    if setting.AutoEnabled && snapshot.EligibleAsTarget && (cfg.ROIMin <= 0 || snapshot.ROIEstimate >= cfg.ROIMin) {
+      targetsNeeding++
+    }
+  }
+  return eligibleSources, targetsNeeding
 }
 
 func (s *RebalanceService) Queue(ctx context.Context) ([]RebalanceJob, []RebalanceAttempt, error) {

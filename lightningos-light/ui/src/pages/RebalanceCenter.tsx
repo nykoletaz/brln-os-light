@@ -42,6 +42,8 @@ type RebalanceOverview = {
   auto_enabled: boolean
   last_scan_at?: string
   last_scan_status?: string
+  eligible_sources?: number
+  targets_needing?: number
   daily_budget_sat: number
   daily_spent_sat: number
   daily_spent_auto_sat: number
@@ -361,6 +363,12 @@ export default function RebalanceCenter() {
               <p className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.overview.liveCost')}</p>
               <p className="text-lg font-semibold text-fog">{formatSats(overview.live_cost_sat)}</p>
               <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.last24h')}</p>
+              <p className="text-xs text-fog/50">
+                {t('rebalanceCenter.overview.eligibleCounts', {
+                  sources: overview.eligible_sources ?? 0,
+                  targets: overview.targets_needing ?? 0
+                })}
+              </p>
               <p className="text-xs text-fog/50">
                 {t('rebalanceCenter.overview.lastScan', {
                   value: overview.auto_enabled
@@ -706,12 +714,18 @@ export default function RebalanceCenter() {
               </tr>
             </thead>
             <tbody>
-              {sortedChannels.map((ch) => (
-                <tr key={ch.channel_point || String(ch.channel_id)} className="border-t border-white/5">
-                  <td className="py-3">
-                    <div className="text-fog">{ch.peer_alias || ch.remote_pubkey}</div>
-                    <div className="text-xs text-fog/50">{ch.channel_point}</div>
-                  </td>
+              {sortedChannels.map((ch) => {
+                const highlight = ch.eligible_as_target
+                  ? 'bg-rose-500/10'
+                  : ch.eligible_as_source
+                    ? 'bg-emerald-500/10'
+                    : ''
+                return (
+                  <tr key={ch.channel_point || String(ch.channel_id)} className={`border-t border-white/5 ${highlight}`}>
+                    <td className="py-3">
+                      <div className="text-fog">{ch.peer_alias || ch.remote_pubkey}</div>
+                      <div className="text-xs text-fog/50">{ch.channel_point}</div>
+                    </td>
                   <td className="py-3">
                     <div>{formatPct(ch.local_pct)} / {formatPct(ch.remote_pct)}</div>
                     <div className="text-xs text-fog/50">{formatSats(ch.local_balance_sat)} | {formatSats(ch.remote_balance_sat)}</div>
@@ -786,7 +800,8 @@ export default function RebalanceCenter() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>

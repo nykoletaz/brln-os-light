@@ -925,6 +925,7 @@
       "overview": {
         "liveCost": "Live cost",
         "last24h": "Last 24h",
+        "eligibleCounts": "Eligible sources: {{sources}} · Targets: {{targets}}",
         "lastScan": "Last scan: {{value}}",
         "lastScanDisabled": "Auto disabled",
         "budgetLast24h": "Based on last 24h revenue",
@@ -994,12 +995,12 @@
       "criticalRelease": "Percent of protected liquidity released per critical cycle.",
       "criticalCycles": "Number of consecutive critical scans before releasing."
     },
-    "channels": {
-      "title": "Channel Workbench",
-      "count": "{{count}} channels",
-      "channel": "Channel",
-      "balance": "Balance",
-      "fees": "Fees (out / peer rate)",
+      "channels": {
+        "title": "Channel Workbench",
+        "count": "{{count}} channels",
+        "channel": "Channel",
+        "balance": "Balance",
+        "fees": "Fees (out / peer rate)",
       "feeOut": "Out {{value}} ppm",
       "feePeer": "Peer {{value}} ppm",
         "target": "Target outbound",

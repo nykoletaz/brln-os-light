@@ -925,6 +925,7 @@
       "overview": {
         "liveCost": "Custo ao vivo",
         "last24h": "Últimas 24h",
+        "eligibleCounts": "Fontes elegíveis: {{sources}} · Targets: {{targets}}",
         "lastScan": "Última varredura: {{value}}",
         "lastScanDisabled": "Auto desativado",
         "budgetLast24h": "Baseado na receita das últimas 24h",
