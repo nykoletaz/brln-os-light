@@ -114,6 +114,10 @@ export default function RebalanceCenter() {
   const locale = getLocale(i18n.language)
   const formatter = useMemo(() => new Intl.NumberFormat(locale), [locale])
   const pctFormatter = useMemo(() => new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }), [locale])
+  const dateTimeFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'medium' }),
+    [locale]
+  )
 
   const [config, setConfig] = useState<RebalanceConfig | null>(null)
   const [overview, setOverview] = useState<RebalanceOverview | null>(null)
@@ -129,6 +133,12 @@ export default function RebalanceCenter() {
 
   const formatSats = (value: number) => `${formatter.format(Math.round(value))} sats`
   const formatPct = (value: number) => `${pctFormatter.format(value)}%`
+  const formatTimestamp = (value?: string) => {
+    if (!value) return '-'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return dateTimeFormatter.format(date)
+  }
   const sortedChannels = useMemo(
     () => [...channels].sort((a, b) => a.local_pct - b.local_pct),
     [channels]
@@ -341,7 +351,7 @@ export default function RebalanceCenter() {
             <p className="text-xs text-fog/50">
               {t('rebalanceCenter.overview.lastScan', {
                 value: overview.auto_enabled
-                  ? (overview.last_scan_at || '-')
+                  ? formatTimestamp(overview.last_scan_at)
                   : t('rebalanceCenter.overview.lastScanDisabled')
               })}
             </p>

@@ -176,6 +176,43 @@ API endpoints:
 - `GET /api/reports/summary?range=...`
 - `GET /api/reports/live` (today 00:00 local → now, cached ~60s)
 
+## Rebalance Center
+Rebalance Center is an inbound (local/outbound) liquidity optimizer for LND. It can run manual rebalances per channel or fully automated scans that enqueue rebalances based on fee spread, ROI, and budget constraints. A rebalance only proceeds when **outgoing fee > peer fee** so you never pay more than the peer charge without a positive spread. Costs are tracked from notifications (fee msat) and aggregated into live cost + daily auto/manual spending.
+
+Key behavior:
+- Manual rebalances ignore the daily budget and can be started per channel.
+- Auto rebalances respect the daily budget and only target channels explicitly marked as `Auto`.
+- Source channels are selected from those with enough local liquidity and not excluded; a channel filled by rebalance becomes **protected** and cannot be used as a source until payback rules release it.
+- Targets are chosen when outbound liquidity deficit exceeds the deadband and fee spread is positive; ROI estimate uses last 7 days of routing revenue vs estimated rebalance cost.
+- The overview shows **Last scan** in local time and a scan status (e.g., no sources, no candidates, budget exhausted).
+
+Channel Workbench:
+- Set per-channel target outbound percentage.
+- Toggle `Auto` to allow auto mode to rebalance that channel.
+- Toggle `Exclude source` to block a channel from ever being used as a source.
+
+Configuration parameters:
+- `Enable auto rebalance`: turns auto scanning on/off.
+- `Scan interval (sec)`: how often auto scan runs.
+- `Daily budget (% of revenue)`: percent of 7-day average routing revenue allocated to auto rebalances.
+- `Deadband (%)`: minimum outbound deficit before a channel becomes a target.
+- `Minimum local for source (%)`: minimum local liquidity required for a channel to be a source.
+- `Economic ratio`: fraction of outgoing fee used as the maximum fee cap (bounded by fee spread).
+- `ROI minimum`: minimum estimated ROI (7d revenue / estimated cost) to enqueue auto jobs.
+- `Max concurrent`: maximum number of rebalances running at the same time.
+- `Minimum (sats)`: smallest rebalance amount allowed per attempt.
+- `Maximum (sats)`: upper bound for rebalance size (0 = unlimited).
+- `Fee ladder steps`: number of fee caps to try from low to high before giving up.
+- `Payback policy`: three modes can be enabled together.
+- `Release by payback`: unlocks protected liquidity once routing revenue repays the rebalance cost.
+- `Release by time`: unlocks after `Unlock days` since the last rebalance.
+- `Critical mode`: unlocks a fraction when sources are scarce for repeated scans.
+- `Unlock days`: number of days before time-based unlock.
+- `Critical release (%)`: percent of protected liquidity released per critical cycle.
+- `Critical cycles`: consecutive scans with low sources before critical release triggers.
+- `Critical min sources`: minimum eligible source channels required to avoid critical mode.
+- `Critical min available sats`: minimum total source liquidity required to avoid critical mode.
+
 ## Web terminal (optional)
 LightningOS Light can expose a protected web terminal using GoTTY.
 
