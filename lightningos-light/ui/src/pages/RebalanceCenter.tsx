@@ -145,7 +145,7 @@ export default function RebalanceCenter() {
     return dateTimeFormatter.format(date)
   }
   const sortedChannels = useMemo(
-    () => [...channels].sort((a, b) => a.local_pct - b.local_pct),
+    () => channels.filter((ch) => ch.active).sort((a, b) => a.local_pct - b.local_pct),
     [channels]
   )
   const parseRemaining = (reason?: string) => {
@@ -258,11 +258,11 @@ export default function RebalanceCenter() {
   }
 
   const handleBulkAuto = async (enabled: boolean) => {
-    if (channels.length === 0) return
+    if (sortedChannels.length === 0) return
     setStatus('')
     try {
       await Promise.all(
-        channels.map((channel) =>
+        sortedChannels.map((channel) =>
           updateRebalanceChannelAuto({
             channel_id: channel.channel_id,
             channel_point: channel.channel_point,
@@ -277,11 +277,11 @@ export default function RebalanceCenter() {
   }
 
   const handleBulkExclude = async (excluded: boolean) => {
-    if (channels.length === 0) return
+    if (sortedChannels.length === 0) return
     setStatus('')
     try {
       await Promise.all(
-        channels.map((channel) =>
+        sortedChannels.map((channel) =>
           updateRebalanceExclude({
             channel_id: channel.channel_id,
             channel_point: channel.channel_point,
@@ -696,7 +696,7 @@ export default function RebalanceCenter() {
                     <label className="flex items-center gap-2 text-xs text-fog/70">
                       <input
                         type="checkbox"
-                        checked={channels.length > 0 && channels.every((ch) => ch.auto_enabled)}
+                        checked={sortedChannels.length > 0 && sortedChannels.every((ch) => ch.auto_enabled)}
                         onChange={(e) => handleBulkAuto(e.target.checked)}
                       />
                       {t('rebalanceCenter.channels.bulkAuto')}
@@ -704,7 +704,7 @@ export default function RebalanceCenter() {
                     <label className="flex items-center gap-2 text-xs text-fog/70">
                       <input
                         type="checkbox"
-                        checked={channels.length > 0 && channels.every((ch) => ch.excluded_as_source)}
+                        checked={sortedChannels.length > 0 && sortedChannels.every((ch) => ch.excluded_as_source)}
                         onChange={(e) => handleBulkExclude(e.target.checked)}
                       />
                       {t('rebalanceCenter.channels.bulkExclude')}

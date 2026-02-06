@@ -530,6 +530,10 @@ func (s *RebalanceService) startJob(targetChannelID uint64, source string, reaso
     return 0, errors.New("target already within range")
   }
 
+  if s.isChannelBusy(targetChannelID) {
+    return 0, errors.New("channel busy")
+  }
+
   jobID, err := s.insertJob(ctx, &target, source, reason, targetPct, amount)
   if err != nil {
     return 0, err
@@ -905,6 +909,26 @@ func (s *RebalanceService) unlockChannel(channelID uint64) {
   s.mu.Unlock()
 }
 
+func (s *RebalanceService) isChannelBusy(channelID uint64) bool {
+  s.mu.Lock()
+  locked := s.channelLocks[channelID]
+  s.mu.Unlock()
+  if locked {
+    return true
+  }
+  if s.db == nil {
+    return false
+  }
+  var running int
+  _ = s.db.QueryRow(context.Background(), `
+select 1
+from rebalance_jobs
+where status in ('running','queued') and target_channel_id=$1
+limit 1
+`, int64(channelID)).Scan(&running)
+  return running == 1
+}
+
 func (s *RebalanceService) finishJob(jobID int64, status string, reason string) {
   ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
   defer cancel()
@@ -1019,6 +1043,12 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
   estCost := estimateMaxCost(targetAmount, outgoingFee, cfg.EconRatio, peerFeeRate)
   if estCost > 0 && revenue7dSat > 0 {
     roiEstimate = float64(revenue7dSat) / float64(estCost)
+  } else if estCost == 0 && targetAmount > 0 && outgoingFee > peerFeeRate {
+    // If estimated cost is zero, treat ROI as positive so the channel can still be eligible.
+    roiEstimate = cfg.ROIMin
+    if roiEstimate <= 0 {
+      roiEstimate = 1
+    }
   }
 
   return RebalanceChannel{
