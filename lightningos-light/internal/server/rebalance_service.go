@@ -1801,7 +1801,21 @@ func (s *RebalanceService) Channels(ctx context.Context) ([]RebalanceChannel, er
     return nil, err
   }
   result := []RebalanceChannel{}
+  seenIDs := map[uint64]bool{}
+  seenPoints := map[string]bool{}
   for _, ch := range channels {
+    if ch.ChannelID != 0 {
+      if seenIDs[ch.ChannelID] {
+        continue
+      }
+      seenIDs[ch.ChannelID] = true
+    }
+    if point := strings.TrimSpace(ch.ChannelPoint); point != "" {
+      if seenPoints[point] {
+        continue
+      }
+      seenPoints[point] = true
+    }
     setting := settings[ch.ChannelID]
     snapshot := s.buildChannelSnapshot(ctx, cfg, criticalActive, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], exclusions[ch.ChannelID])
     result = append(result, snapshot)

@@ -627,8 +627,8 @@ export default function RebalanceCenter() {
           <h3 className="text-lg font-semibold">{t('rebalanceCenter.channels.title')}</h3>
           <span className="text-xs text-fog/60">{t('rebalanceCenter.channels.count', { count: channels.length })}</span>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-fog/70">
+        <div className="max-h-[520px] overflow-x-auto overflow-y-auto pr-1">
+            <table className="w-full text-sm text-fog/70">
             <thead>
               <tr className="text-left">
                 <th className="pb-2">{t('rebalanceCenter.channels.channel')}</th>
@@ -661,7 +661,7 @@ export default function RebalanceCenter() {
             </thead>
             <tbody>
               {sortedChannels.map((ch) => (
-                <tr key={ch.channel_id} className="border-t border-white/5">
+                <tr key={ch.channel_point || String(ch.channel_id)} className="border-t border-white/5">
                   <td className="py-3">
                     <div className="text-fog">{ch.peer_alias || ch.remote_pubkey}</div>
                     <div className="text-xs text-fog/50">{ch.channel_point}</div>
