@@ -14,7 +14,6 @@ import (
 
   "lightningos-light/internal/lndclient"
 
-  "github.com/jackc/pgx/v5"
   "github.com/jackc/pgx/v5/pgtype"
   "github.com/jackc/pgx/v5/pgxpool"
 )
