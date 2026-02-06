@@ -32,13 +32,13 @@ type rebalanceConfigPayload struct {
 type rebalanceRunPayload struct {
   ChannelID uint64 `json:"channel_id"`
   ChannelPoint string `json:"channel_point"`
-  TargetInboundPct *float64 `json:"target_inbound_pct,omitempty"`
+  TargetOutboundPct *float64 `json:"target_outbound_pct,omitempty"`
 }
 
 type rebalanceChannelTargetPayload struct {
   ChannelID uint64 `json:"channel_id"`
   ChannelPoint string `json:"channel_point"`
-  TargetInboundPct float64 `json:"target_inbound_pct"`
+  TargetOutboundPct *float64 `json:"target_outbound_pct,omitempty"`
 }
 
 type rebalanceChannelAutoPayload struct {
@@ -227,12 +227,13 @@ func (s *Server) handleRebalanceRun(w http.ResponseWriter, r *http.Request) {
   }
   ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
   defer cancel()
-  if payload.TargetInboundPct != nil {
-    if *payload.TargetInboundPct <= 0 || *payload.TargetInboundPct > 100 {
-      writeError(w, http.StatusBadRequest, "target_inbound_pct must be 1-100")
+  targetPct := payload.TargetOutboundPct
+  if targetPct != nil {
+    if *targetPct <= 0 || *targetPct > 100 {
+      writeError(w, http.StatusBadRequest, "target_outbound_pct must be 1-100")
       return
     }
-    _ = s.rebalance.SetChannelTarget(ctx, payload.ChannelID, payload.ChannelPoint, *payload.TargetInboundPct)
+    _ = s.rebalance.SetChannelTarget(ctx, payload.ChannelID, payload.ChannelPoint, *targetPct)
   }
   jobID, err := s.rebalance.startJob(payload.ChannelID, "manual", "")
   if err != nil {
@@ -270,13 +271,18 @@ func (s *Server) handleRebalanceChannelTarget(w http.ResponseWriter, r *http.Req
     writeError(w, http.StatusBadRequest, "invalid json")
     return
   }
-  if payload.ChannelID == 0 || payload.TargetInboundPct <= 0 || payload.TargetInboundPct > 100 {
-    writeError(w, http.StatusBadRequest, "channel_id and target_inbound_pct required")
+  if payload.ChannelID == 0 {
+    writeError(w, http.StatusBadRequest, "channel_id required")
+    return
+  }
+  targetPct := payload.TargetOutboundPct
+  if targetPct == nil || *targetPct <= 0 || *targetPct > 100 {
+    writeError(w, http.StatusBadRequest, "channel_id and target_outbound_pct required")
     return
   }
   ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
   defer cancel()
-  if err := s.rebalance.SetChannelTarget(ctx, payload.ChannelID, payload.ChannelPoint, payload.TargetInboundPct); err != nil {
+  if err := s.rebalance.SetChannelTarget(ctx, payload.ChannelID, payload.ChannelPoint, *targetPct); err != nil {
     writeError(w, http.StatusInternalServerError, err.Error())
     return
   }

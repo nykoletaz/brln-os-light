@@ -21,7 +21,7 @@ import (
 
 const (
   rebalanceConfigID = 1
-  rebalanceDefaultTargetInboundPct = 50.0
+  rebalanceDefaultTargetOutboundPct = 50.0
 )
 
 const (
@@ -76,7 +76,7 @@ type RebalanceChannel struct {
   OutgoingFeePpm int64 `json:"outgoing_fee_ppm"`
   PeerInboundFeePpm int64 `json:"peer_inbound_fee_ppm"`
   SpreadPpm int64 `json:"spread_ppm"`
-  TargetInboundPct float64 `json:"target_inbound_pct"`
+  TargetOutboundPct float64 `json:"target_outbound_pct"`
   TargetAmountSat int64 `json:"target_amount_sat"`
   AutoEnabled bool `json:"auto_enabled"`
   EligibleAsTarget bool `json:"eligible_as_target"`
@@ -98,7 +98,7 @@ type RebalanceJob struct {
   Reason string `json:"reason,omitempty"`
   TargetChannelID uint64 `json:"target_channel_id"`
   TargetChannelPoint string `json:"target_channel_point"`
-  TargetInboundPct float64 `json:"target_inbound_pct"`
+  TargetOutboundPct float64 `json:"target_outbound_pct"`
   TargetAmountSat int64 `json:"target_amount_sat"`
 }
 
@@ -127,7 +127,7 @@ type RebalanceEvent struct {
 type channelSetting struct {
   ChannelID uint64
   ChannelPoint string
-  TargetInboundPct float64
+  TargetOutboundPct float64
   AutoEnabled bool
 }
 
@@ -369,10 +369,10 @@ func (s *RebalanceService) runAutoScan() {
   totalAvailable := int64(0)
   for _, ch := range channels {
     setting := settings[ch.ChannelID]
-    targetPct := setting.TargetInboundPct
+    targetPct := setting.TargetOutboundPct
     autoEnabled := setting.AutoEnabled
     if targetPct <= 0 {
-      targetPct = rebalanceDefaultTargetInboundPct
+      targetPct = rebalanceDefaultTargetOutboundPct
     }
     if !autoEnabled {
       continue
@@ -411,7 +411,7 @@ func (s *RebalanceService) runAutoScan() {
   s.mu.Unlock()
 
   sort.Slice(candidates, func(i, j int) bool {
-    return candidates[i].Channel.RemotePct < candidates[j].Channel.RemotePct
+    return candidates[i].Channel.LocalPct < candidates[j].Channel.LocalPct
   })
 
   budget, spent := s.getDailyBudget(ctx)
@@ -466,9 +466,9 @@ func (s *RebalanceService) startJob(targetChannelID uint64, source string, reaso
 
   settings, _ := s.loadChannelSettings(ctx)
   setting := settings[targetChannelID]
-  targetPct := setting.TargetInboundPct
+  targetPct := setting.TargetOutboundPct
   if targetPct <= 0 {
-    targetPct = rebalanceDefaultTargetInboundPct
+    targetPct = rebalanceDefaultTargetOutboundPct
   }
   amount := computeDeficitAmount(target, targetPct)
   if amount <= 0 {
@@ -537,13 +537,13 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     snapshot := s.buildChannelSnapshot(ctx, cfg, false, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], exclusions[ch.ChannelID])
     if ch.ChannelID == targetChannelID {
       targetFound = true
-      snapshot.TargetInboundPct = targetPct
+      snapshot.TargetOutboundPct = targetPct
       amount = computeDeficitAmount(ch, targetPct)
       if cfg.MaxAmountSat > 0 && amount > cfg.MaxAmountSat {
         amount = cfg.MaxAmountSat
       }
       snapshot.TargetAmountSat = amount
-      deficitPct := snapshot.TargetInboundPct - snapshot.RemotePct
+      deficitPct := snapshot.TargetOutboundPct - snapshot.LocalPct
       snapshot.EligibleAsTarget = snapshot.Active && deficitPct > cfg.DeadbandPct && snapshot.OutgoingFeePpm > snapshot.PeerInboundFeePpm
     }
     channelSnapshots = append(channelSnapshots, snapshot)
@@ -790,9 +790,9 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
   }
 
   spread := outgoingFee - peerInbound
-  target := setting.TargetInboundPct
+  target := setting.TargetOutboundPct
   if target <= 0 {
-    target = rebalanceDefaultTargetInboundPct
+    target = rebalanceDefaultTargetOutboundPct
   }
 
   protected := int64(0)
@@ -812,7 +812,7 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
   }
 
   eligibleTarget := false
-  deficitPct := target - remotePct
+  deficitPct := target - localPct
   if ch.Active && deficitPct > cfg.DeadbandPct && outgoingFee > peerInbound {
     eligibleTarget = true
   }
@@ -870,7 +870,7 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
     OutgoingFeePpm: outgoingFee,
     PeerInboundFeePpm: peerInbound,
     SpreadPpm: spread,
-    TargetInboundPct: target,
+    TargetOutboundPct: target,
     TargetAmountSat: targetAmount,
     AutoEnabled: setting.AutoEnabled,
     EligibleAsTarget: eligibleTarget,
@@ -884,13 +884,13 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
   }
 }
 
-func computeDeficitAmount(ch lndclient.ChannelInfo, targetInboundPct float64) int64 {
+func computeDeficitAmount(ch lndclient.ChannelInfo, targetOutboundPct float64) int64 {
   if ch.CapacitySat <= 0 {
     return 0
   }
   capacity := float64(ch.CapacitySat)
-  currentInbound := float64(ch.RemoteBalanceSat) / capacity * 100
-  deficit := targetInboundPct - currentInbound
+  currentOutbound := float64(ch.LocalBalanceSat) / capacity * 100
+  deficit := targetOutboundPct - currentOutbound
   if deficit <= 0 {
     return 0
   }
@@ -948,6 +948,51 @@ func (s *RebalanceService) ensureSchema(ctx context.Context) error {
     return errors.New("db not configured")
   }
   _, err := s.db.Exec(ctx, `
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='rebalance_channel_settings' and column_name='target_inbound_pct'
+  ) and not exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='rebalance_channel_settings' and column_name='target_outbound_pct'
+  ) then
+    alter table rebalance_channel_settings rename column target_inbound_pct to target_outbound_pct;
+    update rebalance_channel_settings
+      set target_outbound_pct = 100 - target_outbound_pct
+      where target_outbound_pct between 0 and 100;
+  elsif exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='rebalance_channel_settings' and column_name='target_inbound_pct'
+  ) and exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='rebalance_channel_settings' and column_name='target_outbound_pct'
+  ) then
+    alter table rebalance_channel_settings drop column target_inbound_pct;
+  end if;
+
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='rebalance_jobs' and column_name='target_inbound_pct'
+  ) and not exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='rebalance_jobs' and column_name='target_outbound_pct'
+  ) then
+    alter table rebalance_jobs rename column target_inbound_pct to target_outbound_pct;
+    update rebalance_jobs
+      set target_outbound_pct = 100 - target_outbound_pct
+      where target_outbound_pct between 0 and 100;
+  elsif exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='rebalance_jobs' and column_name='target_inbound_pct'
+  ) and exists (
+    select 1 from information_schema.columns
+    where table_schema='public' and table_name='rebalance_jobs' and column_name='target_outbound_pct'
+  ) then
+    alter table rebalance_jobs drop column target_inbound_pct;
+  end if;
+end $$;
+
 create table if not exists rebalance_config (
   id smallint primary key,
   auto_enabled boolean not null default false,
@@ -972,7 +1017,7 @@ create table if not exists rebalance_config (
 create table if not exists rebalance_channel_settings (
   channel_id bigint primary key,
   channel_point text not null,
-  target_inbound_pct double precision not null default 50,
+  target_outbound_pct double precision not null default 50,
   auto_enabled boolean not null default false,
   updated_at timestamptz not null default now()
 );
@@ -1003,7 +1048,7 @@ create table if not exists rebalance_jobs (
   reason text,
   target_channel_id bigint not null,
   target_channel_point text not null,
-  target_inbound_pct double precision not null,
+  target_outbound_pct double precision not null,
   target_amount_sat bigint not null,
   config_snapshot jsonb
 );
@@ -1132,7 +1177,7 @@ func (s *RebalanceService) loadChannelSettings(ctx context.Context) (map[uint64]
     return settings, nil
   }
   rows, err := s.db.Query(ctx, `
-select channel_id, channel_point, target_inbound_pct, auto_enabled from rebalance_channel_settings
+select channel_id, channel_point, target_outbound_pct, auto_enabled from rebalance_channel_settings
 `)
   if err != nil {
     return settings, err
@@ -1141,7 +1186,7 @@ select channel_id, channel_point, target_inbound_pct, auto_enabled from rebalanc
   for rows.Next() {
     var channelID int64
     var setting channelSetting
-    if err := rows.Scan(&channelID, &setting.ChannelPoint, &setting.TargetInboundPct, &setting.AutoEnabled); err != nil {
+    if err := rows.Scan(&channelID, &setting.ChannelPoint, &setting.TargetOutboundPct, &setting.AutoEnabled); err != nil {
       return settings, err
     }
     setting.ChannelID = uint64(channelID)
@@ -1377,7 +1422,7 @@ func (s *RebalanceService) insertJob(ctx context.Context, target *lndclient.Chan
   var jobID int64
   err := s.db.QueryRow(ctx, `
 insert into rebalance_jobs (
-  source, status, reason, target_channel_id, target_channel_point, target_inbound_pct, target_amount_sat, config_snapshot
+  source, status, reason, target_channel_id, target_channel_point, target_outbound_pct, target_amount_sat, config_snapshot
 ) values ($1,'running',$2,$3,$4,$5,$6,$7)
  returning id
 `, source, nullableString(reason), int64(target.ChannelID), target.ChannelPoint, targetPct, amount, nil).Scan(&jobID)
@@ -1483,7 +1528,7 @@ func (s *RebalanceService) Queue(ctx context.Context) ([]RebalanceJob, []Rebalan
   }
   rows, err := s.db.Query(ctx, `
 select id, created_at, completed_at, source, status, reason, target_channel_id,
-  target_channel_point, target_inbound_pct, target_amount_sat
+  target_channel_point, target_outbound_pct, target_amount_sat
 from rebalance_jobs
 where status in ('running','queued')
 order by created_at desc
@@ -1499,7 +1544,7 @@ order by created_at desc
     var reason pgtype.Text
     var targetChannelID int64
     if err := rows.Scan(&job.ID, &created, &completed, &job.Source, &job.Status, &reason, &targetChannelID,
-      &job.TargetChannelPoint, &job.TargetInboundPct, &job.TargetAmountSat); err != nil {
+      &job.TargetChannelPoint, &job.TargetOutboundPct, &job.TargetAmountSat); err != nil {
       return jobs, attempts, err
     }
     job.CreatedAt = created.UTC().Format(time.RFC3339)
@@ -1563,7 +1608,7 @@ func (s *RebalanceService) History(ctx context.Context, limit int) ([]RebalanceJ
   }
   rows, err := s.db.Query(ctx, `
 select id, created_at, completed_at, source, status, reason, target_channel_id,
-  target_channel_point, target_inbound_pct, target_amount_sat
+  target_channel_point, target_outbound_pct, target_amount_sat
 from rebalance_jobs
 where status in ('succeeded','failed','cancelled')
 order by created_at desc
@@ -1579,7 +1624,7 @@ limit $1`, limit)
     var reason pgtype.Text
     var targetChannelID int64
     if err := rows.Scan(&job.ID, &created, &completed, &job.Source, &job.Status, &reason, &targetChannelID,
-      &job.TargetChannelPoint, &job.TargetInboundPct, &job.TargetAmountSat); err != nil {
+      &job.TargetChannelPoint, &job.TargetOutboundPct, &job.TargetAmountSat); err != nil {
       return jobs, attempts, err
     }
     job.CreatedAt = created.UTC().Format(time.RFC3339)
@@ -1601,12 +1646,12 @@ func (s *RebalanceService) SetChannelTarget(ctx context.Context, channelID uint6
     return errors.New("db unavailable")
   }
   if targetPct <= 0 || targetPct > 100 {
-    return errors.New("target inbound must be between 1 and 100")
+    return errors.New("target outbound must be between 1 and 100")
   }
   _, err := s.db.Exec(ctx, `
-insert into rebalance_channel_settings (channel_id, channel_point, target_inbound_pct, auto_enabled, updated_at)
+insert into rebalance_channel_settings (channel_id, channel_point, target_outbound_pct, auto_enabled, updated_at)
 values ($1,$2,$3,false,now())
- on conflict (channel_id) do update set target_inbound_pct=excluded.target_inbound_pct, channel_point=excluded.channel_point, updated_at=now()
+ on conflict (channel_id) do update set target_outbound_pct=excluded.target_outbound_pct, channel_point=excluded.channel_point, updated_at=now()
 `, int64(channelID), channelPoint, targetPct)
   return err
 }
@@ -1616,10 +1661,10 @@ func (s *RebalanceService) SetChannelAuto(ctx context.Context, channelID uint64,
     return errors.New("db unavailable")
   }
   _, err := s.db.Exec(ctx, `
-insert into rebalance_channel_settings (channel_id, channel_point, target_inbound_pct, auto_enabled, updated_at)
+insert into rebalance_channel_settings (channel_id, channel_point, target_outbound_pct, auto_enabled, updated_at)
 values ($1,'', $2, $3, now())
  on conflict (channel_id) do update set auto_enabled=excluded.auto_enabled, updated_at=now()
-`, int64(channelID), rebalanceDefaultTargetInboundPct, autoEnabled)
+`, int64(channelID), rebalanceDefaultTargetOutboundPct, autoEnabled)
   return err
 }
 

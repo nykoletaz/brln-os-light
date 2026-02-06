@@ -59,7 +59,7 @@ type RebalanceChannel = {
   outgoing_fee_ppm: number
   peer_inbound_fee_ppm: number
   spread_ppm: number
-  target_inbound_pct: number
+  target_outbound_pct: number
   target_amount_sat: number
   auto_enabled: boolean
   eligible_as_target: boolean
@@ -81,7 +81,7 @@ type RebalanceJob = {
   reason?: string
   target_channel_id: number
   target_channel_point: string
-  target_inbound_pct: number
+  target_outbound_pct: number
   target_amount_sat: number
 }
 
@@ -119,6 +119,7 @@ export default function RebalanceCenter() {
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('')
   const [saving, setSaving] = useState(false)
+  const [autoOpen, setAutoOpen] = useState(false)
   const [editTargets, setEditTargets] = useState<Record<number, string>>({})
 
   const formatSats = (value: number) => `${formatter.format(Math.round(value))} sats`
@@ -212,7 +213,7 @@ export default function RebalanceCenter() {
   const handleUpdateTarget = async (channel: RebalanceChannel) => {
     const nextValue = editTargets[channel.channel_id]
     const parsed = Number(nextValue)
-    if (!parsed || parsed <= 0 || parsed > 100) {
+    if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 100) {
       setStatus(t('rebalanceCenter.invalidTarget'))
       return
     }
@@ -220,7 +221,7 @@ export default function RebalanceCenter() {
       await updateRebalanceChannelTarget({
         channel_id: channel.channel_id,
         channel_point: channel.channel_point,
-        target_inbound_pct: parsed
+        target_outbound_pct: parsed
       })
       setEditTargets((prev) => ({ ...prev, [channel.channel_id]: String(parsed) }))
       loadAll()
@@ -231,12 +232,12 @@ export default function RebalanceCenter() {
 
   const handleRunRebalance = async (channel: RebalanceChannel) => {
     const nextValue = editTargets[channel.channel_id]
-    const parsed = nextValue ? Number(nextValue) : channel.target_inbound_pct
+    const parsed = nextValue ? Number(nextValue) : channel.target_outbound_pct
     try {
       await runRebalance({
         channel_id: channel.channel_id,
         channel_point: channel.channel_point,
-        target_inbound_pct: parsed
+        target_outbound_pct: parsed
       })
       loadAll()
     } catch (err) {
@@ -257,7 +258,6 @@ export default function RebalanceCenter() {
           <h2 className="text-2xl font-semibold">{t('rebalanceCenter.title')}</h2>
           <p className="text-fog/60">{t('rebalanceCenter.subtitle')}</p>
         </div>
-        <span className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.desktopFirst')}</span>
       </div>
 
       {status && <p className="text-sm text-brass">{status}</p>}
@@ -291,13 +291,21 @@ export default function RebalanceCenter() {
       )}
 
       <div className="section-card space-y-4">
-        <div>
-          <h3 className="text-lg font-semibold">{t('rebalanceCenter.settings.title')}</h3>
-          <p className="text-fog/60">{t('rebalanceCenter.settings.subtitle')}</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold">{t('rebalanceCenter.settings.title')}</h3>
+            <p className="text-fog/60">{t('rebalanceCenter.settings.subtitle')}</p>
+          </div>
+          <button className="btn-secondary text-xs px-3 py-1" onClick={() => setAutoOpen((prev) => !prev)}>
+            {autoOpen ? t('common.hide') : t('rebalanceCenter.settings.show')}
+          </button>
         </div>
-        {config && (
+        {config && autoOpen && (
           <div className="grid gap-4 lg:grid-cols-3">
-            <label className="flex items-center gap-2 text-sm text-fog/70">
+            <label
+              className="flex items-center gap-2 text-sm text-fog/70"
+              title={t('rebalanceCenter.settingsHints.autoEnabled')}
+            >
               <input
                 type="checkbox"
                 checked={config.auto_enabled}
@@ -306,7 +314,9 @@ export default function RebalanceCenter() {
               {t('rebalanceCenter.settings.autoEnabled')}
             </label>
             <div className="space-y-2">
-              <label className="text-sm text-fog/70">{t('rebalanceCenter.settings.scanInterval')}</label>
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.scanInterval')}>
+                {t('rebalanceCenter.settings.scanInterval')}
+              </label>
               <input
                 className="input-field"
                 type="number"
@@ -316,7 +326,9 @@ export default function RebalanceCenter() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-fog/70">{t('rebalanceCenter.settings.dailyBudgetPct')}</label>
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.dailyBudgetPct')}>
+                {t('rebalanceCenter.settings.dailyBudgetPct')}
+              </label>
               <input
                 className="input-field"
                 type="number"
@@ -327,7 +339,9 @@ export default function RebalanceCenter() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-fog/70">{t('rebalanceCenter.settings.deadband')}</label>
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.deadband')}>
+                {t('rebalanceCenter.settings.deadband')}
+              </label>
               <input
                 className="input-field"
                 type="number"
@@ -338,7 +352,9 @@ export default function RebalanceCenter() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-fog/70">{t('rebalanceCenter.settings.econRatio')}</label>
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.econRatio')}>
+                {t('rebalanceCenter.settings.econRatio')}
+              </label>
               <input
                 className="input-field"
                 type="number"
@@ -349,7 +365,9 @@ export default function RebalanceCenter() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-fog/70">{t('rebalanceCenter.settings.roiMin')}</label>
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.roiMin')}>
+                {t('rebalanceCenter.settings.roiMin')}
+              </label>
               <input
                 className="input-field"
                 type="number"
@@ -360,7 +378,9 @@ export default function RebalanceCenter() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-fog/70">{t('rebalanceCenter.settings.maxConcurrent')}</label>
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.maxConcurrent')}>
+                {t('rebalanceCenter.settings.maxConcurrent')}
+              </label>
               <input
                 className="input-field"
                 type="number"
@@ -370,7 +390,9 @@ export default function RebalanceCenter() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-fog/70">{t('rebalanceCenter.settings.minAmount')}</label>
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.minAmount')}>
+                {t('rebalanceCenter.settings.minAmount')}
+              </label>
               <input
                 className="input-field"
                 type="number"
@@ -380,7 +402,9 @@ export default function RebalanceCenter() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-fog/70">{t('rebalanceCenter.settings.maxAmount')}</label>
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.maxAmount')}>
+                {t('rebalanceCenter.settings.maxAmount')}
+              </label>
               <input
                 className="input-field"
                 type="number"
@@ -390,7 +414,9 @@ export default function RebalanceCenter() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-fog/70">{t('rebalanceCenter.settings.feeSteps')}</label>
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.feeSteps')}>
+                {t('rebalanceCenter.settings.feeSteps')}
+              </label>
               <input
                 className="input-field"
                 type="number"
@@ -401,11 +427,16 @@ export default function RebalanceCenter() {
             </div>
           </div>
         )}
-        {config && (
+        {config && autoOpen && (
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="space-y-2">
-              <p className="text-sm text-fog/70">{t('rebalanceCenter.settings.paybackPolicy')}</p>
-              <label className="flex items-center gap-2 text-sm text-fog/70">
+              <p className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.paybackPolicy')}>
+                {t('rebalanceCenter.settings.paybackPolicy')}
+              </p>
+              <label
+                className="flex items-center gap-2 text-sm text-fog/70"
+                title={t('rebalanceCenter.settingsHints.paybackMode')}
+              >
                 <input
                   type="checkbox"
                   checked={(config.payback_mode_flags & PAYBACK_MODE_PAYBACK) !== 0}
@@ -413,7 +444,10 @@ export default function RebalanceCenter() {
                 />
                 {t('rebalanceCenter.settings.paybackMode')}
               </label>
-              <label className="flex items-center gap-2 text-sm text-fog/70">
+              <label
+                className="flex items-center gap-2 text-sm text-fog/70"
+                title={t('rebalanceCenter.settingsHints.timeMode')}
+              >
                 <input
                   type="checkbox"
                   checked={(config.payback_mode_flags & PAYBACK_MODE_TIME) !== 0}
@@ -421,7 +455,10 @@ export default function RebalanceCenter() {
                 />
                 {t('rebalanceCenter.settings.timeMode')}
               </label>
-              <label className="flex items-center gap-2 text-sm text-fog/70">
+              <label
+                className="flex items-center gap-2 text-sm text-fog/70"
+                title={t('rebalanceCenter.settingsHints.criticalMode')}
+              >
                 <input
                   type="checkbox"
                   checked={(config.payback_mode_flags & PAYBACK_MODE_CRITICAL) !== 0}
@@ -431,7 +468,9 @@ export default function RebalanceCenter() {
               </label>
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-fog/70">{t('rebalanceCenter.settings.unlockDays')}</label>
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.unlockDays')}>
+                {t('rebalanceCenter.settings.unlockDays')}
+              </label>
               <input
                 className="input-field"
                 type="number"
@@ -441,7 +480,9 @@ export default function RebalanceCenter() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-fog/70">{t('rebalanceCenter.settings.criticalRelease')}</label>
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.criticalRelease')}>
+                {t('rebalanceCenter.settings.criticalRelease')}
+              </label>
               <input
                 className="input-field"
                 type="number"
@@ -452,7 +493,9 @@ export default function RebalanceCenter() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm text-fog/70">{t('rebalanceCenter.settings.criticalCycles')}</label>
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.criticalCycles')}>
+                {t('rebalanceCenter.settings.criticalCycles')}
+              </label>
               <input
                 className="input-field"
                 type="number"
@@ -463,11 +506,13 @@ export default function RebalanceCenter() {
             </div>
           </div>
         )}
-        <div className="flex flex-wrap items-center gap-3">
-          <button className="btn-primary" onClick={handleSaveConfig} disabled={saving}>
-            {saving ? t('rebalanceCenter.saving') : t('rebalanceCenter.save')}
-          </button>
-        </div>
+        {autoOpen && (
+          <div className="flex flex-wrap items-center gap-3">
+            <button className="btn-primary" onClick={handleSaveConfig} disabled={saving}>
+              {saving ? t('rebalanceCenter.saving') : t('rebalanceCenter.save')}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="section-card space-y-4">
@@ -499,19 +544,29 @@ export default function RebalanceCenter() {
                     <div className="text-xs text-fog/50">{formatSats(ch.local_balance_sat)} | {formatSats(ch.remote_balance_sat)}</div>
                   </td>
                   <td className="py-3">
-                    <div>{ch.outgoing_fee_ppm} ppm ? {ch.peer_inbound_fee_ppm} ppm</div>
+                    <div>
+                      {t('rebalanceCenter.channels.feeOut', { value: ch.outgoing_fee_ppm })} ·{' '}
+                      {t('rebalanceCenter.channels.feePeerIn', { value: ch.peer_inbound_fee_ppm })}
+                    </div>
                     <div className="text-xs text-fog/50">{t('rebalanceCenter.channels.spread', { value: ch.spread_ppm })}</div>
                   </td>
                   <td className="py-3">
-                    <input
-                      className="input-field w-24"
-                      type="number"
-                      min={1}
-                      max={100}
-                      value={editTargets[ch.channel_id] ?? String(ch.target_inbound_pct)}
-                      onChange={(e) => setEditTargets((prev) => ({ ...prev, [ch.channel_id]: e.target.value }))}
-                    />
-                    <div className="text-xs text-fog/50">{t('rebalanceCenter.channels.amount', { value: formatSats(ch.target_amount_sat) })}</div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        className="input-field w-24"
+                        type="number"
+                        min={1}
+                        max={99}
+                        step={0.1}
+                        title={t('rebalanceCenter.channelsHints.targetOutbound')}
+                        value={editTargets[ch.channel_id] ?? String(Math.round(ch.target_outbound_pct * 10) / 10)}
+                        onChange={(e) => setEditTargets((prev) => ({ ...prev, [ch.channel_id]: e.target.value }))}
+                      />
+                      <span className="text-xs text-fog/60">%</span>
+                    </div>
+                    <div className="text-xs text-fog/50">
+                      {t('rebalanceCenter.channels.amount', { value: formatSats(ch.target_amount_sat) })}
+                    </div>
                   </td>
                   <td className="py-3">
                     <div>{formatSats(ch.protected_liquidity_sat)}</div>
@@ -519,19 +574,24 @@ export default function RebalanceCenter() {
                   </td>
                   <td className="py-3 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
-                      <button className="btn-secondary text-xs px-3 py-1" onClick={() => handleUpdateTarget(ch)}>
+                      <button
+                        className="btn-secondary text-xs px-3 py-1"
+                        onClick={() => handleUpdateTarget(ch)}
+                        title={t('rebalanceCenter.channelsHints.saveTarget')}
+                      >
                         {t('common.save')}
                       </button>
                       <button
                         className="btn-primary text-xs px-3 py-1"
                         onClick={() => handleRunRebalance(ch)}
                         disabled={!ch.eligible_as_target}
+                        title={t('rebalanceCenter.channelsHints.rebalanceIn')}
                       >
                         {t('rebalanceCenter.channels.rebalanceIn')}
                       </button>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-xs">
-                      <label className="flex items-center gap-2">
+                      <label className="flex items-center gap-2" title={t('rebalanceCenter.channelsHints.auto')}>
                         <input
                           type="checkbox"
                           checked={ch.auto_enabled}
@@ -539,7 +599,7 @@ export default function RebalanceCenter() {
                         />
                         {t('rebalanceCenter.channels.auto')}
                       </label>
-                      <label className="flex items-center gap-2">
+                      <label className="flex items-center gap-2" title={t('rebalanceCenter.channelsHints.excludeSource')}>
                         <input
                           type="checkbox"
                           checked={ch.excluded_as_source}
@@ -573,7 +633,7 @@ export default function RebalanceCenter() {
                 <span className="text-xs uppercase tracking-wide text-fog/60">{job.status}</span>
               </div>
               <div className="mt-2 text-xs text-fog/50">
-                {t('rebalanceCenter.queue.target', { value: formatPct(job.target_inbound_pct) })}
+                {t('rebalanceCenter.queue.target', { value: formatPct(job.target_outbound_pct) })}
               </div>
               {queueAttempts.filter((attempt) => attempt.job_id === job.id).map((attempt) => (
                 <div key={attempt.id} className="mt-2 text-xs text-fog/60">
@@ -601,7 +661,7 @@ export default function RebalanceCenter() {
                 <span className="text-xs uppercase tracking-wide text-fog/60">{job.status}</span>
               </div>
               <div className="mt-2 text-xs text-fog/50">
-                {t('rebalanceCenter.history.target', { value: formatPct(job.target_inbound_pct) })}
+                {t('rebalanceCenter.history.target', { value: formatPct(job.target_outbound_pct) })}
               </div>
               {job.reason && <div className="mt-1 text-xs text-amber-200">{job.reason}</div>}
             </div>

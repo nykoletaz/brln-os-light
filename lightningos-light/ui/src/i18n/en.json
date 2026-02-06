@@ -918,7 +918,7 @@
     "settingsSaved": "Settings saved.",
     "settingsSaveFailed": "Failed to save settings.",
     "saveFailed": "Save failed.",
-    "invalidTarget": "Invalid inbound target.",
+    "invalidTarget": "Invalid outbound target.",
     "runFailed": "Rebalance failed to start.",
     "saving": "Saving...",
     "save": "Save",
@@ -935,6 +935,7 @@
     "settings": {
       "title": "Auto Mode Settings",
       "subtitle": "Guardrails, budget, and payback rules.",
+      "show": "Configure",
       "autoEnabled": "Enable auto rebalance",
       "scanInterval": "Scan interval (sec)",
       "dailyBudgetPct": "Daily budget (% of revenue)",
@@ -953,33 +954,61 @@
       "criticalRelease": "Critical release (%)",
       "criticalCycles": "Critical cycles"
     },
+    "settingsHints": {
+      "autoEnabled": "Turns on periodic scans and automatic rebalances.",
+      "scanInterval": "How often the auto engine scans channels for opportunities.",
+      "dailyBudgetPct": "Daily spend cap as a % of 7-day average routing revenue.",
+      "deadband": "Minimum outbound deficit before a channel becomes a target.",
+      "econRatio": "Fraction of outbound fee used as max fee for route finding.",
+      "roiMin": "Minimum expected ROI (7d revenue / estimated cost) to auto rebalance.",
+      "maxConcurrent": "Maximum simultaneous rebalance jobs.",
+      "minAmount": "Minimum sats per rebalance attempt.",
+      "maxAmount": "Maximum sats per rebalance attempt. 0 = no cap.",
+      "feeSteps": "Number of fee limits tried from low to high.",
+      "paybackPolicy": "Rules that unlock protected liquidity.",
+      "paybackMode": "Unlock when routing revenue pays back the rebalance cost.",
+      "timeMode": "Unlock after N days since last rebalance.",
+      "criticalMode": "Allow partial release when sources are scarce.",
+      "unlockDays": "Days before protected liquidity can be reused.",
+      "criticalRelease": "Percent of protected liquidity released per critical cycle.",
+      "criticalCycles": "Number of consecutive critical scans before releasing."
+    },
     "channels": {
       "title": "Channel Workbench",
       "count": "{{count}} channels",
       "channel": "Channel",
       "balance": "Balance",
-      "fees": "Fees",
-      "target": "Target inbound",
+      "fees": "Fees (out / peer in)",
+      "feeOut": "Out {{value}} ppm",
+      "feePeerIn": "Peer in {{value}} ppm",
+      "target": "Target outbound",
       "protected": "Protected",
       "actions": "Actions",
       "spread": "Spread {{value}} ppm",
-      "amount": "Target amount: {{value}}",
+      "amount": "Local liquidity to add: {{value}}",
       "payback": "Payback {{value}}%",
       "rebalanceIn": "Rebalance In",
       "auto": "Auto",
       "excludeSource": "Exclude source",
       "roiEstimate": "ROI est. {{value}}"
     },
+    "channelsHints": {
+      "targetOutbound": "Desired outbound liquidity percentage after the rebalance.",
+      "saveTarget": "Save the target outbound percentage for this channel.",
+      "rebalanceIn": "Start a rebalance to increase local (outbound) liquidity.",
+      "auto": "Allow auto mode to rebalance this channel.",
+      "excludeSource": "Never use this channel as a source for rebalances."
+    },
     "queue": {
       "title": "Active Queue",
       "empty": "No active rebalances.",
-      "target": "Target inbound: {{value}}",
+      "target": "Target outbound: {{value}}",
       "attempt": "Attempt {{index}} · {{amount}} · fee cap {{fee}} ppm"
     },
     "history": {
       "title": "Recent History",
       "empty": "No completed rebalances yet.",
-      "target": "Target inbound: {{value}}"
+      "target": "Target outbound: {{value}}"
     }
   }
 }
