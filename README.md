@@ -194,7 +194,7 @@ Channel Workbench:
 Configuration parameters:
 - `Enable auto rebalance`: turns auto scanning on/off.
 - `Scan interval (sec)`: how often auto scan runs.
-- `Daily budget (% of revenue)`: percent of 7-day average routing revenue allocated to auto rebalances.
+- `Daily budget (% of revenue)`: percent of the last 24h routing revenue allocated to auto rebalances.
 - `Deadband (%)`: minimum outbound deficit before a channel becomes a target.
 - `Minimum local for source (%)`: minimum local liquidity required for a channel to be a source.
 - `Economic ratio`: fraction of outgoing fee used as the maximum fee cap (bounded by fee spread).
@@ -203,6 +203,9 @@ Configuration parameters:
 - `Minimum (sats)`: smallest rebalance amount allowed per attempt.
 - `Maximum (sats)`: upper bound for rebalance size (0 = unlimited).
 - `Fee ladder steps`: number of fee caps to try from low to high before giving up.
+- `Amount probe steps`: number of amount probes from large to small per fee step.
+- `Adaptive amount probing`: caps the next attempt based on the last successful amount.
+- `Rebalance timeout (sec)`: maximum runtime per rebalance job (auto or manual).
 - `Payback policy`: three modes can be enabled together.
 - `Release by payback`: unlocks protected liquidity once routing revenue repays the rebalance cost.
 - `Release by time`: unlocks after `Unlock days` since the last rebalance.

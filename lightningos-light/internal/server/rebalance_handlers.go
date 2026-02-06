@@ -23,6 +23,9 @@ type rebalanceConfigPayload struct {
   MinAmountSat *int64 `json:"min_amount_sat,omitempty"`
   MaxAmountSat *int64 `json:"max_amount_sat,omitempty"`
   FeeLadderSteps *int `json:"fee_ladder_steps,omitempty"`
+  AmountProbeSteps *int `json:"amount_probe_steps,omitempty"`
+  AmountProbeAdaptive *bool `json:"amount_probe_adaptive,omitempty"`
+  RebalanceTimeoutSec *int `json:"rebalance_timeout_sec,omitempty"`
   PaybackModeFlags *int `json:"payback_mode_flags,omitempty"`
   UnlockDays *int `json:"unlock_days,omitempty"`
   CriticalReleasePct *float64 `json:"critical_release_pct,omitempty"`
@@ -123,6 +126,15 @@ func (s *Server) handleRebalanceConfigPost(w http.ResponseWriter, r *http.Reques
   }
   if payload.FeeLadderSteps != nil {
     cfg.FeeLadderSteps = *payload.FeeLadderSteps
+  }
+  if payload.AmountProbeSteps != nil {
+    cfg.AmountProbeSteps = *payload.AmountProbeSteps
+  }
+  if payload.AmountProbeAdaptive != nil {
+    cfg.AmountProbeAdaptive = *payload.AmountProbeAdaptive
+  }
+  if payload.RebalanceTimeoutSec != nil {
+    cfg.RebalanceTimeoutSec = *payload.RebalanceTimeoutSec
   }
   if payload.PaybackModeFlags != nil {
     cfg.PaybackModeFlags = *payload.PaybackModeFlags

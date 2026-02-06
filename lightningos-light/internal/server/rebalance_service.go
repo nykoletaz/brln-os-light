@@ -43,6 +43,9 @@ type RebalanceConfig struct {
   MinAmountSat int64 `json:"min_amount_sat"`
   MaxAmountSat int64 `json:"max_amount_sat"`
   FeeLadderSteps int `json:"fee_ladder_steps"`
+  AmountProbeSteps int `json:"amount_probe_steps"`
+  AmountProbeAdaptive bool `json:"amount_probe_adaptive"`
+  RebalanceTimeoutSec int `json:"rebalance_timeout_sec"`
   PaybackModeFlags int `json:"payback_mode_flags"`
   UnlockDays int `json:"unlock_days"`
   CriticalReleasePct float64 `json:"critical_release_pct"`
@@ -191,6 +194,9 @@ func defaultRebalanceConfig() RebalanceConfig {
     MinAmountSat: 20000,
     MaxAmountSat: 0,
     FeeLadderSteps: 4,
+    AmountProbeSteps: 4,
+    AmountProbeAdaptive: true,
+    RebalanceTimeoutSec: 600,
     PaybackModeFlags: paybackModePayback | paybackModeTime | paybackModeCritical,
     UnlockDays: 14,
     CriticalReleasePct: 20,
@@ -538,7 +544,12 @@ func (s *RebalanceService) startJob(targetChannelID uint64, source string, reaso
 }
 
 func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount int64, targetPct float64, jobSource string) {
-  ctx, cancel := context.WithCancel(context.Background())
+  cfg, _ := s.loadConfig(context.Background())
+  timeoutSec := cfg.RebalanceTimeoutSec
+  if timeoutSec <= 0 {
+    timeoutSec = 600
+  }
+  ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
   s.mu.Lock()
   s.jobCancel[jobID] = cancel
   s.mu.Unlock()
@@ -561,7 +572,6 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
   }
   defer s.unlockChannel(targetChannelID)
 
-  cfg, _ := s.loadConfig(ctx)
   if cfg.MinAmountSat > 0 && amount < cfg.MinAmountSat {
     s.finishJob(jobID, "failed", "amount below minimum")
     return
@@ -655,40 +665,51 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     return
   }
 
-  remaining := amount
-  anySuccess := false
-  attemptIndex := 0
+    remaining := amount
+    anySuccess := false
+    attemptIndex := 0
+    adaptiveMaxAmount := int64(0)
 
     for _, source := range sources {
-      if ctx.Err() != nil {
+    if ctx.Err() != nil {
+      if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+        s.finishJob(jobID, "failed", "timeout")
+      } else {
         s.finishJob(jobID, "cancelled", "cancelled")
-        return
       }
+      return
+    }
 
-      maxFromSource := source.MaxSourceSat
-      if maxFromSource <= 0 {
+    maxFromSource := source.MaxSourceSat
+    if maxFromSource <= 0 {
         continue
       }
-      sendAmount := remaining
-      if sendAmount > maxFromSource {
-        sendAmount = maxFromSource
+    sendAmount := remaining
+    if sendAmount > maxFromSource {
+      sendAmount = maxFromSource
+    }
+    if cfg.AmountProbeAdaptive && adaptiveMaxAmount > 0 {
+      capAmount := adaptiveMaxAmount * 2
+      if capAmount > 0 && capAmount < sendAmount {
+        sendAmount = capAmount
       }
-      if cfg.MinAmountSat > 0 && sendAmount < cfg.MinAmountSat {
-        continue
-      }
+    }
+    if cfg.MinAmountSat > 0 && sendAmount < cfg.MinAmountSat {
+      continue
+    }
 
-      feeSteps := cfg.FeeLadderSteps
-      if feeSteps <= 0 {
-        feeSteps = 1
-      }
-      amountSteps := feeSteps
-      if amountSteps > 4 {
-        amountSteps = 4
-      }
-      amountCandidates := buildAmountProbe(sendAmount, cfg.MinAmountSat, amountSteps)
-      if len(amountCandidates) == 0 {
-        continue
-      }
+    feeSteps := cfg.FeeLadderSteps
+    if feeSteps <= 0 {
+      feeSteps = 1
+    }
+    amountSteps := cfg.AmountProbeSteps
+    if amountSteps <= 0 {
+      amountSteps = feeSteps
+    }
+    amountCandidates := buildAmountProbe(sendAmount, cfg.MinAmountSat, amountSteps)
+    if len(amountCandidates) == 0 {
+      continue
+    }
 
       sourceSucceeded := false
       for step := 1; step <= feeSteps; step++ {
@@ -698,6 +719,14 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
         }
 
         for _, amountTry := range amountCandidates {
+          if ctx.Err() != nil {
+            if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+              s.finishJob(jobID, "failed", "timeout")
+            } else {
+              s.finishJob(jobID, "cancelled", "cancelled")
+            }
+            return
+          }
           if amountTry <= 0 {
             continue
           }
@@ -708,6 +737,10 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
           feeLimitMsat := ppmToFeeLimitMsat(amountTry, feePpm)
           var probeFeeMsat int64
           if route, err := s.lnd.QueryRoute(ctx, selfPubkey, amountTry, source.ChannelID, targetSnapshot.RemotePubkey, feeLimitMsat); err != nil {
+            if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+              s.finishJob(jobID, "failed", "timeout")
+              return
+            }
             if step == feeSteps && amountTry == amountCandidates[len(amountCandidates)-1] {
               attemptIndex++
               _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feePpm, 0, "failed", "", err.Error())
@@ -730,6 +763,10 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
 
           payment, err := s.lnd.SendPaymentWithConstraints(ctx, paymentReq, source.ChannelID, targetSnapshot.RemotePubkey, feeLimitMsat, 60, 3)
           if err != nil {
+            if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+              s.finishJob(jobID, "failed", "timeout")
+              return
+            }
             attemptIndex++
             _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feePpm, 0, "failed", paymentHash, err.Error())
             continue
@@ -769,6 +806,9 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
 
           anySuccess = true
           sourceSucceeded = true
+          if cfg.AmountProbeAdaptive {
+            adaptiveMaxAmount = amountTry
+          }
           remaining -= amountTry
           if remaining <= 0 {
             s.finishJob(jobID, "succeeded", "")
@@ -1177,21 +1217,30 @@ end $$;
     econ_ratio double precision not null default 0.6,
     roi_min double precision not null default 1.1,
     daily_budget_pct double precision not null default 50,
-  max_concurrent integer not null default 2,
-  min_amount_sat bigint not null default 20000,
-  max_amount_sat bigint not null default 0,
-  fee_ladder_steps integer not null default 4,
-  payback_mode_flags integer not null default 7,
-  unlock_days integer not null default 14,
-  critical_release_pct double precision not null default 20,
-  critical_min_sources integer not null default 2,
-  critical_min_available_sats bigint not null default 0,
+    max_concurrent integer not null default 2,
+    min_amount_sat bigint not null default 20000,
+    max_amount_sat bigint not null default 0,
+    fee_ladder_steps integer not null default 4,
+    amount_probe_steps integer not null default 4,
+    amount_probe_adaptive boolean not null default true,
+    rebalance_timeout_sec integer not null default 600,
+    payback_mode_flags integer not null default 7,
+    unlock_days integer not null default 14,
+    critical_release_pct double precision not null default 20,
+    critical_min_sources integer not null default 2,
+    critical_min_available_sats bigint not null default 0,
   critical_cycles integer not null default 3,
   updated_at timestamptz not null default now()
 );
 
-alter table rebalance_config
-  add column if not exists source_min_local_pct double precision not null default 50;
+  alter table rebalance_config
+    add column if not exists source_min_local_pct double precision not null default 50;
+  alter table rebalance_config
+    add column if not exists amount_probe_steps integer not null default 4;
+  alter table rebalance_config
+    add column if not exists amount_probe_adaptive boolean not null default true;
+  alter table rebalance_config
+    add column if not exists rebalance_timeout_sec integer not null default 600;
 
 create table if not exists rebalance_channel_settings (
   channel_id bigint primary key,
@@ -1288,10 +1337,10 @@ func (s *RebalanceService) loadConfig(ctx context.Context) (RebalanceConfig, err
   }
 
   row := s.db.QueryRow(ctx, `
-select auto_enabled, scan_interval_sec, deadband_pct, source_min_local_pct, econ_ratio, roi_min, daily_budget_pct,
-  max_concurrent, min_amount_sat, max_amount_sat, fee_ladder_steps, payback_mode_flags,
-  unlock_days, critical_release_pct, critical_min_sources, critical_min_available_sats, critical_cycles
-from rebalance_config where id=$1`, rebalanceConfigID)
+  select auto_enabled, scan_interval_sec, deadband_pct, source_min_local_pct, econ_ratio, roi_min, daily_budget_pct,
+    max_concurrent, min_amount_sat, max_amount_sat, fee_ladder_steps, amount_probe_steps, amount_probe_adaptive, rebalance_timeout_sec, payback_mode_flags,
+    unlock_days, critical_release_pct, critical_min_sources, critical_min_available_sats, critical_cycles
+  from rebalance_config where id=$1`, rebalanceConfigID)
 
   cfg := defaultRebalanceConfig()
   err := row.Scan(
@@ -1306,6 +1355,9 @@ from rebalance_config where id=$1`, rebalanceConfigID)
     &cfg.MinAmountSat,
     &cfg.MaxAmountSat,
     &cfg.FeeLadderSteps,
+    &cfg.AmountProbeSteps,
+    &cfg.AmountProbeAdaptive,
+    &cfg.RebalanceTimeoutSec,
     &cfg.PaybackModeFlags,
     &cfg.UnlockDays,
     &cfg.CriticalReleasePct,
@@ -1329,32 +1381,35 @@ func (s *RebalanceService) upsertConfig(ctx context.Context, cfg RebalanceConfig
     return errors.New("db unavailable")
   }
   _, err := s.db.Exec(ctx, `
-insert into rebalance_config (
-  id, auto_enabled, scan_interval_sec, deadband_pct, source_min_local_pct, econ_ratio, roi_min, daily_budget_pct,
-  max_concurrent, min_amount_sat, max_amount_sat, fee_ladder_steps, payback_mode_flags,
-  unlock_days, critical_release_pct, critical_min_sources, critical_min_available_sats, critical_cycles, updated_at
-) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,now())
- on conflict (id) do update set
-  auto_enabled = excluded.auto_enabled,
-  scan_interval_sec = excluded.scan_interval_sec,
-  deadband_pct = excluded.deadband_pct,
-  source_min_local_pct = excluded.source_min_local_pct,
-  econ_ratio = excluded.econ_ratio,
-  roi_min = excluded.roi_min,
-  daily_budget_pct = excluded.daily_budget_pct,
-  max_concurrent = excluded.max_concurrent,
-  min_amount_sat = excluded.min_amount_sat,
-  max_amount_sat = excluded.max_amount_sat,
-  fee_ladder_steps = excluded.fee_ladder_steps,
-  payback_mode_flags = excluded.payback_mode_flags,
-  unlock_days = excluded.unlock_days,
-  critical_release_pct = excluded.critical_release_pct,
-  critical_min_sources = excluded.critical_min_sources,
-  critical_min_available_sats = excluded.critical_min_available_sats,
+  insert into rebalance_config (
+    id, auto_enabled, scan_interval_sec, deadband_pct, source_min_local_pct, econ_ratio, roi_min, daily_budget_pct,
+    max_concurrent, min_amount_sat, max_amount_sat, fee_ladder_steps, amount_probe_steps, amount_probe_adaptive, rebalance_timeout_sec, payback_mode_flags,
+    unlock_days, critical_release_pct, critical_min_sources, critical_min_available_sats, critical_cycles, updated_at
+  ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,now())
+   on conflict (id) do update set
+    auto_enabled = excluded.auto_enabled,
+    scan_interval_sec = excluded.scan_interval_sec,
+    deadband_pct = excluded.deadband_pct,
+    source_min_local_pct = excluded.source_min_local_pct,
+    econ_ratio = excluded.econ_ratio,
+    roi_min = excluded.roi_min,
+    daily_budget_pct = excluded.daily_budget_pct,
+    max_concurrent = excluded.max_concurrent,
+    min_amount_sat = excluded.min_amount_sat,
+    max_amount_sat = excluded.max_amount_sat,
+    fee_ladder_steps = excluded.fee_ladder_steps,
+    amount_probe_steps = excluded.amount_probe_steps,
+    amount_probe_adaptive = excluded.amount_probe_adaptive,
+    rebalance_timeout_sec = excluded.rebalance_timeout_sec,
+    payback_mode_flags = excluded.payback_mode_flags,
+    unlock_days = excluded.unlock_days,
+    critical_release_pct = excluded.critical_release_pct,
+    critical_min_sources = excluded.critical_min_sources,
+    critical_min_available_sats = excluded.critical_min_available_sats,
   critical_cycles = excluded.critical_cycles,
   updated_at = now()
-`, rebalanceConfigID, cfg.AutoEnabled, cfg.ScanIntervalSec, cfg.DeadbandPct, cfg.SourceMinLocalPct, cfg.EconRatio, cfg.ROIMin, cfg.DailyBudgetPct, cfg.MaxConcurrent,
-    cfg.MinAmountSat, cfg.MaxAmountSat, cfg.FeeLadderSteps, cfg.PaybackModeFlags, cfg.UnlockDays, cfg.CriticalReleasePct, cfg.CriticalMinSources, cfg.CriticalMinAvailableSats, cfg.CriticalCycles,
+  `, rebalanceConfigID, cfg.AutoEnabled, cfg.ScanIntervalSec, cfg.DeadbandPct, cfg.SourceMinLocalPct, cfg.EconRatio, cfg.ROIMin, cfg.DailyBudgetPct, cfg.MaxConcurrent,
+    cfg.MinAmountSat, cfg.MaxAmountSat, cfg.FeeLadderSteps, cfg.AmountProbeSteps, cfg.AmountProbeAdaptive, cfg.RebalanceTimeoutSec, cfg.PaybackModeFlags, cfg.UnlockDays, cfg.CriticalReleasePct, cfg.CriticalMinSources, cfg.CriticalMinAvailableSats, cfg.CriticalCycles,
   )
   return err
 }

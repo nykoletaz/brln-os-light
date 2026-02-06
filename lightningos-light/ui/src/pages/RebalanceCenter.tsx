@@ -27,6 +27,9 @@ type RebalanceConfig = {
   min_amount_sat: number
   max_amount_sat: number
   fee_ladder_steps: number
+  amount_probe_steps: number
+  amount_probe_adaptive: boolean
+  rebalance_timeout_sec: number
   payback_mode_flags: number
   unlock_days: number
   critical_release_pct: number
@@ -165,14 +168,20 @@ export default function RebalanceCenter() {
   const loadAll = async () => {
     try {
       setLoading(true)
-      const [cfg, ovw, ch, queue, hist] = await Promise.all([
-        getRebalanceConfig(),
-        getRebalanceOverview(),
-        getRebalanceChannels(),
-        getRebalanceQueue(),
-        getRebalanceHistory(50)
-      ])
-      setConfig(cfg as RebalanceConfig)
+        const [cfg, ovw, ch, queue, hist] = await Promise.all([
+          getRebalanceConfig(),
+          getRebalanceOverview(),
+          getRebalanceChannels(),
+          getRebalanceQueue(),
+          getRebalanceHistory(50)
+        ])
+        const nextConfig = cfg as RebalanceConfig
+        setConfig({
+          ...nextConfig,
+          amount_probe_steps: nextConfig.amount_probe_steps || 4,
+          amount_probe_adaptive: nextConfig.amount_probe_adaptive ?? true,
+          rebalance_timeout_sec: nextConfig.rebalance_timeout_sec || 600
+        })
       setOverview(ovw as RebalanceOverview)
       const channelList = Array.isArray((ch as any)?.channels) ? (ch as any).channels : []
       setChannels(channelList)
@@ -202,23 +211,26 @@ export default function RebalanceCenter() {
     setSaving(true)
     setStatus('')
     try {
-      await updateRebalanceConfig({
-        auto_enabled: config.auto_enabled,
-        scan_interval_sec: config.scan_interval_sec,
-        deadband_pct: config.deadband_pct,
-        source_min_local_pct: config.source_min_local_pct,
-        econ_ratio: config.econ_ratio,
-        roi_min: config.roi_min,
-        daily_budget_pct: config.daily_budget_pct,
-        max_concurrent: config.max_concurrent,
-        min_amount_sat: config.min_amount_sat,
-        max_amount_sat: config.max_amount_sat,
-        fee_ladder_steps: config.fee_ladder_steps,
-        payback_mode_flags: config.payback_mode_flags,
-        unlock_days: config.unlock_days,
-        critical_release_pct: config.critical_release_pct,
-        critical_min_sources: config.critical_min_sources,
-        critical_min_available_sats: config.critical_min_available_sats,
+        await updateRebalanceConfig({
+          auto_enabled: config.auto_enabled,
+          scan_interval_sec: config.scan_interval_sec,
+          deadband_pct: config.deadband_pct,
+          source_min_local_pct: config.source_min_local_pct,
+          econ_ratio: config.econ_ratio,
+          roi_min: config.roi_min,
+          daily_budget_pct: config.daily_budget_pct,
+          max_concurrent: config.max_concurrent,
+          min_amount_sat: config.min_amount_sat,
+          max_amount_sat: config.max_amount_sat,
+          fee_ladder_steps: config.fee_ladder_steps,
+          amount_probe_steps: config.amount_probe_steps,
+          amount_probe_adaptive: config.amount_probe_adaptive,
+          rebalance_timeout_sec: config.rebalance_timeout_sec,
+          payback_mode_flags: config.payback_mode_flags,
+          unlock_days: config.unlock_days,
+          critical_release_pct: config.critical_release_pct,
+          critical_min_sources: config.critical_min_sources,
+          critical_min_available_sats: config.critical_min_available_sats,
         critical_cycles: config.critical_cycles
       })
       setStatus(t('rebalanceCenter.settingsSaved'))
@@ -531,6 +543,40 @@ export default function RebalanceCenter() {
                 value={config.fee_ladder_steps}
                 onChange={(e) => setConfig({ ...config, fee_ladder_steps: Number(e.target.value) })}
               />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.amountProbeSteps')}>
+                {t('rebalanceCenter.settings.amountProbeSteps')}
+              </label>
+              <input
+                className="input-field"
+                type="number"
+                min={1}
+                value={config.amount_probe_steps}
+                onChange={(e) => setConfig({ ...config, amount_probe_steps: Number(e.target.value) })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.rebalanceTimeout')}>
+                {t('rebalanceCenter.settings.rebalanceTimeout')}
+              </label>
+              <input
+                className="input-field"
+                type="number"
+                min={60}
+                value={config.rebalance_timeout_sec}
+                onChange={(e) => setConfig({ ...config, rebalance_timeout_sec: Number(e.target.value) })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.amountProbeAdaptive')}>
+                <input
+                  type="checkbox"
+                  checked={config.amount_probe_adaptive}
+                  onChange={(e) => setConfig({ ...config, amount_probe_adaptive: e.target.checked })}
+                />
+                {t('rebalanceCenter.settings.amountProbeAdaptive')}
+              </label>
             </div>
           </div>
         )}
