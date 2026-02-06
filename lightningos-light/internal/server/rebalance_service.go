@@ -1029,6 +1029,13 @@ func ppmToFeeLimitMsat(amountSat int64, feePpm int64) int64 {
   return feeSat * 1000
 }
 
+func msatToSatCeil(msat int64) int64 {
+  if msat <= 0 {
+    return 0
+  }
+  return int64(math.Ceil(float64(msat) / 1000.0))
+}
+
 func (s *RebalanceService) ensureSchema(ctx context.Context) error {
   if s.db == nil {
     return errors.New("db not configured")
@@ -1491,6 +1498,10 @@ func (s *RebalanceService) getDailyBudget(ctx context.Context) (int64, int64, in
   if s.db == nil {
     return 0, 0, 0, 0
   }
+  cfg, _ := s.loadConfig(ctx)
+  _ = s.ensureDailyBudget(ctx, cfg)
+  refreshedAuto, refreshedManual, refreshedTotal, refreshed := s.refreshDailySpend(ctx)
+
   day := time.Now().In(time.Local).Format("2006-01-02")
   var budget int64
   var spentAuto int64
@@ -1502,6 +1513,9 @@ from rebalance_budget_daily
 where day=$1`, day).Scan(&budget, &spentAuto, &spentManual, &spentTotal)
   if err != nil {
     return 0, 0, 0, 0
+  }
+  if refreshed {
+    return budget, refreshedAuto, refreshedManual, refreshedTotal
   }
   if spentTotal <= 0 {
     spentTotal = spentAuto + spentManual
@@ -1529,8 +1543,61 @@ values ($1,0,$2,$3,$4,now())
   spent_manual_sat=rebalance_budget_daily.spent_manual_sat + excluded.spent_manual_sat,
   spent_sat=rebalance_budget_daily.spent_sat + excluded.spent_sat,
   updated_at=now()
-`, day, autoSpend, manualSpend, amountSat)
+  `, day, autoSpend, manualSpend, amountSat)
   return err
+}
+
+func (s *RebalanceService) refreshDailySpend(ctx context.Context) (int64, int64, int64, bool) {
+  if s.db == nil {
+    return 0, 0, 0, false
+  }
+
+  loc := time.Local
+  now := time.Now().In(loc)
+  dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+  dayEnd := dayStart.Add(24 * time.Hour)
+
+  var autoMsat int64
+  var manualMsat int64
+  err := s.db.QueryRow(ctx, `
+select
+  coalesce(sum(case when source='auto' then fee_msat else 0 end), 0) as auto_msat,
+  coalesce(sum(case when source='manual' then fee_msat else 0 end), 0) as manual_msat
+from (
+  select j.source as source,
+    case
+      when n.fee_msat > 0 then n.fee_msat
+      when n.fee_sat > 0 then n.fee_sat * 1000
+      when a.fee_paid_sat > 0 then a.fee_paid_sat * 1000
+      else 0
+    end as fee_msat
+  from rebalance_attempts a
+  join rebalance_jobs j on j.id = a.job_id
+  left join notifications n on n.payment_hash = a.payment_hash and n.type='rebalance'
+  where a.status in ('succeeded','partial')
+    and coalesce(n.occurred_at, a.finished_at, a.started_at) >= $1
+    and coalesce(n.occurred_at, a.finished_at, a.started_at) < $2
+) t
+`, dayStart, dayEnd).Scan(&autoMsat, &manualMsat)
+  if err != nil {
+    return 0, 0, 0, false
+  }
+
+  autoSat := msatToSatCeil(autoMsat)
+  manualSat := msatToSatCeil(manualMsat)
+  totalSat := autoSat + manualSat
+
+  dayKey := dayStart.Format("2006-01-02")
+  _, _ = s.db.Exec(ctx, `
+update rebalance_budget_daily
+set spent_auto_sat=$2,
+  spent_manual_sat=$3,
+  spent_sat=$4,
+  updated_at=now()
+where day=$1
+`, dayKey, autoSat, manualSat, totalSat)
+
+  return autoSat, manualSat, totalSat, true
 }
 
 func (s *RebalanceService) insertJob(ctx context.Context, target *lndclient.ChannelInfo, source string, reason string, targetPct float64, amount int64) (int64, error) {
@@ -1563,11 +1630,15 @@ func (s *RebalanceService) Overview(ctx context.Context) (RebalanceOverview, err
   cfg, _ := s.loadConfig(ctx)
   budget, spentAuto, spentManual, spent := s.getDailyBudget(ctx)
   liveCost := int64(0)
-  _ = s.db.QueryRow(ctx, `
-select coalesce(sum(fee_paid_sat), 0)
-from rebalance_attempts
-where started_at >= now() - interval '1 day'
-`).Scan(&liveCost)
+  if s.db != nil {
+    var liveMsat int64
+    _ = s.db.QueryRow(ctx, `
+select coalesce(sum(case when fee_msat > 0 then fee_msat else fee_sat * 1000 end), 0)
+from notifications
+where type='rebalance' and occurred_at >= now() - interval '1 day'
+`).Scan(&liveMsat)
+    liveCost = msatToSatCeil(liveMsat)
+  }
 
   effectiveness := 0.0
   roi := 0.0
