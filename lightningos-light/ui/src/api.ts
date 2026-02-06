@@ -211,6 +211,9 @@ export const updateRebalanceConfig = (payload: {
   min_amount_sat?: number
   max_amount_sat?: number
   fee_ladder_steps?: number
+  amount_probe_steps?: number
+  amount_probe_adaptive?: boolean
+  rebalance_timeout_sec?: number
   payback_mode_flags?: number
   unlock_days?: number
   critical_release_pct?: number
