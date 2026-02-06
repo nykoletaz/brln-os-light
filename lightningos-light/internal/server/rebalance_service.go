@@ -659,107 +659,129 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
   anySuccess := false
   attemptIndex := 0
 
-  for _, source := range sources {
-    if ctx.Err() != nil {
-      s.finishJob(jobID, "cancelled", "cancelled")
-      return
-    }
-
-    maxFromSource := source.MaxSourceSat
-    if maxFromSource <= 0 {
-      continue
-    }
-    sendAmount := remaining
-    if sendAmount > maxFromSource {
-      sendAmount = maxFromSource
-    }
-    if cfg.MinAmountSat > 0 && sendAmount < cfg.MinAmountSat {
-      continue
-    }
-
-    feeSteps := cfg.FeeLadderSteps
-    if feeSteps <= 0 {
-      feeSteps = 1
-    }
-
-    for step := 1; step <= feeSteps; step++ {
-      feePpm := int64(math.Ceil(float64(maxFeePpm) * float64(step) / float64(feeSteps)))
-      if feePpm <= 0 {
-        feePpm = 1
-      }
-
-      feeLimitMsat := ppmToFeeLimitMsat(sendAmount, feePpm)
-      var probeFeeMsat int64
-      if route, err := s.lnd.QueryRoute(ctx, selfPubkey, sendAmount, source.ChannelID, targetSnapshot.RemotePubkey, feeLimitMsat); err != nil {
-        if step == feeSteps {
-          attemptIndex++
-          _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, sendAmount, feePpm, 0, "failed", "", err.Error())
-        }
-        continue
-      } else if route != nil {
-        if route.TotalFeesMsat > 0 {
-          probeFeeMsat = route.TotalFeesMsat
-        } else if route.TotalFees > 0 {
-          probeFeeMsat = route.TotalFees * 1000
-        }
-      }
-
-      paymentReq, paymentHash, err := s.createRebalanceInvoice(ctx, sendAmount, jobID, source.ChannelID, targetChannelID)
-      if err != nil {
-        attemptIndex++
-        _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, sendAmount, feePpm, 0, "failed", "", err.Error())
-        continue
-      }
-
-      payment, err := s.lnd.SendPaymentWithConstraints(ctx, paymentReq, source.ChannelID, targetSnapshot.RemotePubkey, feeLimitMsat, 60, 3)
-      if err != nil {
-        attemptIndex++
-        _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, sendAmount, feePpm, 0, "failed", paymentHash, err.Error())
-        continue
-      }
-
-      feePaidSat := payment.FeeSat
-      if feePaidSat == 0 && payment.FeeMsat != 0 {
-        feePaidSat = int64(math.Ceil(float64(payment.FeeMsat) / 1000.0))
-      }
-      if feePaidSat == 0 && len(payment.Htlcs) > 0 {
-        var feeMsatSum int64
-        var feeSatSum int64
-        for _, htlc := range payment.Htlcs {
-          if htlc == nil || htlc.Route == nil {
-            continue
-          }
-          if htlc.Route.TotalFeesMsat > 0 {
-            feeMsatSum += htlc.Route.TotalFeesMsat
-          } else if htlc.Route.TotalFees > 0 {
-            feeSatSum += htlc.Route.TotalFees
-          }
-        }
-        if feeMsatSum > 0 {
-          feePaidSat = int64(math.Ceil(float64(feeMsatSum) / 1000.0))
-        } else if feeSatSum > 0 {
-          feePaidSat = feeSatSum
-        }
-      }
-      if feePaidSat == 0 && probeFeeMsat > 0 {
-        feePaidSat = int64(math.Ceil(float64(probeFeeMsat) / 1000.0))
-      }
-      attemptIndex++
-      _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, sendAmount, feePpm, feePaidSat, "succeeded", paymentHash, "")
-
-      _ = s.applyRebalanceLedger(ctx, targetChannelID, sendAmount, feePaidSat)
-      _ = s.addBudgetSpend(ctx, feePaidSat, jobSource)
-
-      anySuccess = true
-      remaining -= sendAmount
-      if remaining <= 0 {
-        s.finishJob(jobID, "succeeded", "")
-        s.broadcast(RebalanceEvent{Type: "job", JobID: jobID, Status: "succeeded"})
+    for _, source := range sources {
+      if ctx.Err() != nil {
+        s.finishJob(jobID, "cancelled", "cancelled")
         return
       }
-      break
+
+      maxFromSource := source.MaxSourceSat
+      if maxFromSource <= 0 {
+        continue
+      }
+      sendAmount := remaining
+      if sendAmount > maxFromSource {
+        sendAmount = maxFromSource
+      }
+      if cfg.MinAmountSat > 0 && sendAmount < cfg.MinAmountSat {
+        continue
+      }
+
+      feeSteps := cfg.FeeLadderSteps
+      if feeSteps <= 0 {
+        feeSteps = 1
+      }
+      amountSteps := feeSteps
+      if amountSteps > 4 {
+        amountSteps = 4
+      }
+      amountCandidates := buildAmountProbe(sendAmount, cfg.MinAmountSat, amountSteps)
+      if len(amountCandidates) == 0 {
+        continue
+      }
+
+      sourceSucceeded := false
+      for step := 1; step <= feeSteps; step++ {
+        feePpm := int64(math.Ceil(float64(maxFeePpm) * float64(step) / float64(feeSteps)))
+        if feePpm <= 0 {
+          feePpm = 1
+        }
+
+        for _, amountTry := range amountCandidates {
+          if amountTry <= 0 {
+            continue
+          }
+          if cfg.MinAmountSat > 0 && amountTry < cfg.MinAmountSat {
+            continue
+          }
+
+          feeLimitMsat := ppmToFeeLimitMsat(amountTry, feePpm)
+          var probeFeeMsat int64
+          if route, err := s.lnd.QueryRoute(ctx, selfPubkey, amountTry, source.ChannelID, targetSnapshot.RemotePubkey, feeLimitMsat); err != nil {
+            if step == feeSteps && amountTry == amountCandidates[len(amountCandidates)-1] {
+              attemptIndex++
+              _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feePpm, 0, "failed", "", err.Error())
+            }
+            continue
+          } else if route != nil {
+            if route.TotalFeesMsat > 0 {
+              probeFeeMsat = route.TotalFeesMsat
+            } else if route.TotalFees > 0 {
+              probeFeeMsat = route.TotalFees * 1000
+            }
+          }
+
+          paymentReq, paymentHash, err := s.createRebalanceInvoice(ctx, amountTry, jobID, source.ChannelID, targetChannelID)
+          if err != nil {
+            attemptIndex++
+            _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feePpm, 0, "failed", "", err.Error())
+            continue
+          }
+
+          payment, err := s.lnd.SendPaymentWithConstraints(ctx, paymentReq, source.ChannelID, targetSnapshot.RemotePubkey, feeLimitMsat, 60, 3)
+          if err != nil {
+            attemptIndex++
+            _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feePpm, 0, "failed", paymentHash, err.Error())
+            continue
+          }
+
+          feePaidSat := payment.FeeSat
+          if feePaidSat == 0 && payment.FeeMsat != 0 {
+            feePaidSat = int64(math.Ceil(float64(payment.FeeMsat) / 1000.0))
+          }
+          if feePaidSat == 0 && len(payment.Htlcs) > 0 {
+            var feeMsatSum int64
+            var feeSatSum int64
+            for _, htlc := range payment.Htlcs {
+              if htlc == nil || htlc.Route == nil {
+                continue
+              }
+              if htlc.Route.TotalFeesMsat > 0 {
+                feeMsatSum += htlc.Route.TotalFeesMsat
+              } else if htlc.Route.TotalFees > 0 {
+                feeSatSum += htlc.Route.TotalFees
+              }
+            }
+            if feeMsatSum > 0 {
+              feePaidSat = int64(math.Ceil(float64(feeMsatSum) / 1000.0))
+            } else if feeSatSum > 0 {
+              feePaidSat = feeSatSum
+            }
+          }
+          if feePaidSat == 0 && probeFeeMsat > 0 {
+            feePaidSat = int64(math.Ceil(float64(probeFeeMsat) / 1000.0))
+          }
+          attemptIndex++
+          _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feePpm, feePaidSat, "succeeded", paymentHash, "")
+
+          _ = s.applyRebalanceLedger(ctx, targetChannelID, amountTry, feePaidSat)
+          _ = s.addBudgetSpend(ctx, feePaidSat, jobSource)
+
+          anySuccess = true
+          sourceSucceeded = true
+          remaining -= amountTry
+          if remaining <= 0 {
+            s.finishJob(jobID, "succeeded", "")
+            s.broadcast(RebalanceEvent{Type: "job", JobID: jobID, Status: "succeeded"})
+            return
+          }
+          break
+        }
+        if sourceSucceeded {
+          break
+        }
+      }
     }
-  }
 
   if anySuccess {
     s.finishJob(jobID, "partial", fmt.Sprintf("remaining %d sats", remaining))
@@ -1056,6 +1078,44 @@ func msatToSatCeil(msat int64) int64 {
     return 0
   }
   return int64(math.Ceil(float64(msat) / 1000.0))
+}
+
+func buildAmountProbe(maxAmount int64, minAmount int64, steps int) []int64 {
+  if maxAmount <= 0 {
+    return nil
+  }
+  if minAmount <= 0 {
+    minAmount = 1
+  }
+  if steps <= 0 {
+    steps = 1
+  }
+  if steps > 6 {
+    steps = 6
+  }
+
+  amounts := make([]int64, 0, steps)
+  current := maxAmount
+  for i := 0; i < steps; i++ {
+    if current < minAmount {
+      current = minAmount
+    }
+    if len(amounts) == 0 || amounts[len(amounts)-1] != current {
+      amounts = append(amounts, current)
+    }
+    if current == minAmount {
+      break
+    }
+    next := (current + minAmount) / 2
+    if next >= current {
+      next = current - 1
+    }
+    if next < minAmount {
+      next = minAmount
+    }
+    current = next
+  }
+  return amounts
 }
 
 func (s *RebalanceService) ensureSchema(ctx context.Context) error {
