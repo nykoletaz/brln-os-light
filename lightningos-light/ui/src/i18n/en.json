@@ -52,6 +52,7 @@
     "lndConfig": "LND Config",
     "logs": "Logs",
     "notifications": "Notifications",
+    "rebalanceCenter": "Rebalance Center",
     "reports": "Reports",
     "terminal": "Terminal",
     "wallet": "Wallet",
@@ -907,5 +908,78 @@
     "updateFees": "Update fees",
     "updatingFees": "Updating fees...",
     "useFastest": "Use fastest"
+  },
+  "rebalanceCenter": {
+    "title": "Rebalance Center",
+    "subtitle": "Live costs, payback control, and autonomous liquidity recovery.",
+    "desktopFirst": "Desktop-first",
+    "loading": "Loading rebalance center...",
+    "loadFailed": "Failed to load rebalance center.",
+    "settingsSaved": "Settings saved.",
+    "settingsSaveFailed": "Failed to save settings.",
+    "saveFailed": "Save failed.",
+    "invalidTarget": "Invalid inbound target.",
+    "runFailed": "Rebalance failed to start.",
+    "saving": "Saving...",
+    "save": "Save",
+    "overview": {
+      "liveCost": "Live cost",
+      "lastScan": "Last scan: {{value}}",
+      "effectiveness": "Effectiveness (7d)",
+      "roi": "ROI 7d: {{value}}",
+      "dailyBudget": "Daily budget",
+      "dailySpent": "Spent: {{value}}",
+      "autoMode": "Auto mode",
+      "scanInterval": "Scan: {{value}}s"
+    },
+    "settings": {
+      "title": "Auto Mode Settings",
+      "subtitle": "Guardrails, budget, and payback rules.",
+      "autoEnabled": "Enable auto rebalance",
+      "scanInterval": "Scan interval (sec)",
+      "dailyBudgetPct": "Daily budget (% of revenue)",
+      "deadband": "Deadband (%)",
+      "econRatio": "Economic ratio",
+      "roiMin": "ROI minimum",
+      "maxConcurrent": "Max concurrent",
+      "minAmount": "Min amount (sats)",
+      "maxAmount": "Max amount (sats)",
+      "feeSteps": "Fee ladder steps",
+      "paybackPolicy": "Payback policy",
+      "paybackMode": "Unlock by payback",
+      "timeMode": "Unlock by time",
+      "criticalMode": "Critical mode",
+      "unlockDays": "Unlock days",
+      "criticalRelease": "Critical release (%)",
+      "criticalCycles": "Critical cycles"
+    },
+    "channels": {
+      "title": "Channel Workbench",
+      "count": "{{count}} channels",
+      "channel": "Channel",
+      "balance": "Balance",
+      "fees": "Fees",
+      "target": "Target inbound",
+      "protected": "Protected",
+      "actions": "Actions",
+      "spread": "Spread {{value}} ppm",
+      "amount": "Target amount: {{value}}",
+      "payback": "Payback {{value}}%",
+      "rebalanceIn": "Rebalance In",
+      "auto": "Auto",
+      "excludeSource": "Exclude source",
+      "roiEstimate": "ROI est. {{value}}"
+    },
+    "queue": {
+      "title": "Active Queue",
+      "empty": "No active rebalances.",
+      "target": "Target inbound: {{value}}",
+      "attempt": "Attempt {{index}} · {{amount}} · fee cap {{fee}} ppm"
+    },
+    "history": {
+      "title": "Recent History",
+      "empty": "No completed rebalances yet.",
+      "target": "Target inbound: {{value}}"
+    }
   }
 }

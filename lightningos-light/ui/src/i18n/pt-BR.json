@@ -52,6 +52,7 @@
     "lndConfig": "Config LND",
     "logs": "Logs",
     "notifications": "Notificações",
+    "rebalanceCenter": "Rebalance Center",
     "reports": "Relatórios",
     "terminal": "Terminal",
     "wallet": "Carteira",
@@ -907,5 +908,78 @@
     "updateFees": "Atualizar fees",
     "updatingFees": "Atualizando fees...",
     "useFastest": "Usar mais rápido"
+  },
+  "rebalanceCenter": {
+    "title": "Rebalance Center",
+    "subtitle": "Custos ao vivo, controle de payback e recuperaÃ§Ã£o automÃ¡tica de liquidez.",
+    "desktopFirst": "Desktop-first",
+    "loading": "Carregando Rebalance Center...",
+    "loadFailed": "Falha ao carregar o Rebalance Center.",
+    "settingsSaved": "ConfiguraÃ§Ãµes salvas.",
+    "settingsSaveFailed": "Falha ao salvar configuraÃ§Ãµes.",
+    "saveFailed": "Falha ao salvar.",
+    "invalidTarget": "Target de inbound invÃ¡lido.",
+    "runFailed": "Falha ao iniciar o rebalance.",
+    "saving": "Salvando...",
+    "save": "Salvar",
+    "overview": {
+      "liveCost": "Custo ao vivo",
+      "lastScan": "Ãšltima varredura: {{value}}",
+      "effectiveness": "Efetividade (7d)",
+      "roi": "ROI 7d: {{value}}",
+      "dailyBudget": "OrÃ§amento diÃ¡rio",
+      "dailySpent": "Gasto: {{value}}",
+      "autoMode": "Modo automÃ¡tico",
+      "scanInterval": "Varredura: {{value}}s"
+    },
+    "settings": {
+      "title": "ConfiguraÃ§Ãµes do modo automÃ¡tico",
+      "subtitle": "Guardrails, orÃ§amento e regras de payback.",
+      "autoEnabled": "Ativar auto rebalance",
+      "scanInterval": "Intervalo de varredura (seg)",
+      "dailyBudgetPct": "OrÃ§amento diÃ¡rio (% da receita)",
+      "deadband": "Deadband (%)",
+      "econRatio": "Ratio econÃ´mico",
+      "roiMin": "ROI mÃ­nimo",
+      "maxConcurrent": "MÃ¡x. concorrentes",
+      "minAmount": "MÃ­nimo (sats)",
+      "maxAmount": "MÃ¡ximo (sats)",
+      "feeSteps": "Degraus de fee",
+      "paybackPolicy": "PolÃ­tica de payback",
+      "paybackMode": "Liberar por payback",
+      "timeMode": "Liberar por tempo",
+      "criticalMode": "Modo crÃ­tico",
+      "unlockDays": "Dias para liberar",
+      "criticalRelease": "LiberaÃ§Ã£o crÃ­tica (%)",
+      "criticalCycles": "Ciclos crÃ­ticos"
+    },
+    "channels": {
+      "title": "Workbench de Canais",
+      "count": "{{count}} canais",
+      "channel": "Canal",
+      "balance": "Saldo",
+      "fees": "Fees",
+      "target": "Alvo inbound",
+      "protected": "Protegido",
+      "actions": "AÃ§Ãµes",
+      "spread": "Spread {{value}} ppm",
+      "amount": "Montante alvo: {{value}}",
+      "payback": "Payback {{value}}%",
+      "rebalanceIn": "Rebalance In",
+      "auto": "Auto",
+      "excludeSource": "Excluir fonte",
+      "roiEstimate": "ROI est. {{value}}"
+    },
+    "queue": {
+      "title": "Fila ativa",
+      "empty": "Nenhum rebalance ativo.",
+      "target": "Alvo inbound: {{value}}",
+      "attempt": "Tentativa {{index}} Â· {{amount}} Â· fee cap {{fee}} ppm"
+    },
+    "history": {
+      "title": "HistÃ³rico recente",
+      "empty": "Sem rebalances concluÃ­dos.",
+      "target": "Alvo inbound: {{value}}"
+    }
   }
 }

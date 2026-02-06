@@ -94,6 +94,21 @@ func (s *Server) routes() http.Handler {
     r.Post("/channel/status", s.handleLNUpdateChanStatus)
   })
 
+  r.Route("/api/rebalance", func(r chi.Router) {
+    r.Get("/config", s.handleRebalanceConfigGet)
+    r.Post("/config", s.handleRebalanceConfigPost)
+    r.Get("/overview", s.handleRebalanceOverview)
+    r.Get("/channels", s.handleRebalanceChannels)
+    r.Get("/queue", s.handleRebalanceQueue)
+    r.Get("/history", s.handleRebalanceHistory)
+    r.Post("/run", s.handleRebalanceRun)
+    r.Post("/stop", s.handleRebalanceStop)
+    r.Post("/channel/target", s.handleRebalanceChannelTarget)
+    r.Post("/channel/auto", s.handleRebalanceChannelAuto)
+    r.Post("/channel/exclude", s.handleRebalanceExclude)
+    r.Get("/stream", s.handleRebalanceStream)
+  })
+
   r.Route("/api/chat", func(r chi.Router) {
     r.Get("/inbox", s.handleChatInbox)
     r.Get("/messages", s.handleChatMessages)
