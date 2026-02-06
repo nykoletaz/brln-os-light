@@ -103,6 +103,7 @@ type RebalanceJob struct {
   TargetChannelPoint string `json:"target_channel_point"`
   TargetOutboundPct float64 `json:"target_outbound_pct"`
   TargetAmountSat int64 `json:"target_amount_sat"`
+  TargetPeerAlias string `json:"target_peer_alias,omitempty"`
 }
 
 type RebalanceAttempt struct {
@@ -690,7 +691,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
 
       feePaidSat := payment.FeeSat
       if feePaidSat == 0 && payment.FeeMsat != 0 {
-        feePaidSat = payment.FeeMsat / 1000
+        feePaidSat = int64(math.Ceil(float64(payment.FeeMsat) / 1000.0))
       }
       if feePaidSat == 0 && len(payment.Htlcs) > 0 {
         var feeMsatSum int64
@@ -706,7 +707,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
           }
         }
         if feeMsatSum > 0 {
-          feePaidSat = feeMsatSum / 1000
+          feePaidSat = int64(math.Ceil(float64(feeMsatSum) / 1000.0))
         } else if feeSatSum > 0 {
           feePaidSat = feeSatSum
         }
@@ -1635,6 +1636,16 @@ func (s *RebalanceService) Queue(ctx context.Context) ([]RebalanceJob, []Rebalan
   if s.db == nil {
     return jobs, attempts, nil
   }
+  aliasMap := map[uint64]string{}
+  if s.lnd != nil {
+    if channels, err := s.lnd.ListChannels(ctx); err == nil {
+      for _, ch := range channels {
+        if ch.ChannelID != 0 && ch.PeerAlias != "" {
+          aliasMap[ch.ChannelID] = ch.PeerAlias
+        }
+      }
+    }
+  }
   rows, err := s.db.Query(ctx, `
 select id, created_at, completed_at, source, status, reason, target_channel_id,
   target_channel_point, target_outbound_pct, target_amount_sat
@@ -1664,6 +1675,7 @@ order by created_at desc
       job.Reason = reason.String
     }
     job.TargetChannelID = uint64(targetChannelID)
+    job.TargetPeerAlias = aliasMap[job.TargetChannelID]
     jobs = append(jobs, job)
   }
 
@@ -1712,6 +1724,16 @@ func (s *RebalanceService) History(ctx context.Context, limit int) ([]RebalanceJ
   if s.db == nil {
     return jobs, attempts, nil
   }
+  aliasMap := map[uint64]string{}
+  if s.lnd != nil {
+    if channels, err := s.lnd.ListChannels(ctx); err == nil {
+      for _, ch := range channels {
+        if ch.ChannelID != 0 && ch.PeerAlias != "" {
+          aliasMap[ch.ChannelID] = ch.PeerAlias
+        }
+      }
+    }
+  }
   if limit <= 0 {
     limit = 50
   }
@@ -1719,7 +1741,7 @@ func (s *RebalanceService) History(ctx context.Context, limit int) ([]RebalanceJ
 select id, created_at, completed_at, source, status, reason, target_channel_id,
   target_channel_point, target_outbound_pct, target_amount_sat
 from rebalance_jobs
-where status in ('succeeded','failed','cancelled')
+where status in ('succeeded','failed','cancelled','partial')
 order by created_at desc
 limit $1`, limit)
   if err != nil {
@@ -1744,6 +1766,7 @@ limit $1`, limit)
       job.Reason = reason.String
     }
     job.TargetChannelID = uint64(targetChannelID)
+    job.TargetPeerAlias = aliasMap[job.TargetChannelID]
     jobs = append(jobs, job)
   }
 

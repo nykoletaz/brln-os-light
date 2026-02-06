@@ -84,6 +84,7 @@ type RebalanceJob = {
   reason?: string
   target_channel_id: number
   target_channel_point: string
+  target_peer_alias?: string
   target_outbound_pct: number
   target_amount_sat: number
 }
@@ -668,6 +669,7 @@ export default function RebalanceCenter() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-fog">#{job.id} {job.source}</p>
+                  <p className="text-xs text-fog/70">{job.target_peer_alias || job.target_channel_point}</p>
                   <p className="text-xs text-fog/50">{job.target_channel_point}</p>
                 </div>
                 <span className={`text-xs uppercase tracking-wide ${statusClass(job.status)}`}>{job.status}</span>
@@ -704,6 +706,7 @@ export default function RebalanceCenter() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-fog">#{job.id} {job.source}</p>
+                  <p className="text-xs text-fog/70">{job.target_peer_alias || job.target_channel_point}</p>
                   <p className="text-xs text-fog/50">{job.target_channel_point}</p>
                 </div>
                 <span className={`text-xs uppercase tracking-wide ${statusClass(job.status)}`}>{job.status}</span>
