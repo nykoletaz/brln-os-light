@@ -120,6 +120,10 @@ export default function RebalanceCenter() {
   const locale = getLocale(i18n.language)
   const formatter = useMemo(() => new Intl.NumberFormat(locale), [locale])
   const pctFormatter = useMemo(() => new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }), [locale])
+  const roiFormatter = useMemo(
+    () => new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    [locale]
+  )
   const dateTimeFormatter = useMemo(
     () => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'medium' }),
     [locale]
@@ -139,6 +143,7 @@ export default function RebalanceCenter() {
 
   const formatSats = (value: number) => `${formatter.format(Math.round(value))} sats`
   const formatPct = (value: number) => `${pctFormatter.format(value)}%`
+  const formatRoi = (value: number) => (value > 0 && value < 0.01 ? '<0.01' : roiFormatter.format(value))
   const formatTimestamp = (value?: string) => {
     if (!value) return '-'
     const date = new Date(value)
@@ -802,7 +807,7 @@ export default function RebalanceCenter() {
                     </div>
                       <div className="text-xs text-fog/50">
                         {ch.roi_estimate_valid
-                          ? t('rebalanceCenter.channels.roiEstimate', { value: ch.roi_estimate.toFixed(2) })
+                          ? t('rebalanceCenter.channels.roiEstimate', { value: formatRoi(ch.roi_estimate) })
                           : t('rebalanceCenter.channels.roiEstimateNA')}
                       </div>
                     </td>
