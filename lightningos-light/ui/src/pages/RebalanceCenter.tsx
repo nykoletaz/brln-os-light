@@ -867,12 +867,6 @@ export default function RebalanceCenter() {
                 <div className="mt-2 text-xs text-fog/50">
                   {t('rebalanceCenter.queue.target', { value: formatPct(job.target_outbound_pct) })}
                 </div>
-                <div className="mt-1 text-xs text-fog/60">
-                  {t('rebalanceCenter.queue.amountFee', {
-                    amount: formatSats(queueTotals.get(job.id)?.amount ?? 0),
-                    fee: formatSats(queueTotals.get(job.id)?.fee ?? 0)
-                  })}
-                </div>
                 {job.status === 'partial' && parseRemaining(job.reason) !== null && (
                   <div className="mt-1 text-xs text-amber-200">
                     {t('rebalanceCenter.queue.remaining', { value: formatSats(parseRemaining(job.reason) || 0) })}
@@ -912,12 +906,14 @@ export default function RebalanceCenter() {
                 <div className="mt-2 text-xs text-fog/50">
                   {t('rebalanceCenter.history.target', { value: formatPct(job.target_outbound_pct) })}
                 </div>
-                <div className="mt-1 text-xs text-fog/60">
-                  {t('rebalanceCenter.history.amountFee', {
-                    amount: formatSats(historyTotals.get(job.id)?.amount ?? 0),
-                    fee: formatSats(historyTotals.get(job.id)?.fee ?? 0)
-                  })}
-                </div>
+                {job.status === 'succeeded' && (
+                  <div className="mt-1 text-xs text-fog/60">
+                    {t('rebalanceCenter.history.amountFee', {
+                      amount: formatSats(historyTotals.get(job.id)?.amount ?? 0),
+                      fee: formatSats(historyTotals.get(job.id)?.fee ?? 0)
+                    })}
+                  </div>
+                )}
                 {job.status === 'partial' && parseRemaining(job.reason) !== null && (
                   <div className="mt-1 text-xs text-amber-200">
                     {t('rebalanceCenter.history.remaining', { value: formatSats(parseRemaining(job.reason) || 0) })}
