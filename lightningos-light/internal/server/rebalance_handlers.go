@@ -25,6 +25,7 @@ type rebalanceConfigPayload struct {
   FeeLadderSteps *int `json:"fee_ladder_steps,omitempty"`
   AmountProbeSteps *int `json:"amount_probe_steps,omitempty"`
   AmountProbeAdaptive *bool `json:"amount_probe_adaptive,omitempty"`
+  AttemptTimeoutSec *int `json:"attempt_timeout_sec,omitempty"`
   RebalanceTimeoutSec *int `json:"rebalance_timeout_sec,omitempty"`
   PaybackModeFlags *int `json:"payback_mode_flags,omitempty"`
   UnlockDays *int `json:"unlock_days,omitempty"`
@@ -132,6 +133,9 @@ func (s *Server) handleRebalanceConfigPost(w http.ResponseWriter, r *http.Reques
   }
   if payload.AmountProbeAdaptive != nil {
     cfg.AmountProbeAdaptive = *payload.AmountProbeAdaptive
+  }
+  if payload.AttemptTimeoutSec != nil {
+    cfg.AttemptTimeoutSec = *payload.AttemptTimeoutSec
   }
   if payload.RebalanceTimeoutSec != nil {
     cfg.RebalanceTimeoutSec = *payload.RebalanceTimeoutSec

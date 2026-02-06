@@ -213,6 +213,7 @@ export const updateRebalanceConfig = (payload: {
   fee_ladder_steps?: number
   amount_probe_steps?: number
   amount_probe_adaptive?: boolean
+  attempt_timeout_sec?: number
   rebalance_timeout_sec?: number
   payback_mode_flags?: number
   unlock_days?: number

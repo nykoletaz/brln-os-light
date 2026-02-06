@@ -29,6 +29,7 @@ type RebalanceConfig = {
   fee_ladder_steps: number
   amount_probe_steps: number
   amount_probe_adaptive: boolean
+  attempt_timeout_sec: number
   rebalance_timeout_sec: number
   payback_mode_flags: number
   unlock_days: number
@@ -135,6 +136,7 @@ export default function RebalanceCenter() {
   const [queueJobs, setQueueJobs] = useState<RebalanceJob[]>([])
   const [queueAttempts, setQueueAttempts] = useState<RebalanceAttempt[]>([])
   const [historyJobs, setHistoryJobs] = useState<RebalanceJob[]>([])
+  const [historyAttempts, setHistoryAttempts] = useState<RebalanceAttempt[]>([])
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('')
   const [saving, setSaving] = useState(false)
@@ -154,6 +156,19 @@ export default function RebalanceCenter() {
     () => channels.filter((ch) => ch.active).sort((a, b) => a.local_pct - b.local_pct),
     [channels]
   )
+  const buildAttemptTotals = (attempts: RebalanceAttempt[]) => {
+    const totals = new Map<number, { amount: number; fee: number }>()
+    attempts.forEach((attempt) => {
+      if (attempt.status !== 'succeeded') return
+      const current = totals.get(attempt.job_id) ?? { amount: 0, fee: 0 }
+      current.amount += attempt.amount_sat || 0
+      current.fee += attempt.fee_paid_sat || 0
+      totals.set(attempt.job_id, current)
+    })
+    return totals
+  }
+  const queueTotals = useMemo(() => buildAttemptTotals(queueAttempts), [queueAttempts])
+  const historyTotals = useMemo(() => buildAttemptTotals(historyAttempts), [historyAttempts])
   const parseRemaining = (reason?: string) => {
     if (!reason) return null
     const match = reason.match(/remaining\s+(\d+)/i)
@@ -188,6 +203,7 @@ export default function RebalanceCenter() {
           ...nextConfig,
           amount_probe_steps: nextConfig.amount_probe_steps || 4,
           amount_probe_adaptive: nextConfig.amount_probe_adaptive ?? true,
+          attempt_timeout_sec: nextConfig.attempt_timeout_sec || 20,
           rebalance_timeout_sec: nextConfig.rebalance_timeout_sec || 600
         })
       setOverview(ovw as RebalanceOverview)
@@ -196,6 +212,7 @@ export default function RebalanceCenter() {
       setQueueJobs(Array.isArray((queue as any)?.jobs) ? (queue as any).jobs : [])
       setQueueAttempts(Array.isArray((queue as any)?.attempts) ? (queue as any).attempts : [])
       setHistoryJobs(Array.isArray((hist as any)?.jobs) ? (hist as any).jobs : [])
+      setHistoryAttempts(Array.isArray((hist as any)?.attempts) ? (hist as any).attempts : [])
     } catch (err) {
       setStatus(err instanceof Error ? err.message : t('rebalanceCenter.loadFailed'))
     } finally {
@@ -233,6 +250,7 @@ export default function RebalanceCenter() {
           fee_ladder_steps: config.fee_ladder_steps,
           amount_probe_steps: config.amount_probe_steps,
           amount_probe_adaptive: config.amount_probe_adaptive,
+          attempt_timeout_sec: config.attempt_timeout_sec,
           rebalance_timeout_sec: config.rebalance_timeout_sec,
           payback_mode_flags: config.payback_mode_flags,
           unlock_days: config.unlock_days,
@@ -571,6 +589,18 @@ export default function RebalanceCenter() {
               />
             </div>
             <div className="space-y-2">
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.attemptTimeout')}>
+                {t('rebalanceCenter.settings.attemptTimeout')}
+              </label>
+              <input
+                className="input-field"
+                type="number"
+                min={5}
+                value={config.attempt_timeout_sec}
+                onChange={(e) => setConfig({ ...config, attempt_timeout_sec: Number(e.target.value) })}
+              />
+            </div>
+            <div className="space-y-2">
               <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.rebalanceTimeout')}>
                 {t('rebalanceCenter.settings.rebalanceTimeout')}
               </label>
@@ -837,6 +867,12 @@ export default function RebalanceCenter() {
                 <div className="mt-2 text-xs text-fog/50">
                   {t('rebalanceCenter.queue.target', { value: formatPct(job.target_outbound_pct) })}
                 </div>
+                <div className="mt-1 text-xs text-fog/60">
+                  {t('rebalanceCenter.queue.amountFee', {
+                    amount: formatSats(queueTotals.get(job.id)?.amount ?? 0),
+                    fee: formatSats(queueTotals.get(job.id)?.fee ?? 0)
+                  })}
+                </div>
                 {job.status === 'partial' && parseRemaining(job.reason) !== null && (
                   <div className="mt-1 text-xs text-amber-200">
                     {t('rebalanceCenter.queue.remaining', { value: formatSats(parseRemaining(job.reason) || 0) })}
@@ -875,6 +911,12 @@ export default function RebalanceCenter() {
                 </div>
                 <div className="mt-2 text-xs text-fog/50">
                   {t('rebalanceCenter.history.target', { value: formatPct(job.target_outbound_pct) })}
+                </div>
+                <div className="mt-1 text-xs text-fog/60">
+                  {t('rebalanceCenter.history.amountFee', {
+                    amount: formatSats(historyTotals.get(job.id)?.amount ?? 0),
+                    fee: formatSats(historyTotals.get(job.id)?.fee ?? 0)
+                  })}
                 </div>
                 {job.status === 'partial' && parseRemaining(job.reason) !== null && (
                   <div className="mt-1 text-xs text-amber-200">
