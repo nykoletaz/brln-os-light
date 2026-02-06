@@ -53,6 +53,7 @@ type RebalanceConfig struct {
 type RebalanceOverview struct {
   AutoEnabled bool `json:"auto_enabled"`
   LastScanAt string `json:"last_scan_at,omitempty"`
+  LastScanStatus string `json:"last_scan_status,omitempty"`
   DailyBudgetSat int64 `json:"daily_budget_sat"`
   DailySpentSat int64 `json:"daily_spent_sat"`
   DailySpentAutoSat int64 `json:"daily_spent_auto_sat"`
@@ -158,6 +159,7 @@ type RebalanceService struct {
   cfg RebalanceConfig
   cfgLoaded bool
   lastScan time.Time
+  lastScanStatus string
   criticalMissCount int
   sem chan struct{}
   channelLocks map[uint64]bool
@@ -388,6 +390,14 @@ func (s *RebalanceService) runAutoScan() {
   if err != nil {
     return
   }
+  scanAt := time.Now()
+  scanStatus := "scanned"
+  defer func() {
+    s.mu.Lock()
+    s.lastScan = scanAt
+    s.lastScanStatus = scanStatus
+    s.mu.Unlock()
+  }()
 
   revenueByChannel, _ := s.fetchChannelRevenue7d(ctx)
 
@@ -427,6 +437,7 @@ func (s *RebalanceService) runAutoScan() {
     s.mu.Lock()
     s.criticalMissCount++
     s.mu.Unlock()
+    scanStatus = "no_sources"
     return
   }
 
@@ -434,6 +445,7 @@ func (s *RebalanceService) runAutoScan() {
     s.mu.Lock()
     s.criticalMissCount++
     s.mu.Unlock()
+    scanStatus = "no_candidates"
     return
   }
 
@@ -450,9 +462,15 @@ func (s *RebalanceService) runAutoScan() {
   if remaining < 0 {
     remaining = 0
   }
+  if remaining == 0 {
+    scanStatus = "budget_exhausted"
+    return
+  }
 
+  started := 0
   for _, target := range candidates {
     if remaining <= 0 {
+      scanStatus = "budget_exhausted"
       break
     }
     estimatedCost := estimateMaxCost(target.Channel.TargetAmountSat, target.Channel.OutgoingFeePpm, cfg.EconRatio, target.Channel.PeerFeeRatePpm)
@@ -462,12 +480,15 @@ func (s *RebalanceService) runAutoScan() {
     _, err := s.startJob(target.Channel.ChannelID, "auto", "")
     if err == nil {
       remaining -= estimatedCost
+      started++
     }
   }
 
-  s.mu.Lock()
-  s.lastScan = time.Now()
-  s.mu.Unlock()
+  if started > 0 {
+    scanStatus = "queued"
+  } else if remaining > 0 {
+    scanStatus = "budget_insufficient"
+  }
 }
 
 type rebalanceTarget struct {
@@ -1669,6 +1690,7 @@ where report_date >= current_date - interval '6 days'
 
   s.mu.Lock()
   lastScan := s.lastScan
+  lastScanStatus := s.lastScanStatus
   s.mu.Unlock()
 
   overview := RebalanceOverview{
@@ -1680,6 +1702,7 @@ where report_date >= current_date - interval '6 days'
     LiveCostSat: liveCost,
     Effectiveness7d: effectiveness,
     ROI7d: roi,
+    LastScanStatus: lastScanStatus,
   }
   if !lastScan.IsZero() {
     overview.LastScanAt = lastScan.UTC().Format(time.RFC3339)
@@ -1869,15 +1892,15 @@ values ($1,$2,$3,false,now())
   return err
 }
 
-func (s *RebalanceService) SetChannelAuto(ctx context.Context, channelID uint64, autoEnabled bool) error {
+func (s *RebalanceService) SetChannelAuto(ctx context.Context, channelID uint64, channelPoint string, autoEnabled bool) error {
   if s.db == nil {
     return errors.New("db unavailable")
   }
   _, err := s.db.Exec(ctx, `
-insert into rebalance_channel_settings (channel_id, channel_point, target_outbound_pct, auto_enabled, updated_at)
-values ($1,'', $2, $3, now())
- on conflict (channel_id) do update set auto_enabled=excluded.auto_enabled, updated_at=now()
-`, int64(channelID), rebalanceDefaultTargetOutboundPct, autoEnabled)
+  insert into rebalance_channel_settings (channel_id, channel_point, target_outbound_pct, auto_enabled, updated_at)
+  values ($1,$2, $3, $4, now())
+   on conflict (channel_id) do update set channel_point=excluded.channel_point, auto_enabled=excluded.auto_enabled, updated_at=now()
+  `, int64(channelID), channelPoint, rebalanceDefaultTargetOutboundPct, autoEnabled)
   return err
 }
 

@@ -228,7 +228,7 @@ export const stopRebalance = (payload: { job_id: number }) =>
   request('/api/rebalance/stop', { method: 'POST', body: JSON.stringify(payload) })
 export const updateRebalanceChannelTarget = (payload: { channel_id: number; channel_point: string; target_outbound_pct: number }) =>
   request('/api/rebalance/channel/target', { method: 'POST', body: JSON.stringify(payload) })
-export const updateRebalanceChannelAuto = (payload: { channel_id: number; auto_enabled: boolean }) =>
+export const updateRebalanceChannelAuto = (payload: { channel_id: number; channel_point?: string; auto_enabled: boolean }) =>
   request('/api/rebalance/channel/auto', { method: 'POST', body: JSON.stringify(payload) })
 export const updateRebalanceExclude = (payload: { channel_id: number; channel_point: string; excluded: boolean }) =>
   request('/api/rebalance/channel/exclude', { method: 'POST', body: JSON.stringify(payload) })

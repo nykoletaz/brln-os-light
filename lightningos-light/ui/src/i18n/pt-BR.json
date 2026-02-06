@@ -922,15 +922,24 @@
     "runFailed": "Falha ao iniciar o rebalance.",
     "saving": "Salvando...",
     "save": "Salvar",
-    "overview": {
-      "liveCost": "Custo ao vivo",
-      "lastScan": "Última varredura: {{value}}",
-      "effectiveness": "Efetividade (7d)",
-      "roi": "ROI 7d: {{value}}",
-      "dailyBudget": "Orçamento diário",
-      "dailySpent": "Gasto: {{value}}",
-      "dailySpentAuto": "Gasto auto: {{value}}",
-      "dailySpentManual": "Gasto manual: {{value}}",
+      "overview": {
+        "liveCost": "Custo ao vivo",
+        "lastScan": "Última varredura: {{value}}",
+        "lastScanDisabled": "Auto desativado",
+        "scanStatus": {
+          "scanned": "Varredura concluída",
+          "queued": "Rebalances enfileirados",
+          "no_sources": "Sem fontes elegíveis",
+          "no_candidates": "Sem candidatos elegíveis",
+          "budget_exhausted": "Orçamento esgotado",
+          "budget_insufficient": "Orçamento insuficiente"
+        },
+        "effectiveness": "Efetividade (7d)",
+        "roi": "ROI 7d: {{value}}",
+        "dailyBudget": "Orçamento diário",
+        "dailySpent": "Gasto: {{value}}",
+        "dailySpentAuto": "Gasto auto: {{value}}",
+        "dailySpentManual": "Gasto manual: {{value}}",
       "autoMode": "Modo automático",
       "scanInterval": "Varredura: {{value}}s"
     },
@@ -991,11 +1000,13 @@
       "spread": "Spread {{value}} ppm",
       "amount": "Liquidez local a adicionar: {{value}}",
       "payback": "Payback {{value}}%",
-      "rebalanceIn": "Rebalance In",
-      "auto": "Auto",
-      "excludeSource": "Excluir fonte",
-      "roiEstimate": "ROI est. {{value}}"
-    },
+        "rebalanceIn": "Rebalance In",
+        "bulkAuto": "Auto (todos)",
+        "bulkExclude": "Excluir (todos)",
+        "auto": "Auto",
+        "excludeSource": "Excluir fonte",
+        "roiEstimate": "ROI est. {{value}}"
+      },
     "channelsHints": {
       "targetOutbound": "Percentual de outbound desejado apos o rebalance.",
       "saveTarget": "Salvar o target outbound deste canal.",

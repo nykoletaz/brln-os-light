@@ -38,6 +38,7 @@ type RebalanceConfig = {
 type RebalanceOverview = {
   auto_enabled: boolean
   last_scan_at?: string
+  last_scan_status?: string
   daily_budget_sat: number
   daily_spent_sat: number
   daily_spent_auto_sat: number
@@ -219,9 +220,51 @@ export default function RebalanceCenter() {
     }
   }
 
-  const handleToggleChannelAuto = async (channelId: number, enabled: boolean) => {
+  const handleToggleChannelAuto = async (channel: RebalanceChannel, enabled: boolean) => {
     try {
-      await updateRebalanceChannelAuto({ channel_id: channelId, auto_enabled: enabled })
+      await updateRebalanceChannelAuto({
+        channel_id: channel.channel_id,
+        channel_point: channel.channel_point,
+        auto_enabled: enabled
+      })
+      loadAll()
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : t('rebalanceCenter.saveFailed'))
+    }
+  }
+
+  const handleBulkAuto = async (enabled: boolean) => {
+    if (channels.length === 0) return
+    setStatus('')
+    try {
+      await Promise.all(
+        channels.map((channel) =>
+          updateRebalanceChannelAuto({
+            channel_id: channel.channel_id,
+            channel_point: channel.channel_point,
+            auto_enabled: enabled
+          })
+        )
+      )
+      loadAll()
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : t('rebalanceCenter.saveFailed'))
+    }
+  }
+
+  const handleBulkExclude = async (excluded: boolean) => {
+    if (channels.length === 0) return
+    setStatus('')
+    try {
+      await Promise.all(
+        channels.map((channel) =>
+          updateRebalanceExclude({
+            channel_id: channel.channel_id,
+            channel_point: channel.channel_point,
+            excluded
+          })
+        )
+      )
       loadAll()
     } catch (err) {
       setStatus(err instanceof Error ? err.message : t('rebalanceCenter.saveFailed'))
@@ -295,7 +338,18 @@ export default function RebalanceCenter() {
           <div className="section-card space-y-2">
             <p className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.overview.liveCost')}</p>
             <p className="text-lg font-semibold text-fog">{formatSats(overview.live_cost_sat)}</p>
-            <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.lastScan', { value: overview.last_scan_at || '-' })}</p>
+            <p className="text-xs text-fog/50">
+              {t('rebalanceCenter.overview.lastScan', {
+                value: overview.auto_enabled
+                  ? (overview.last_scan_at || '-')
+                  : t('rebalanceCenter.overview.lastScanDisabled')
+              })}
+            </p>
+            {overview.auto_enabled && overview.last_scan_status && (
+              <p className="text-xs text-fog/50">
+                {t(`rebalanceCenter.overview.scanStatus.${overview.last_scan_status}`)}
+              </p>
+            )}
           </div>
           <div className="section-card space-y-2">
             <p className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.overview.effectiveness')}</p>
@@ -570,7 +624,27 @@ export default function RebalanceCenter() {
                 <th className="pb-2">{t('rebalanceCenter.channels.fees')}</th>
                 <th className="pb-2">{t('rebalanceCenter.channels.target')}</th>
                 <th className="pb-2">{t('rebalanceCenter.channels.protected')}</th>
-                <th className="pb-2">{t('rebalanceCenter.channels.actions')}</th>
+                <th className="pb-2">
+                  <div className="flex flex-col gap-2">
+                    <span>{t('rebalanceCenter.channels.actions')}</span>
+                    <label className="flex items-center gap-2 text-xs text-fog/70">
+                      <input
+                        type="checkbox"
+                        checked={channels.length > 0 && channels.every((ch) => ch.auto_enabled)}
+                        onChange={(e) => handleBulkAuto(e.target.checked)}
+                      />
+                      {t('rebalanceCenter.channels.bulkAuto')}
+                    </label>
+                    <label className="flex items-center gap-2 text-xs text-fog/70">
+                      <input
+                        type="checkbox"
+                        checked={channels.length > 0 && channels.every((ch) => ch.excluded_as_source)}
+                        onChange={(e) => handleBulkExclude(e.target.checked)}
+                      />
+                      {t('rebalanceCenter.channels.bulkExclude')}
+                    </label>
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -635,9 +709,9 @@ export default function RebalanceCenter() {
                       <label className="flex items-center gap-2" title={t('rebalanceCenter.channelsHints.auto')}>
                         <input
                           type="checkbox"
-                          checked={ch.auto_enabled}
-                          onChange={(e) => handleToggleChannelAuto(ch.channel_id, e.target.checked)}
-                        />
+                        checked={ch.auto_enabled}
+                        onChange={(e) => handleToggleChannelAuto(ch, e.target.checked)}
+                      />
                         {t('rebalanceCenter.channels.auto')}
                       </label>
                       <label className="flex items-center gap-2" title={t('rebalanceCenter.channelsHints.excludeSource')}>
