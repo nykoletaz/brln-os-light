@@ -167,7 +167,6 @@ export default function RebalanceCenter() {
     })
     return totals
   }
-  const queueTotals = useMemo(() => buildAttemptTotals(queueAttempts), [queueAttempts])
   const historyTotals = useMemo(() => buildAttemptTotals(historyAttempts), [historyAttempts])
   const parseRemaining = (reason?: string) => {
     if (!reason) return null
@@ -417,6 +416,11 @@ export default function RebalanceCenter() {
               <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.budgetLast24h')}</p>
               <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.dailySpentAuto', { value: formatSats(overview.daily_spent_auto_sat) })}</p>
               <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.dailySpentManual', { value: formatSats(overview.daily_spent_manual_sat) })}</p>
+              {overview.last_scan_status && (overview.last_scan_status === 'budget_exhausted' || overview.last_scan_status === 'budget_insufficient') && (
+                <p className="text-xs text-amber-200">
+                  {t(`rebalanceCenter.overview.budgetPaused.${overview.last_scan_status}`)}
+                </p>
+              )}
             </div>
           <div className="section-card space-y-2">
             <p className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.overview.autoMode')}</p>
@@ -433,6 +437,7 @@ export default function RebalanceCenter() {
           <div>
             <h3 className="text-lg font-semibold">{t('rebalanceCenter.settings.title')}</h3>
             <p className="text-fog/60">{t('rebalanceCenter.settings.subtitle')}</p>
+            <p className="text-xs text-fog/50">{t('rebalanceCenter.settings.autoOnlyNote')}</p>
           </div>
           <button className="btn-secondary text-xs px-3 py-1" onClick={() => setAutoOpen((prev) => !prev)}>
             {autoOpen ? t('common.hide') : t('rebalanceCenter.settings.show')}

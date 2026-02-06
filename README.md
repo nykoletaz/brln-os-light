@@ -191,7 +191,13 @@ Channel Workbench:
 - Toggle `Auto` to allow auto mode to rebalance that channel.
 - Toggle `Exclude source` to block a channel from ever being used as a source.
 
+Color coding (channel rows):
+- Green background = eligible source (can fund rebalances).
+- Red background = eligible target (auto-enabled and needs outbound).
+- Amber background = potential target (needs outbound but not auto-enabled).
+
 Configuration parameters:
+- Auto-only settings: `Enable auto rebalance`, `Scan interval (sec)`, `Daily budget (% of revenue)`.
 - `Enable auto rebalance`: turns auto scanning on/off.
 - `Scan interval (sec)`: how often auto scan runs.
 - `Daily budget (% of revenue)`: percent of the last 24h routing revenue allocated to auto rebalances.
@@ -205,6 +211,7 @@ Configuration parameters:
 - `Fee ladder steps`: number of fee caps to try from low to high before giving up.
 - `Amount probe steps`: number of amount probes from large to small per fee step.
 - `Adaptive amount probing`: caps the next attempt based on the last successful amount.
+- `Attempt timeout (sec)`: maximum time per attempt before moving to the next fee/amount.
 - `Rebalance timeout (sec)`: maximum runtime per rebalance job (auto or manual).
 - `Payback policy`: three modes can be enabled together.
 - `Release by payback`: unlocks protected liquidity once routing revenue repays the rebalance cost.

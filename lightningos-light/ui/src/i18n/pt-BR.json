@@ -937,6 +937,10 @@
           "budget_exhausted": "Orçamento esgotado",
           "budget_insufficient": "Orçamento insuficiente"
         },
+        "budgetPaused": {
+          "budget_exhausted": "Auto pausado: orçamento diário esgotado.",
+          "budget_insufficient": "Auto pausado: orçamento baixo para o alvo."
+        },
         "effectiveness": "Efetividade (7d)",
         "roi": "ROI 7d: {{value}}",
         "dailyBudget": "Orçamento diário",
@@ -947,8 +951,9 @@
       "scanInterval": "Varredura: {{value}}s"
     },
     "settings": {
-      "title": "Configurações do modo automático",
-      "subtitle": "Guardrails, orçamento e regras de payback.",
+      "title": "Configurações de Rebalance",
+      "subtitle": "Controles do modo automático e guardrails compartilhados.",
+      "autoOnlyNote": "Somente auto: ativar auto rebalance, intervalo de varredura, orçamento diário.",
       "show": "Configurar",
       "autoEnabled": "Ativar auto rebalance",
       "scanInterval": "Intervalo de varredura (seg)",
