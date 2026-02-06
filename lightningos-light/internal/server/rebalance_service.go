@@ -185,7 +185,7 @@ func defaultRebalanceConfig() RebalanceConfig {
     SourceMinLocalPct: 50,
     EconRatio: 0.6,
     ROIMin: 1.1,
-    DailyBudgetPct: 10,
+    DailyBudgetPct: 50,
     MaxConcurrent: 2,
     MinAmountSat: 20000,
     MaxAmountSat: 0,
@@ -1107,15 +1107,15 @@ begin
   end if;
 end $$;
 
-create table if not exists rebalance_config (
-  id smallint primary key,
-  auto_enabled boolean not null default false,
-  scan_interval_sec integer not null default 600,
-  deadband_pct double precision not null default 10,
-  source_min_local_pct double precision not null default 50,
-  econ_ratio double precision not null default 0.6,
-  roi_min double precision not null default 1.1,
-  daily_budget_pct double precision not null default 10,
+  create table if not exists rebalance_config (
+    id smallint primary key,
+    auto_enabled boolean not null default false,
+    scan_interval_sec integer not null default 600,
+    deadband_pct double precision not null default 10,
+    source_min_local_pct double precision not null default 50,
+    econ_ratio double precision not null default 0.6,
+    roi_min double precision not null default 1.1,
+    daily_budget_pct double precision not null default 50,
   max_concurrent integer not null default 2,
   min_amount_sat bigint not null default 20000,
   max_amount_sat bigint not null default 0,
@@ -1472,29 +1472,19 @@ func (s *RebalanceService) ensureDailyBudget(ctx context.Context, cfg RebalanceC
     return nil
   }
   day := time.Now().In(time.Local).Format("2006-01-02")
-  var existing int64
-  err := s.db.QueryRow(ctx, `select budget_sat from rebalance_budget_daily where day=$1`, day).Scan(&existing)
-  if err == nil && existing > 0 {
-    return nil
-  }
-  if err != nil && err != pgx.ErrNoRows {
-    return err
-  }
-
-  start := time.Now().In(time.Local).AddDate(0, 0, -6)
-  avg, err := s.fetchAvgRevenue7d(ctx, start)
+  revenue, err := s.fetchForwardRevenue24h(ctx, time.Now().In(time.Local))
   if err != nil {
     return err
   }
-  budget := int64(math.Round(float64(avg) * (cfg.DailyBudgetPct / 100)))
+  budget := int64(math.Round(float64(revenue) * (cfg.DailyBudgetPct / 100)))
   if budget < 0 {
     budget = 0
   }
   _, err = s.db.Exec(ctx, `
-insert into rebalance_budget_daily (day, budget_sat, spent_auto_sat, spent_manual_sat, spent_sat, updated_at)
-values ($1,$2,0,0,0,now())
- on conflict (day) do update set budget_sat=excluded.budget_sat, updated_at=now()
-`, day, budget)
+  insert into rebalance_budget_daily (day, budget_sat, spent_auto_sat, spent_manual_sat, spent_sat, updated_at)
+  values ($1,$2,0,0,0,now())
+   on conflict (day) do update set budget_sat=excluded.budget_sat, updated_at=now()
+  `, day, budget)
   return err
 }
 
@@ -1513,6 +1503,26 @@ where report_date >= $1
     return 0, err
   }
   return total / 7, nil
+}
+
+func (s *RebalanceService) fetchForwardRevenue24h(ctx context.Context, now time.Time) (int64, error) {
+  if s.db == nil {
+    return 0, nil
+  }
+  if now.IsZero() {
+    now = time.Now().In(time.Local)
+  }
+  start := now.Add(-24 * time.Hour)
+  var feeMsat int64
+  err := s.db.QueryRow(ctx, `
+select coalesce(sum(case when fee_msat > 0 then fee_msat else fee_sat * 1000 end), 0)
+from notifications
+where type='forward' and occurred_at >= $1 and occurred_at <= $2
+`, start, now).Scan(&feeMsat)
+  if err != nil {
+    return 0, err
+  }
+  return msatToSatCeil(feeMsat), nil
 }
 
 func (s *RebalanceService) getDailyBudget(ctx context.Context) (int64, int64, int64, int64) {
@@ -1575,8 +1585,8 @@ func (s *RebalanceService) refreshDailySpend(ctx context.Context) (int64, int64,
 
   loc := time.Local
   now := time.Now().In(loc)
-  dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-  dayEnd := dayStart.Add(24 * time.Hour)
+  dayStart := now.Add(-24 * time.Hour)
+  dayEnd := now
 
   var autoMsat int64
   var manualMsat int64
@@ -1597,7 +1607,7 @@ from (
   left join notifications n on n.payment_hash = a.payment_hash and n.type='rebalance'
   where a.status in ('succeeded','partial')
     and coalesce(n.occurred_at, a.finished_at, a.started_at) >= $1
-    and coalesce(n.occurred_at, a.finished_at, a.started_at) < $2
+    and coalesce(n.occurred_at, a.finished_at, a.started_at) <= $2
 ) t
 `, dayStart, dayEnd).Scan(&autoMsat, &manualMsat)
   if err != nil {
@@ -1608,7 +1618,7 @@ from (
   manualSat := msatToSatCeil(manualMsat)
   totalSat := autoSat + manualSat
 
-  dayKey := dayStart.Format("2006-01-02")
+  dayKey := now.Format("2006-01-02")
   _, _ = s.db.Exec(ctx, `
 update rebalance_budget_daily
 set spent_auto_sat=$2,
