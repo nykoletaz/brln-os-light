@@ -530,14 +530,12 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
 
   revenueByChannel, _ := s.fetchChannelRevenue7d(ctx)
 
-  var target lndclient.ChannelInfo
   targetFound := false
   channelSnapshots := []RebalanceChannel{}
   for _, ch := range channels {
     setting := settings[ch.ChannelID]
     snapshot := s.buildChannelSnapshot(ctx, cfg, false, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], exclusions[ch.ChannelID])
     if ch.ChannelID == targetChannelID {
-      target = ch
       targetFound = true
       snapshot.TargetInboundPct = targetPct
       amount = computeDeficitAmount(ch, targetPct)
@@ -1382,7 +1380,7 @@ insert into rebalance_jobs (
   source, status, reason, target_channel_id, target_channel_point, target_inbound_pct, target_amount_sat, config_snapshot
 ) values ($1,'running',$2,$3,$4,$5,$6,$7)
  returning id
-`, source, nullableString(reason), int64(target.ChannelID), target.ChannelPoint, targetPct, amount, pgtype.JSONB{}).Scan(&jobID)
+`, source, nullableString(reason), int64(target.ChannelID), target.ChannelPoint, targetPct, amount, nil).Scan(&jobID)
   return jobID, err
 }
 
