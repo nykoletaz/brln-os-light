@@ -13,6 +13,7 @@ import (
   "time"
 
   "lightningos-light/internal/lndclient"
+  "lightningos-light/lnrpc"
 
   "github.com/jackc/pgx/v5/pgtype"
   "github.com/jackc/pgx/v5/pgxpool"
@@ -21,6 +22,7 @@ import (
 const (
   rebalanceConfigID = 1
   rebalanceDefaultTargetOutboundPct = 50.0
+  rebalanceForwardPageSize = 50000
 )
 
 const (
@@ -1505,19 +1507,83 @@ where report_date >= $1
 }
 
 func (s *RebalanceService) fetchForwardRevenue24h(ctx context.Context, now time.Time) (int64, error) {
-  if s.db == nil {
-    return 0, nil
-  }
   if now.IsZero() {
     now = time.Now().In(time.Local)
   }
   start := now.Add(-24 * time.Hour)
+
+  if s.lnd != nil {
+    feeMsat, err := s.fetchForwardRevenue24hFromLND(ctx, start, now)
+    if err == nil {
+      return msatToSatCeil(feeMsat), nil
+    }
+  }
+
+  return s.fetchForwardRevenue24hFromNotifications(ctx, start, now)
+}
+
+func (s *RebalanceService) fetchForwardRevenue24hFromLND(ctx context.Context, start time.Time, end time.Time) (int64, error) {
+  if s.lnd == nil {
+    return 0, errors.New("lnd unavailable")
+  }
+  conn, err := s.lnd.DialLightning(ctx)
+  if err != nil {
+    return 0, err
+  }
+  defer conn.Close()
+
+  client := lnrpc.NewLightningClient(conn)
+
+  var offset uint32
+  var revenueMsat int64
+
+  for {
+    resp, err := client.ForwardingHistory(ctx, &lnrpc.ForwardingHistoryRequest{
+      StartTime: uint64(start.Unix()),
+      EndTime: uint64(end.Unix()),
+      IndexOffset: offset,
+      NumMaxEvents: rebalanceForwardPageSize,
+    })
+    if err != nil {
+      return 0, err
+    }
+    if resp == nil || len(resp.ForwardingEvents) == 0 {
+      break
+    }
+
+    for _, evt := range resp.ForwardingEvents {
+      if evt == nil {
+        continue
+      }
+      if evt.FeeMsat != 0 {
+        revenueMsat += int64(evt.FeeMsat)
+      } else if evt.Fee != 0 {
+        revenueMsat += int64(evt.Fee) * 1000
+      }
+    }
+
+    if resp.LastOffsetIndex <= offset {
+      break
+    }
+    offset = resp.LastOffsetIndex
+    if len(resp.ForwardingEvents) < rebalanceForwardPageSize {
+      break
+    }
+  }
+
+  return revenueMsat, nil
+}
+
+func (s *RebalanceService) fetchForwardRevenue24hFromNotifications(ctx context.Context, start time.Time, end time.Time) (int64, error) {
+  if s.db == nil {
+    return 0, nil
+  }
   var feeMsat int64
   err := s.db.QueryRow(ctx, `
 select coalesce(sum(case when fee_msat > 0 then fee_msat else fee_sat * 1000 end), 0)
 from notifications
 where type='forward' and occurred_at >= $1 and occurred_at <= $2
-`, start, now).Scan(&feeMsat)
+`, start, end).Scan(&feeMsat)
   if err != nil {
     return 0, err
   }

@@ -924,8 +924,10 @@
     "save": "Save",
       "overview": {
         "liveCost": "Live cost",
+        "last24h": "Last 24h",
         "lastScan": "Last scan: {{value}}",
         "lastScanDisabled": "Auto disabled",
+        "budgetLast24h": "Based on last 24h revenue",
         "scanStatus": {
           "scanned": "Scan complete",
           "queued": "Rebalances queued",

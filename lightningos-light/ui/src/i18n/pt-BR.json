@@ -924,8 +924,10 @@
     "save": "Salvar",
       "overview": {
         "liveCost": "Custo ao vivo",
+        "last24h": "Últimas 24h",
         "lastScan": "Última varredura: {{value}}",
         "lastScanDisabled": "Auto desativado",
+        "budgetLast24h": "Baseado na receita das últimas 24h",
         "scanStatus": {
           "scanned": "Varredura concluída",
           "queued": "Rebalances enfileirados",

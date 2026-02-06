@@ -345,33 +345,35 @@ export default function RebalanceCenter() {
 
       {overview && (
         <div className="grid gap-4 lg:grid-cols-4">
-          <div className="section-card space-y-2">
-            <p className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.overview.liveCost')}</p>
-            <p className="text-lg font-semibold text-fog">{formatSats(overview.live_cost_sat)}</p>
-            <p className="text-xs text-fog/50">
-              {t('rebalanceCenter.overview.lastScan', {
-                value: overview.auto_enabled
-                  ? formatTimestamp(overview.last_scan_at)
-                  : t('rebalanceCenter.overview.lastScanDisabled')
-              })}
-            </p>
-            {overview.auto_enabled && overview.last_scan_status && (
+            <div className="section-card space-y-2">
+              <p className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.overview.liveCost')}</p>
+              <p className="text-lg font-semibold text-fog">{formatSats(overview.live_cost_sat)}</p>
+              <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.last24h')}</p>
               <p className="text-xs text-fog/50">
-                {t(`rebalanceCenter.overview.scanStatus.${overview.last_scan_status}`)}
+                {t('rebalanceCenter.overview.lastScan', {
+                  value: overview.auto_enabled
+                    ? formatTimestamp(overview.last_scan_at)
+                    : t('rebalanceCenter.overview.lastScanDisabled')
+                })}
               </p>
-            )}
-          </div>
+              {overview.auto_enabled && overview.last_scan_status && (
+                <p className="text-xs text-fog/50">
+                  {t(`rebalanceCenter.overview.scanStatus.${overview.last_scan_status}`)}
+                </p>
+              )}
+            </div>
           <div className="section-card space-y-2">
             <p className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.overview.effectiveness')}</p>
             <p className="text-lg font-semibold text-fog">{formatPct(overview.effectiveness_7d * 100)}</p>
             <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.roi', { value: overview.roi_7d.toFixed(2) })}</p>
           </div>
-          <div className="section-card space-y-2">
-            <p className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.overview.dailyBudget')}</p>
-            <p className="text-lg font-semibold text-fog">{formatSats(overview.daily_budget_sat)}</p>
-            <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.dailySpentAuto', { value: formatSats(overview.daily_spent_auto_sat) })}</p>
-            <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.dailySpentManual', { value: formatSats(overview.daily_spent_manual_sat) })}</p>
-          </div>
+            <div className="section-card space-y-2">
+              <p className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.overview.dailyBudget')}</p>
+              <p className="text-lg font-semibold text-fog">{formatSats(overview.daily_budget_sat)}</p>
+              <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.budgetLast24h')}</p>
+              <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.dailySpentAuto', { value: formatSats(overview.daily_spent_auto_sat) })}</p>
+              <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.dailySpentManual', { value: formatSats(overview.daily_spent_manual_sat) })}</p>
+            </div>
           <div className="section-card space-y-2">
             <p className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.overview.autoMode')}</p>
             <p className={`text-lg font-semibold ${overview.auto_enabled ? 'text-emerald-200' : 'text-fog'}`}>
