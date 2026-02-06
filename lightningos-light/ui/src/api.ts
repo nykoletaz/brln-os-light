@@ -203,6 +203,7 @@ export const updateRebalanceConfig = (payload: {
   auto_enabled?: boolean
   scan_interval_sec?: number
   deadband_pct?: number
+  source_min_local_pct?: number
   econ_ratio?: number
   roi_min?: number
   daily_budget_pct?: number

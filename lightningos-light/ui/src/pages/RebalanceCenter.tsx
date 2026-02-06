@@ -19,6 +19,7 @@ type RebalanceConfig = {
   auto_enabled: boolean
   scan_interval_sec: number
   deadband_pct: number
+  source_min_local_pct: number
   econ_ratio: number
   roi_min: number
   daily_budget_pct: number
@@ -39,6 +40,8 @@ type RebalanceOverview = {
   last_scan_at?: string
   daily_budget_sat: number
   daily_spent_sat: number
+  daily_spent_auto_sat: number
+  daily_spent_manual_sat: number
   live_cost_sat: number
   effectiveness_7d: number
   roi_7d: number
@@ -128,6 +131,24 @@ export default function RebalanceCenter() {
     () => [...channels].sort((a, b) => a.local_pct - b.local_pct),
     [channels]
   )
+  const parseRemaining = (reason?: string) => {
+    if (!reason) return null
+    const match = reason.match(/remaining\s+(\d+)/i)
+    if (!match) return null
+    return Number(match[1])
+  }
+  const statusClass = (status: string) => {
+    switch (status) {
+      case 'succeeded':
+        return 'text-emerald-200'
+      case 'partial':
+        return 'text-amber-200'
+      case 'failed':
+        return 'text-rose-200'
+      default:
+        return 'text-fog/60'
+    }
+  }
 
   const loadAll = async () => {
     try {
@@ -173,6 +194,7 @@ export default function RebalanceCenter() {
         auto_enabled: config.auto_enabled,
         scan_interval_sec: config.scan_interval_sec,
         deadband_pct: config.deadband_pct,
+        source_min_local_pct: config.source_min_local_pct,
         econ_ratio: config.econ_ratio,
         roi_min: config.roi_min,
         daily_budget_pct: config.daily_budget_pct,
@@ -282,7 +304,8 @@ export default function RebalanceCenter() {
           <div className="section-card space-y-2">
             <p className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.overview.dailyBudget')}</p>
             <p className="text-lg font-semibold text-fog">{formatSats(overview.daily_budget_sat)}</p>
-            <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.dailySpent', { value: formatSats(overview.daily_spent_sat) })}</p>
+            <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.dailySpentAuto', { value: formatSats(overview.daily_spent_auto_sat) })}</p>
+            <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.dailySpentManual', { value: formatSats(overview.daily_spent_manual_sat) })}</p>
           </div>
           <div className="section-card space-y-2">
             <p className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.overview.autoMode')}</p>
@@ -353,6 +376,19 @@ export default function RebalanceCenter() {
                 step={0.1}
                 value={config.deadband_pct}
                 onChange={(e) => setConfig({ ...config, deadband_pct: Number(e.target.value) })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.sourceMinLocal')}>
+                {t('rebalanceCenter.settings.sourceMinLocal')}
+              </label>
+              <input
+                className="input-field"
+                type="number"
+                min={0}
+                step={0.1}
+                value={config.source_min_local_pct}
+                onChange={(e) => setConfig({ ...config, source_min_local_pct: Number(e.target.value) })}
               />
             </div>
             <div className="space-y-2">
@@ -634,11 +670,19 @@ export default function RebalanceCenter() {
                   <p className="text-sm text-fog">#{job.id} {job.source}</p>
                   <p className="text-xs text-fog/50">{job.target_channel_point}</p>
                 </div>
-                <span className="text-xs uppercase tracking-wide text-fog/60">{job.status}</span>
+                <span className={`text-xs uppercase tracking-wide ${statusClass(job.status)}`}>{job.status}</span>
               </div>
               <div className="mt-2 text-xs text-fog/50">
                 {t('rebalanceCenter.queue.target', { value: formatPct(job.target_outbound_pct) })}
               </div>
+              {job.status === 'partial' && parseRemaining(job.reason) !== null && (
+                <div className="mt-1 text-xs text-amber-200">
+                  {t('rebalanceCenter.queue.remaining', { value: formatSats(parseRemaining(job.reason) || 0) })}
+                </div>
+              )}
+              {job.reason && job.status !== 'partial' && (
+                <div className="mt-1 text-xs text-amber-200">{job.reason}</div>
+              )}
               {queueAttempts.filter((attempt) => attempt.job_id === job.id).map((attempt) => (
                 <div key={attempt.id} className="mt-2 text-xs text-fog/60">
                   {t('rebalanceCenter.queue.attempt', {
@@ -662,12 +706,19 @@ export default function RebalanceCenter() {
                   <p className="text-sm text-fog">#{job.id} {job.source}</p>
                   <p className="text-xs text-fog/50">{job.target_channel_point}</p>
                 </div>
-                <span className="text-xs uppercase tracking-wide text-fog/60">{job.status}</span>
+                <span className={`text-xs uppercase tracking-wide ${statusClass(job.status)}`}>{job.status}</span>
               </div>
               <div className="mt-2 text-xs text-fog/50">
                 {t('rebalanceCenter.history.target', { value: formatPct(job.target_outbound_pct) })}
               </div>
-              {job.reason && <div className="mt-1 text-xs text-amber-200">{job.reason}</div>}
+              {job.status === 'partial' && parseRemaining(job.reason) !== null && (
+                <div className="mt-1 text-xs text-amber-200">
+                  {t('rebalanceCenter.history.remaining', { value: formatSats(parseRemaining(job.reason) || 0) })}
+                </div>
+              )}
+              {job.reason && job.status !== 'partial' && (
+                <div className="mt-1 text-xs text-amber-200">{job.reason}</div>
+              )}
             </div>
           ))}
         </div>

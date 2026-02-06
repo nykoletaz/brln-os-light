@@ -15,6 +15,7 @@ type rebalanceConfigPayload struct {
   AutoEnabled *bool `json:"auto_enabled,omitempty"`
   ScanIntervalSec *int `json:"scan_interval_sec,omitempty"`
   DeadbandPct *float64 `json:"deadband_pct,omitempty"`
+  SourceMinLocalPct *float64 `json:"source_min_local_pct,omitempty"`
   EconRatio *float64 `json:"econ_ratio,omitempty"`
   ROIMin *float64 `json:"roi_min,omitempty"`
   DailyBudgetPct *float64 `json:"daily_budget_pct,omitempty"`
@@ -97,6 +98,9 @@ func (s *Server) handleRebalanceConfigPost(w http.ResponseWriter, r *http.Reques
   }
   if payload.DeadbandPct != nil {
     cfg.DeadbandPct = *payload.DeadbandPct
+  }
+  if payload.SourceMinLocalPct != nil {
+    cfg.SourceMinLocalPct = *payload.SourceMinLocalPct
   }
   if payload.EconRatio != nil {
     cfg.EconRatio = *payload.EconRatio

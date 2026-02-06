@@ -1,4 +1,4 @@
-{
+﻿{
   "common": {
     "active": "Active",
     "all": "All",
@@ -929,6 +929,8 @@
       "roi": "ROI 7d: {{value}}",
       "dailyBudget": "Daily budget",
       "dailySpent": "Spent: {{value}}",
+      "dailySpentAuto": "Auto spent: {{value}}",
+      "dailySpentManual": "Manual spent: {{value}}",
       "autoMode": "Auto mode",
       "scanInterval": "Scan: {{value}}s"
     },
@@ -940,6 +942,7 @@
       "scanInterval": "Scan interval (sec)",
       "dailyBudgetPct": "Daily budget (% of revenue)",
       "deadband": "Deadband (%)",
+      "sourceMinLocal": "Source min local (%)",
       "econRatio": "Economic ratio",
       "roiMin": "ROI minimum",
       "maxConcurrent": "Max concurrent",
@@ -959,6 +962,7 @@
       "scanInterval": "How often the auto engine scans channels for opportunities.",
       "dailyBudgetPct": "Daily spend cap as a % of 7-day average routing revenue.",
       "deadband": "Minimum outbound deficit before a channel becomes a target.",
+      "sourceMinLocal": "Minimum local liquidity (outbound %) required for a channel to act as source.",
       "econRatio": "Fraction of outbound fee used as max fee for route finding.",
       "roiMin": "Minimum expected ROI (7d revenue / estimated cost) to auto rebalance.",
       "maxConcurrent": "Maximum simultaneous rebalance jobs.",
@@ -1003,12 +1007,15 @@
       "title": "Active Queue",
       "empty": "No active rebalances.",
       "target": "Target outbound: {{value}}",
+      "remaining": "Remaining: {{value}}",
       "attempt": "Attempt {{index}} · {{amount}} · fee cap {{fee}} ppm"
     },
     "history": {
       "title": "Recent History",
       "empty": "No completed rebalances yet.",
-      "target": "Target outbound: {{value}}"
+      "target": "Target outbound: {{value}}",
+      "remaining": "Remaining: {{value}}"
     }
   }
 }
+

@@ -34,6 +34,7 @@ type RebalanceConfig struct {
   AutoEnabled bool `json:"auto_enabled"`
   ScanIntervalSec int `json:"scan_interval_sec"`
   DeadbandPct float64 `json:"deadband_pct"`
+  SourceMinLocalPct float64 `json:"source_min_local_pct"`
   EconRatio float64 `json:"econ_ratio"`
   ROIMin float64 `json:"roi_min"`
   DailyBudgetPct float64 `json:"daily_budget_pct"`
@@ -54,6 +55,8 @@ type RebalanceOverview struct {
   LastScanAt string `json:"last_scan_at,omitempty"`
   DailyBudgetSat int64 `json:"daily_budget_sat"`
   DailySpentSat int64 `json:"daily_spent_sat"`
+  DailySpentAutoSat int64 `json:"daily_spent_auto_sat"`
+  DailySpentManualSat int64 `json:"daily_spent_manual_sat"`
   LiveCostSat int64 `json:"live_cost_sat"`
   Effectiveness7d float64 `json:"effectiveness_7d"`
   ROI7d float64 `json:"roi_7d"`
@@ -176,6 +179,7 @@ func defaultRebalanceConfig() RebalanceConfig {
     AutoEnabled: false,
     ScanIntervalSec: 600,
     DeadbandPct: 10,
+    SourceMinLocalPct: 50,
     EconRatio: 0.6,
     ROIMin: 1.1,
     DailyBudgetPct: 10,
@@ -440,8 +444,8 @@ func (s *RebalanceService) runAutoScan() {
     return candidates[i].Channel.LocalPct < candidates[j].Channel.LocalPct
   })
 
-  budget, spent := s.getDailyBudget(ctx)
-  remaining := budget - spent
+  budget, spentAuto, _, _ := s.getDailyBudget(ctx)
+  remaining := budget - spentAuto
   if remaining < 0 {
     remaining = 0
   }
@@ -506,11 +510,11 @@ func (s *RebalanceService) startJob(targetChannelID uint64, source string, reaso
     return 0, err
   }
 
-  go s.runJob(jobID, targetChannelID, amount, targetPct)
+  go s.runJob(jobID, targetChannelID, amount, targetPct, source)
   return jobID, nil
 }
 
-func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount int64, targetPct float64) {
+func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount int64, targetPct float64, jobSource string) {
   ctx, cancel := context.WithCancel(context.Background())
   s.mu.Lock()
   s.jobCancel[jobID] = cancel
@@ -628,7 +632,11 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     return
   }
 
-  for idx, source := range sources {
+  remaining := amount
+  anySuccess := false
+  attemptIndex := 0
+
+  for _, source := range sources {
     if ctx.Err() != nil {
       s.finishJob(jobID, "cancelled", "cancelled")
       return
@@ -638,7 +646,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     if maxFromSource <= 0 {
       continue
     }
-    sendAmount := amount
+    sendAmount := remaining
     if sendAmount > maxFromSource {
       sendAmount = maxFromSource
     }
@@ -660,20 +668,23 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       feeLimitMsat := ppmToFeeLimitMsat(sendAmount, feePpm)
       if _, err := s.lnd.QueryRoute(ctx, selfPubkey, sendAmount, source.ChannelID, targetSnapshot.RemotePubkey, feeLimitMsat); err != nil {
         if step == feeSteps {
-          _ = s.insertAttempt(ctx, jobID, idx+1, source.ChannelID, sendAmount, feePpm, 0, "failed", "", err.Error())
+          attemptIndex++
+          _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, sendAmount, feePpm, 0, "failed", "", err.Error())
         }
         continue
       }
 
       paymentReq, paymentHash, err := s.createRebalanceInvoice(ctx, sendAmount, jobID, source.ChannelID, targetChannelID)
       if err != nil {
-        _ = s.insertAttempt(ctx, jobID, idx+1, source.ChannelID, sendAmount, feePpm, 0, "failed", "", err.Error())
+        attemptIndex++
+        _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, sendAmount, feePpm, 0, "failed", "", err.Error())
         continue
       }
 
       payment, err := s.lnd.SendPaymentWithConstraints(ctx, paymentReq, source.ChannelID, targetSnapshot.RemotePubkey, feeLimitMsat, 60, 3)
       if err != nil {
-        _ = s.insertAttempt(ctx, jobID, idx+1, source.ChannelID, sendAmount, feePpm, 0, "failed", paymentHash, err.Error())
+        attemptIndex++
+        _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, sendAmount, feePpm, 0, "failed", paymentHash, err.Error())
         continue
       }
 
@@ -681,15 +692,46 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       if feePaidSat == 0 && payment.FeeMsat != 0 {
         feePaidSat = payment.FeeMsat / 1000
       }
-      _ = s.insertAttempt(ctx, jobID, idx+1, source.ChannelID, sendAmount, feePpm, feePaidSat, "succeeded", paymentHash, "")
+      if feePaidSat == 0 && len(payment.Htlcs) > 0 {
+        var feeMsatSum int64
+        var feeSatSum int64
+        for _, htlc := range payment.Htlcs {
+          if htlc == nil || htlc.Route == nil {
+            continue
+          }
+          if htlc.Route.TotalFeesMsat > 0 {
+            feeMsatSum += htlc.Route.TotalFeesMsat
+          } else if htlc.Route.TotalFees > 0 {
+            feeSatSum += htlc.Route.TotalFees
+          }
+        }
+        if feeMsatSum > 0 {
+          feePaidSat = feeMsatSum / 1000
+        } else if feeSatSum > 0 {
+          feePaidSat = feeSatSum
+        }
+      }
+      attemptIndex++
+      _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, sendAmount, feePpm, feePaidSat, "succeeded", paymentHash, "")
 
       _ = s.applyRebalanceLedger(ctx, targetChannelID, sendAmount, feePaidSat)
-      _ = s.addBudgetSpend(ctx, feePaidSat)
+      _ = s.addBudgetSpend(ctx, feePaidSat, jobSource)
 
-      s.finishJob(jobID, "succeeded", "")
-      s.broadcast(RebalanceEvent{Type: "job", JobID: jobID, Status: "succeeded"})
-      return
+      anySuccess = true
+      remaining -= sendAmount
+      if remaining <= 0 {
+        s.finishJob(jobID, "succeeded", "")
+        s.broadcast(RebalanceEvent{Type: "job", JobID: jobID, Status: "succeeded"})
+        return
+      }
+      break
     }
+  }
+
+  if anySuccess {
+    s.finishJob(jobID, "partial", fmt.Sprintf("remaining %d sats", remaining))
+    s.broadcast(RebalanceEvent{Type: "job", JobID: jobID, Status: "partial"})
+    return
   }
 
   s.finishJob(jobID, "failed", "all sources failed")
@@ -846,8 +888,12 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
     eligibleTarget = true
   }
 
-  maxSource := int64(float64(ch.LocalBalanceSat) - (float64(ch.CapacitySat) / 2))
-  eligibleSource := maxSource > 0
+  sourceFloorPct := cfg.SourceMinLocalPct
+  if sourceFloorPct <= 0 || sourceFloorPct > 100 {
+    sourceFloorPct = rebalanceDefaultTargetOutboundPct
+  }
+  maxSource := int64(float64(ch.LocalBalanceSat) - (float64(ch.CapacitySat) * (sourceFloorPct / 100)))
+  eligibleSource := maxSource > 0 && localPct >= sourceFloorPct
   effectiveProtected := protected
   if protected > 0 {
     unlocked := false
@@ -1027,6 +1073,7 @@ create table if not exists rebalance_config (
   auto_enabled boolean not null default false,
   scan_interval_sec integer not null default 600,
   deadband_pct double precision not null default 10,
+  source_min_local_pct double precision not null default 50,
   econ_ratio double precision not null default 0.6,
   roi_min double precision not null default 1.1,
   daily_budget_pct double precision not null default 10,
@@ -1042,6 +1089,9 @@ create table if not exists rebalance_config (
   critical_cycles integer not null default 3,
   updated_at timestamptz not null default now()
 );
+
+alter table rebalance_config
+  add column if not exists source_min_local_pct double precision not null default 50;
 
 create table if not exists rebalance_channel_settings (
   channel_id bigint primary key,
@@ -1100,9 +1150,16 @@ create table if not exists rebalance_attempts (
 create table if not exists rebalance_budget_daily (
   day date primary key,
   budget_sat bigint not null,
+  spent_auto_sat bigint not null default 0,
+  spent_manual_sat bigint not null default 0,
   spent_sat bigint not null default 0,
   updated_at timestamptz not null default now()
 );
+
+alter table rebalance_budget_daily
+  add column if not exists spent_auto_sat bigint not null default 0;
+alter table rebalance_budget_daily
+  add column if not exists spent_manual_sat bigint not null default 0;
 
 create index if not exists rebalance_jobs_status_idx on rebalance_jobs (status);
 create index if not exists rebalance_jobs_created_idx on rebalance_jobs (created_at desc);
@@ -1131,7 +1188,7 @@ func (s *RebalanceService) loadConfig(ctx context.Context) (RebalanceConfig, err
   }
 
   row := s.db.QueryRow(ctx, `
-select auto_enabled, scan_interval_sec, deadband_pct, econ_ratio, roi_min, daily_budget_pct,
+select auto_enabled, scan_interval_sec, deadband_pct, source_min_local_pct, econ_ratio, roi_min, daily_budget_pct,
   max_concurrent, min_amount_sat, max_amount_sat, fee_ladder_steps, payback_mode_flags,
   unlock_days, critical_release_pct, critical_min_sources, critical_min_available_sats, critical_cycles
 from rebalance_config where id=$1`, rebalanceConfigID)
@@ -1141,6 +1198,7 @@ from rebalance_config where id=$1`, rebalanceConfigID)
     &cfg.AutoEnabled,
     &cfg.ScanIntervalSec,
     &cfg.DeadbandPct,
+    &cfg.SourceMinLocalPct,
     &cfg.EconRatio,
     &cfg.ROIMin,
     &cfg.DailyBudgetPct,
@@ -1172,7 +1230,7 @@ func (s *RebalanceService) upsertConfig(ctx context.Context, cfg RebalanceConfig
   }
   _, err := s.db.Exec(ctx, `
 insert into rebalance_config (
-  id, auto_enabled, scan_interval_sec, deadband_pct, econ_ratio, roi_min, daily_budget_pct,
+  id, auto_enabled, scan_interval_sec, deadband_pct, source_min_local_pct, econ_ratio, roi_min, daily_budget_pct,
   max_concurrent, min_amount_sat, max_amount_sat, fee_ladder_steps, payback_mode_flags,
   unlock_days, critical_release_pct, critical_min_sources, critical_min_available_sats, critical_cycles, updated_at
 ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,now())
@@ -1180,6 +1238,7 @@ insert into rebalance_config (
   auto_enabled = excluded.auto_enabled,
   scan_interval_sec = excluded.scan_interval_sec,
   deadband_pct = excluded.deadband_pct,
+  source_min_local_pct = excluded.source_min_local_pct,
   econ_ratio = excluded.econ_ratio,
   roi_min = excluded.roi_min,
   daily_budget_pct = excluded.daily_budget_pct,
@@ -1194,7 +1253,7 @@ insert into rebalance_config (
   critical_min_available_sats = excluded.critical_min_available_sats,
   critical_cycles = excluded.critical_cycles,
   updated_at = now()
-`, rebalanceConfigID, cfg.AutoEnabled, cfg.ScanIntervalSec, cfg.DeadbandPct, cfg.EconRatio, cfg.ROIMin, cfg.DailyBudgetPct, cfg.MaxConcurrent,
+`, rebalanceConfigID, cfg.AutoEnabled, cfg.ScanIntervalSec, cfg.DeadbandPct, cfg.SourceMinLocalPct, cfg.EconRatio, cfg.ROIMin, cfg.DailyBudgetPct, cfg.MaxConcurrent,
     cfg.MinAmountSat, cfg.MaxAmountSat, cfg.FeeLadderSteps, cfg.PaybackModeFlags, cfg.UnlockDays, cfg.CriticalReleasePct, cfg.CriticalMinSources, cfg.CriticalMinAvailableSats, cfg.CriticalCycles,
   )
   return err
@@ -1393,8 +1452,8 @@ func (s *RebalanceService) ensureDailyBudget(ctx context.Context, cfg RebalanceC
     budget = 0
   }
   _, err = s.db.Exec(ctx, `
-insert into rebalance_budget_daily (day, budget_sat, spent_sat, updated_at)
-values ($1,$2,0,now())
+insert into rebalance_budget_daily (day, budget_sat, spent_auto_sat, spent_manual_sat, spent_sat, updated_at)
+values ($1,$2,0,0,0,now())
  on conflict (day) do update set budget_sat=excluded.budget_sat, updated_at=now()
 `, day, budget)
   return err
@@ -1417,30 +1476,49 @@ where report_date >= $1
   return total / 7, nil
 }
 
-func (s *RebalanceService) getDailyBudget(ctx context.Context) (int64, int64) {
+func (s *RebalanceService) getDailyBudget(ctx context.Context) (int64, int64, int64, int64) {
   if s.db == nil {
-    return 0, 0
+    return 0, 0, 0, 0
   }
   day := time.Now().In(time.Local).Format("2006-01-02")
   var budget int64
-  var spent int64
-  err := s.db.QueryRow(ctx, `select budget_sat, spent_sat from rebalance_budget_daily where day=$1`, day).Scan(&budget, &spent)
+  var spentAuto int64
+  var spentManual int64
+  var spentTotal int64
+  err := s.db.QueryRow(ctx, `
+select budget_sat, spent_auto_sat, spent_manual_sat, spent_sat
+from rebalance_budget_daily
+where day=$1`, day).Scan(&budget, &spentAuto, &spentManual, &spentTotal)
   if err != nil {
-    return 0, 0
+    return 0, 0, 0, 0
   }
-  return budget, spent
+  if spentTotal <= 0 {
+    spentTotal = spentAuto + spentManual
+  }
+  return budget, spentAuto, spentManual, spentTotal
 }
 
-func (s *RebalanceService) addBudgetSpend(ctx context.Context, amountSat int64) error {
+func (s *RebalanceService) addBudgetSpend(ctx context.Context, amountSat int64, source string) error {
   if s.db == nil || amountSat <= 0 {
     return nil
   }
   day := time.Now().In(time.Local).Format("2006-01-02")
+  autoSpend := int64(0)
+  manualSpend := int64(0)
+  if strings.EqualFold(source, "auto") {
+    autoSpend = amountSat
+  } else {
+    manualSpend = amountSat
+  }
   _, err := s.db.Exec(ctx, `
-insert into rebalance_budget_daily (day, budget_sat, spent_sat, updated_at)
-values ($1,0,$2,now())
- on conflict (day) do update set spent_sat=rebalance_budget_daily.spent_sat + excluded.spent_sat, updated_at=now()
-`, day, amountSat)
+insert into rebalance_budget_daily (day, budget_sat, spent_auto_sat, spent_manual_sat, spent_sat, updated_at)
+values ($1,0,$2,$3,$4,now())
+ on conflict (day) do update set
+  spent_auto_sat=rebalance_budget_daily.spent_auto_sat + excluded.spent_auto_sat,
+  spent_manual_sat=rebalance_budget_daily.spent_manual_sat + excluded.spent_manual_sat,
+  spent_sat=rebalance_budget_daily.spent_sat + excluded.spent_sat,
+  updated_at=now()
+`, day, autoSpend, manualSpend, amountSat)
   return err
 }
 
@@ -1472,7 +1550,7 @@ insert into rebalance_attempts (
 
 func (s *RebalanceService) Overview(ctx context.Context) (RebalanceOverview, error) {
   cfg, _ := s.loadConfig(ctx)
-  budget, spent := s.getDailyBudget(ctx)
+  budget, spentAuto, spentManual, spent := s.getDailyBudget(ctx)
   liveCost := int64(0)
   _ = s.db.QueryRow(ctx, `
 select coalesce(sum(fee_paid_sat), 0)
@@ -1486,7 +1564,7 @@ where started_at >= now() - interval '1 day'
   var totalCount int64
   _ = s.db.QueryRow(ctx, `
 select
-  coalesce(sum(case when status='succeeded' then 1 else 0 end), 0),
+  coalesce(sum(case when status in ('succeeded','partial') then 1 else 0 end), 0),
   count(*)
 from rebalance_jobs
 where completed_at >= now() - interval '7 days'
@@ -1515,6 +1593,8 @@ where report_date >= current_date - interval '6 days'
     AutoEnabled: cfg.AutoEnabled,
     DailyBudgetSat: budget,
     DailySpentSat: spent,
+    DailySpentAutoSat: spentAuto,
+    DailySpentManualSat: spentManual,
     LiveCostSat: liveCost,
     Effectiveness7d: effectiveness,
     ROI7d: roi,

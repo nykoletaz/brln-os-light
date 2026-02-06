@@ -929,6 +929,8 @@
       "roi": "ROI 7d: {{value}}",
       "dailyBudget": "Orçamento diário",
       "dailySpent": "Gasto: {{value}}",
+      "dailySpentAuto": "Gasto auto: {{value}}",
+      "dailySpentManual": "Gasto manual: {{value}}",
       "autoMode": "Modo automático",
       "scanInterval": "Varredura: {{value}}s"
     },
@@ -940,6 +942,7 @@
       "scanInterval": "Intervalo de varredura (seg)",
       "dailyBudgetPct": "Orçamento diário (% da receita)",
       "deadband": "Deadband (%)",
+      "sourceMinLocal": "Mínimo local para fonte (%)",
       "econRatio": "Ratio econômico",
       "roiMin": "ROI mínimo",
       "maxConcurrent": "Max. concorrentes",
@@ -959,6 +962,7 @@
       "scanInterval": "Frequência de varredura do modo automático.",
       "dailyBudgetPct": "Teto diário como % da receita média de 7 dias.",
       "deadband": "Déficit outbound mínimo para virar alvo.",
+      "sourceMinLocal": "Liquidez local mínima (outbound %) para usar como fonte.",
       "econRatio": "Fração da fee outbound usada como fee maxima.",
       "roiMin": "ROI mínimo esperado (receita 7d / custo estimado).",
       "maxConcurrent": "Máximo de rebalances simultâneos.",
@@ -1003,13 +1007,16 @@
       "title": "Fila ativa",
       "empty": "Nenhum rebalance ativo.",
       "target": "Alvo outbound: {{value}}",
+      "remaining": "Restante: {{value}}",
       "attempt": "Tentativa {{index}} - {{amount}} - fee cap {{fee}} ppm"
     },
     "history": {
       "title": "Histórico recente",
       "empty": "Sem rebalances concluídos.",
-      "target": "Alvo outbound: {{value}}"
+      "target": "Alvo outbound: {{value}}",
+      "remaining": "Restante: {{value}}"
     }
   }
 }
+
 
