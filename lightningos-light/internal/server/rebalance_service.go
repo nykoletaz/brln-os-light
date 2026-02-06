@@ -94,6 +94,7 @@ type RebalanceChannel struct {
   MaxSourceSat int64 `json:"max_source_sat"`
   Revenue7dSat int64 `json:"revenue_7d_sat"`
   ROIEstimate float64 `json:"roi_estimate"`
+  ROIEstimateValid bool `json:"roi_estimate_valid"`
   ExcludedAsSource bool `json:"excluded_as_source"`
 }
 
@@ -427,7 +428,7 @@ func (s *RebalanceService) runAutoScan() {
         eligibleSources++
         totalAvailable += snapshot.MaxSourceSat
       }
-      if setting.AutoEnabled && snapshot.EligibleAsTarget && (cfg.ROIMin <= 0 || snapshot.ROIEstimate >= cfg.ROIMin) {
+      if setting.AutoEnabled && snapshot.EligibleAsTarget && (cfg.ROIMin <= 0 || !snapshot.ROIEstimateValid || snapshot.ROIEstimate >= cfg.ROIMin) {
         candidates = append(candidates, rebalanceTarget{
           Channel: snapshot,
         })
@@ -1039,16 +1040,15 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
   }
 
   roiEstimate := 0.0
+  roiEstimateValid := false
   targetAmount := computeDeficitAmount(ch, target)
   estCost := estimateMaxCost(targetAmount, outgoingFee, cfg.EconRatio, peerFeeRate)
   if estCost > 0 && revenue7dSat > 0 {
     roiEstimate = float64(revenue7dSat) / float64(estCost)
+    roiEstimateValid = true
   } else if estCost == 0 && targetAmount > 0 && outgoingFee > peerFeeRate {
-    // If estimated cost is zero, treat ROI as positive so the channel can still be eligible.
-    roiEstimate = cfg.ROIMin
-    if roiEstimate <= 0 {
-      roiEstimate = 1
-    }
+    // Cost is zero -> ROI is indeterminate; allow auto rebal by skipping ROI filter.
+    roiEstimateValid = false
   }
 
   return RebalanceChannel{
@@ -1076,6 +1076,7 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
     MaxSourceSat: maxSource,
     Revenue7dSat: revenue7dSat,
     ROIEstimate: roiEstimate,
+    ROIEstimateValid: roiEstimateValid,
     ExcludedAsSource: excluded,
   }
 }
@@ -1999,7 +2000,7 @@ func (s *RebalanceService) computeEligibilityCounts(ctx context.Context, cfg Reb
     if snapshot.EligibleAsSource {
       eligibleSources++
     }
-    if setting.AutoEnabled && snapshot.EligibleAsTarget && (cfg.ROIMin <= 0 || snapshot.ROIEstimate >= cfg.ROIMin) {
+    if setting.AutoEnabled && snapshot.EligibleAsTarget && (cfg.ROIMin <= 0 || !snapshot.ROIEstimateValid || snapshot.ROIEstimate >= cfg.ROIMin) {
       targetsNeeding++
     }
   }

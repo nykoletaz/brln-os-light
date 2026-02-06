@@ -1008,13 +1008,14 @@
       "actions": "Ações",
       "spread": "Spread {{value}} ppm",
       "amount": "Liquidez local a adicionar: {{value}}",
-      "payback": "Payback {{value}}%",
+        "payback": "Payback {{value}}%",
         "rebalanceIn": "Rebalance In",
         "bulkAuto": "Auto (todos)",
         "bulkExclude": "Excluir (todos)",
         "auto": "Auto",
         "excludeSource": "Excluir fonte",
-        "roiEstimate": "ROI est. {{value}}"
+        "roiEstimate": "ROI est. {{value}}",
+        "roiEstimateNA": "ROI est. ind"
       },
     "channelsHints": {
       "targetOutbound": "Percentual de outbound desejado apos o rebalance.",

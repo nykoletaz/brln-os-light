@@ -78,6 +78,7 @@ type RebalanceChannel = {
   max_source_sat: number
   revenue_7d_sat: number
   roi_estimate: number
+  roi_estimate_valid?: boolean
   excluded_as_source: boolean
 }
 
@@ -715,7 +716,7 @@ export default function RebalanceCenter() {
             </thead>
             <tbody>
               {sortedChannels.map((ch) => {
-                const meetsRoi = !config || config.roi_min <= 0 || ch.roi_estimate >= config.roi_min
+                const meetsRoi = !config || config.roi_min <= 0 || !ch.roi_estimate_valid || ch.roi_estimate >= config.roi_min
                 const isAutoTarget = ch.eligible_as_target && ch.auto_enabled && meetsRoi
                 const highlight = isAutoTarget
                   ? 'bg-rose-500/10'
@@ -799,11 +800,13 @@ export default function RebalanceCenter() {
                         {t('rebalanceCenter.channels.excludeSource')}
                       </label>
                     </div>
-                    <div className="text-xs text-fog/50">
-                      {t('rebalanceCenter.channels.roiEstimate', { value: ch.roi_estimate.toFixed(2) })}
-                    </div>
-                  </td>
-                </tr>
+                      <div className="text-xs text-fog/50">
+                        {ch.roi_estimate_valid
+                          ? t('rebalanceCenter.channels.roiEstimate', { value: ch.roi_estimate.toFixed(2) })
+                          : t('rebalanceCenter.channels.roiEstimateNA')}
+                      </div>
+                    </td>
+                  </tr>
                 )
               })}
             </tbody>

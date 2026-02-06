@@ -1014,7 +1014,8 @@
         "bulkExclude": "Exclude all",
         "auto": "Auto",
         "excludeSource": "Exclude source",
-        "roiEstimate": "ROI est. {{value}}"
+        "roiEstimate": "ROI est. {{value}}",
+        "roiEstimateNA": "ROI est. n/a"
       },
     "channelsHints": {
       "targetOutbound": "Desired outbound liquidity percentage after the rebalance.",
