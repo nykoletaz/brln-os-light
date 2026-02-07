@@ -1013,10 +1013,11 @@
       "target": "Alvo outbound",
       "protected": "Protegido",
       "actions": "Ações",
-      "spread": "Spread {{value}} ppm",
-      "amount": "Liquidez local a adicionar: {{value}}",
+        "spread": "Spread {{value}} ppm",
+        "amount": "Liquidez local a adicionar: {{value}}",
         "payback": "Payback {{value}}%",
-        "rebalanceIn": "Rebalance In",
+        "saveTarget": "Salvar target",
+        "rebalanceIn": "Manual Rebal In",
         "bulkAuto": "Auto (todos)",
         "bulkExclude": "Excluir (todos)",
         "auto": "Auto",
@@ -1025,9 +1026,9 @@
         "roiEstimateNA": "ROI est. ind"
       },
     "channelsHints": {
-      "targetOutbound": "Percentual de outbound desejado apos o rebalance.",
+      "targetOutbound": "Percentual de outbound desejado após o rebalance.",
       "saveTarget": "Salvar o target outbound deste canal.",
-      "rebalanceIn": "Iniciar rebalance para aumentar liquidez local (outbound).",
+      "rebalanceIn": "Iniciar rebalance manual para aumentar liquidez local (outbound).",
       "auto": "Permitir que o modo automático rebalance este canal.",
       "excludeSource": "Nunca usar este canal como fonte de rebalance."
     },

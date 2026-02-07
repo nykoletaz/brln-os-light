@@ -727,9 +727,9 @@ export default function RebalanceCenter() {
             <thead>
               <tr className="text-left">
                 <th className="pb-2">{t('rebalanceCenter.channels.channel')}</th>
-                <th className="pb-2">{t('rebalanceCenter.channels.balance')}</th>
-                <th className="pb-2">{t('rebalanceCenter.channels.fees')}</th>
-                <th className="pb-2">{t('rebalanceCenter.channels.target')}</th>
+                <th className="pb-2 pl-6">{t('rebalanceCenter.channels.balance')}</th>
+                <th className="pb-2 pl-6">{t('rebalanceCenter.channels.fees')}</th>
+                <th className="pb-2 pl-6">{t('rebalanceCenter.channels.target')}</th>
                 <th className="pb-2">{t('rebalanceCenter.channels.protected')}</th>
                 <th className="pb-2">
                   <div className="flex flex-col gap-2">
@@ -771,18 +771,18 @@ export default function RebalanceCenter() {
                       <div className="text-fog">{ch.peer_alias || ch.remote_pubkey}</div>
                       <div className="text-xs text-fog/50">{ch.channel_point}</div>
                     </td>
-                  <td className="py-3">
+                  <td className="py-3 pl-6">
                     <div>{formatPct(ch.local_pct)} / {formatPct(ch.remote_pct)}</div>
                     <div className="text-xs text-fog/50">{formatSats(ch.local_balance_sat)} | {formatSats(ch.remote_balance_sat)}</div>
                   </td>
-                  <td className="py-3">
+                  <td className="py-3 pl-6">
                     <div>
                       {t('rebalanceCenter.channels.feeOut', { value: ch.outgoing_fee_ppm })} ·{' '}
                       {t('rebalanceCenter.channels.feePeer', { value: ch.peer_fee_rate_ppm })}
                     </div>
                     <div className="text-xs text-fog/50">{t('rebalanceCenter.channels.spread', { value: ch.spread_ppm })}</div>
                   </td>
-                  <td className="py-3">
+                  <td className="py-3 pl-6">
                     <div className="flex items-center gap-2">
                       <input
                         className="input-field w-24"
@@ -793,6 +793,12 @@ export default function RebalanceCenter() {
                         title={t('rebalanceCenter.channelsHints.targetOutbound')}
                         value={editTargets[ch.channel_id] ?? String(Math.round(ch.target_outbound_pct * 10) / 10)}
                         onChange={(e) => setEditTargets((prev) => ({ ...prev, [ch.channel_id]: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            handleUpdateTarget(ch)
+                          }
+                        }}
                       />
                       <span className="text-xs text-fog/60">%</span>
                     </div>
@@ -811,7 +817,7 @@ export default function RebalanceCenter() {
                         onClick={() => handleUpdateTarget(ch)}
                         title={t('rebalanceCenter.channelsHints.saveTarget')}
                       >
-                        {t('common.save')}
+                        {t('rebalanceCenter.channels.saveTarget')}
                       </button>
                       <button
                         className="btn-primary text-xs px-3 py-1"
