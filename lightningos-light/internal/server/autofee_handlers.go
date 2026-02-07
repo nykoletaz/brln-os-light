@@ -190,10 +190,13 @@ func (s *Server) readAutofeeLogLines(ctx context.Context, limit int) ([]string, 
     limit = 1000
   }
   rows, err := s.db.Query(ctx, `
-select occurred_at, line
+select max(occurred_at) as occurred_at,
+  max(case when seq = 1 then line else '' end) as summary,
+  max(case when seq = 2 then line else '' end) as seed
 from autofee_logs
-where seq = 1
-order by id desc
+where seq in (1,2)
+group by run_id
+order by max(id) desc
 limit $1
 `, limit)
   if err != nil {
@@ -204,11 +207,15 @@ limit $1
   lines := []string{}
   for rows.Next() {
     var ts time.Time
-    var memo string
-    if err := rows.Scan(&ts, &memo); err != nil {
+    var summary string
+    var seed string
+    if err := rows.Scan(&ts, &summary, &seed); err != nil {
       return nil, err
     }
-    line := ts.UTC().Format(time.RFC3339) + " | " + memo
+    line := ts.Local().Format(time.RFC3339) + " | " + strings.TrimSpace(summary)
+    if strings.TrimSpace(seed) != "" {
+      line = line + " | " + strings.TrimSpace(seed)
+    }
     lines = append(lines, line)
   }
   return lines, rows.Err()
