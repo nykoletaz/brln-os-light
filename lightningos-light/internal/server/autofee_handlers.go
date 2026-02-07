@@ -192,6 +192,7 @@ func (s *Server) readAutofeeLogLines(ctx context.Context, limit int) ([]string, 
   rows, err := s.db.Query(ctx, `
 select occurred_at, line
 from autofee_logs
+where seq = 1
 order by id desc
 limit $1
 `, limit)

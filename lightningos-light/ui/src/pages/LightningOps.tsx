@@ -245,6 +245,24 @@ export default function LightningOps() {
     return channels.every((ch) => (autofeeSettings[ch.channel_id] ?? true))
   }, [channels, autofeeSettings])
 
+  const formattedAutofeeResults = useMemo(() => {
+    return autofeeResults.map((line) => {
+      if (!line.startsWith('⚡')) {
+        return line
+      }
+      const idx = line.lastIndexOf('|')
+      if (idx <= 0) {
+        return line
+      }
+      const raw = line.slice(idx + 1).trim()
+      const parsed = new Date(raw)
+      if (Number.isNaN(parsed.getTime())) {
+        return line
+      }
+      return `${line.slice(0, idx + 1)} ${parsed.toLocaleString()}`
+    })
+  }, [autofeeResults])
+
   const blockCadenceAvg = useMemo(() => {
     const buckets = bitcoinLocal?.block_cadence || []
     if (!buckets.length) return 0
@@ -1141,7 +1159,7 @@ export default function LightningOps() {
           <>
             {autofeeResultsStatus && <p className="text-sm text-brass">{autofeeResultsStatus}</p>}
             <div className="bg-ink/70 border border-white/10 rounded-2xl p-4 text-xs font-mono whitespace-pre-wrap max-h-[420px] overflow-y-auto">
-              {autofeeResults.length ? autofeeResults.join('\n') : t('lightningOps.autofeeResultsEmpty')}
+              {formattedAutofeeResults.length ? formattedAutofeeResults.join('\n') : t('lightningOps.autofeeResultsEmpty')}
             </div>
           </>
         )}

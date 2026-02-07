@@ -852,7 +852,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   rebalGlobalPpm := ppmMsat(rebalGlobal.FeeMsat, rebalGlobal.AmtMsat)
 
   runID := fmt.Sprintf("%d", time.Now().UnixNano())
-  header := fmt.Sprintf("⚡ Autofee %s | %s", strings.ToUpper(reason), e.now.Format("2006-01-02 15:04:05Z"))
+  header := fmt.Sprintf("⚡ Autofee %s | %s", strings.ToUpper(reason), e.now.UTC().Format(time.RFC3339))
   if dryRun {
     header = header + " (dry-run)"
   }
@@ -951,27 +951,27 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
 
   report := []string{header, summaryText, seedText, ""}
   if len(changedLines) > 0 {
-    report = append(report, "✅ CANAIS ALTERADOS", "")
+    report = append(report, "✅", "")
     report = append(report, changedLines...)
     report = append(report, "")
   }
   if len(keptLines) > 0 {
-    report = append(report, "🫤 CANAIS MANTIDOS", "")
+    report = append(report, "🫤", "")
     report = append(report, keptLines...)
     report = append(report, "")
   }
   if len(skippedLines) > 0 {
-    report = append(report, "⏭️ CANAIS IGNORADOS", "")
+    report = append(report, "⏭️", "")
     report = append(report, skippedLines...)
     report = append(report, "")
   }
   if len(explorerLines) > 0 {
-    report = append(report, "🧭 EXPLORER STATUS", "")
+    report = append(report, "🧭", "")
     report = append(report, explorerLines...)
     report = append(report, "")
   }
   if len(errorLines) > 0 {
-    report = append(report, "❌ ERROS", "")
+    report = append(report, "❌", "")
     report = append(report, errorLines...)
     report = append(report, "")
   }
