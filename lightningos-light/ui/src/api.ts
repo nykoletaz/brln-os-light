@@ -114,6 +114,8 @@ export const payInvoice = (payload: { payment_request: string; channel_point?: s
 
 export const getLnChannels = () => request('/api/lnops/channels')
 export const getLnPeers = () => request('/api/lnops/peers')
+export const signLnMessage = (payload: { message: string }) =>
+  request('/api/lnops/sign-message', { method: 'POST', body: JSON.stringify(payload) })
 export const getLnChanHeal = () => request('/api/lnops/channel/auto-heal')
 export const updateLnChanHeal = (payload: { enabled?: boolean; interval_sec?: number }) =>
   request('/api/lnops/channel/auto-heal', { method: 'POST', body: JSON.stringify(payload) })

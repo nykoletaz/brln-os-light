@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeResults, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnPeers, getMempoolFees, openChannel, runAutofee, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus } from '../api'
+import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeResults, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnPeers, getMempoolFees, openChannel, runAutofee, signLnMessage, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus } from '../api'
 
 type Channel = {
   channel_point: string
@@ -142,6 +142,11 @@ export default function LightningOps() {
   const [chanHealStatus, setChanHealStatus] = useState('')
   const [chanHealBusy, setChanHealBusy] = useState(false)
   const [chanHealInterval, setChanHealInterval] = useState('300')
+  const [signMessage, setSignMessage] = useState('')
+  const [signSignature, setSignSignature] = useState('')
+  const [signStatus, setSignStatus] = useState('')
+  const [signBusy, setSignBusy] = useState(false)
+  const [signCopied, setSignCopied] = useState(false)
   const [bitcoinLocal, setBitcoinLocal] = useState<BitcoinLocalStatus | null>(null)
 
   const [autofeeConfig, setAutofeeConfig] = useState<AutofeeConfig | null>(null)
@@ -798,6 +803,43 @@ export default function LightningOps() {
       setChanHealStatus(err?.message || t('lightningOps.chanHealSaveFailed'))
     } finally {
       setChanHealBusy(false)
+    }
+  }
+
+  const handleSignMessage = async () => {
+    if (signBusy) return
+    const message = signMessage.trim()
+    if (!message) {
+      setSignStatus(t('lightningOps.signMessageRequired'))
+      return
+    }
+    setSignBusy(true)
+    setSignStatus(t('lightningOps.signMessageSigning'))
+    setSignSignature('')
+    setSignCopied(false)
+    try {
+      const res = await signLnMessage({ message })
+      const signature = String(res?.signature || '').trim()
+      if (!signature) {
+        setSignStatus(t('lightningOps.signMessageFailed'))
+        return
+      }
+      setSignSignature(signature)
+      setSignStatus(t('lightningOps.signMessageReady'))
+    } catch (err: any) {
+      setSignStatus(err?.message || t('lightningOps.signMessageFailed'))
+    } finally {
+      setSignBusy(false)
+    }
+  }
+
+  const handleCopySignature = async () => {
+    if (!signSignature) return
+    try {
+      await navigator.clipboard.writeText(signSignature)
+      setSignCopied(true)
+    } catch {
+      setSignStatus(t('common.copyFailedManual'))
     }
   }
 
@@ -1747,6 +1789,57 @@ export default function LightningOps() {
           <p className="text-xs text-amber-200">
             {t('lightningOps.chanHealLastError')}: {chanHeal.last_error}
           </p>
+        )}
+      </div>
+
+      <div className="section-card space-y-4">
+        <div>
+          <h3 className="text-lg font-semibold">{t('lightningOps.signMessageTitle')}</h3>
+          <p className="text-sm text-fog/60">{t('lightningOps.signMessageSubtitle')}</p>
+        </div>
+        <textarea
+          className="input-field min-h-[120px]"
+          placeholder={t('lightningOps.signMessagePlaceholder')}
+          value={signMessage}
+          onChange={(e) => {
+            const value = e.target.value
+            setSignMessage(value)
+            if (signSignature) setSignSignature('')
+            if (signCopied) setSignCopied(false)
+            if (signStatus) setSignStatus('')
+          }}
+        />
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            className="btn-primary disabled:opacity-60 disabled:cursor-not-allowed"
+            onClick={handleSignMessage}
+            disabled={signBusy || !signMessage.trim()}
+            type="button"
+          >
+            {signBusy ? t('lightningOps.signMessageSigning') : t('lightningOps.signMessageAction')}
+          </button>
+          {signStatus && <p className="text-sm text-brass">{signStatus}</p>}
+        </div>
+        {signSignature && (
+          <div className="rounded-2xl border border-white/10 bg-ink/60 p-3">
+            <div className="flex items-center justify-between text-xs text-fog/60">
+              <span>{t('lightningOps.signatureLabel')}</span>
+              <button
+                className="text-fog/50 hover:text-fog"
+                onClick={handleCopySignature}
+                title={t('lightningOps.copySignature')}
+                aria-label={t('lightningOps.copySignature')}
+                type="button"
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6">
+                  <rect x="9" y="9" width="11" height="11" rx="2" />
+                  <rect x="4" y="4" width="11" height="11" rx="2" />
+                </svg>
+              </button>
+            </div>
+            <p className="mt-2 text-xs font-mono break-all">{signSignature}</p>
+            {signCopied && <p className="mt-2 text-xs text-fog/60">{t('common.copied')}</p>}
+          </div>
         )}
       </div>
 

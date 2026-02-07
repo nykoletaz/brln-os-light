@@ -82,6 +82,7 @@ func (s *Server) routes() http.Handler {
   r.Route("/api/lnops", func(r chi.Router) {
     r.Get("/channels", s.handleLNChannels)
     r.Get("/peers", s.handleLNPeers)
+    r.Post("/sign-message", s.handleLNSignMessage)
     r.Post("/peer", s.handleLNConnectPeer)
     r.Post("/peer/disconnect", s.handleLNDisconnectPeer)
     r.Post("/peers/boost", s.handleLNBoostPeers)

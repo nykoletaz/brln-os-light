@@ -1343,6 +1343,33 @@ func (s *Server) handleLNPeers(w http.ResponseWriter, r *http.Request) {
   writeJSON(w, http.StatusOK, map[string]any{"peers": peers})
 }
 
+func (s *Server) handleLNSignMessage(w http.ResponseWriter, r *http.Request) {
+  var req struct {
+    Message string `json:"message"`
+  }
+  if err := readJSON(r, &req); err != nil {
+    writeError(w, http.StatusBadRequest, "invalid json")
+    return
+  }
+
+  message := strings.TrimSpace(req.Message)
+  if message == "" {
+    writeError(w, http.StatusBadRequest, "message required")
+    return
+  }
+
+  ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
+  defer cancel()
+
+  signature, err := s.lnd.SignMessage(ctx, message)
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, lndDetailedErrorMessage(err))
+    return
+  }
+
+  writeJSON(w, http.StatusOK, map[string]string{"signature": signature})
+}
+
 func (s *Server) handleLNConnectPeer(w http.ResponseWriter, r *http.Request) {
   var req struct {
     Address string `json:"address"`
