@@ -833,7 +833,7 @@ func (e *autofeeEngine) fetchForwardStats(ctx context.Context, lookback int) (ma
   rows, err := e.svc.db.Query(ctx, `
 select chan_id_out, coalesce(sum(fee_msat), 0), coalesce(sum(amount_out_msat), 0), count(*)
 from notifications
-where type='forward' and occurred_at >= now() - ($1::text || ' days')::interval
+where type='forward' and occurred_at >= now() - ($1 * interval '1 day')
   and chan_id_out is not null
 group by chan_id_out
 `, lookback)
@@ -859,7 +859,7 @@ func (e *autofeeEngine) fetchInboundStats(ctx context.Context, lookback int) (ma
   rows, err := e.svc.db.Query(ctx, `
 select chan_id_in, coalesce(sum(amount_in_msat), 0), count(*)
 from notifications
-where type='forward' and occurred_at >= now() - ($1::text || ' days')::interval
+where type='forward' and occurred_at >= now() - ($1 * interval '1 day')
   and chan_id_in is not null
 group by chan_id_in
 `, lookback)
@@ -885,7 +885,7 @@ func (e *autofeeEngine) fetchRebalanceStats(ctx context.Context, lookback int) (
   rows, err := e.svc.db.Query(ctx, `
 select rebal_target_chan_id, coalesce(sum(fee_msat), 0), coalesce(sum(amount_sat), 0)
 from notifications
-where type='rebalance' and occurred_at >= now() - ($1::text || ' days')::interval
+where type='rebalance' and occurred_at >= now() - ($1 * interval '1 day')
   and rebal_target_chan_id is not null
 group by rebal_target_chan_id
 `, lookback)
@@ -909,7 +909,7 @@ group by rebal_target_chan_id
   err = e.svc.db.QueryRow(ctx, `
 select coalesce(sum(fee_msat), 0), coalesce(sum(amount_sat), 0)
 from notifications
-where type='rebalance' and occurred_at >= now() - ($1::text || ' days')::interval
+where type='rebalance' and occurred_at >= now() - ($1 * interval '1 day')
 `, lookback).Scan(&stats.Global.FeeMsat, &stats.Global.AmtMsat)
   if err != nil && !errors.Is(err, pgx.ErrNoRows) {
     return stats, err
