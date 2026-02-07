@@ -74,6 +74,53 @@ type AutofeeStatus struct {
   LastError string `json:"last_error,omitempty"`
 }
 
+type autofeeLogItem struct {
+  Kind string `json:"kind"`
+  Category string `json:"category,omitempty"`
+  Reason string `json:"reason,omitempty"`
+  DryRun bool `json:"dry_run,omitempty"`
+  Timestamp string `json:"timestamp,omitempty"`
+  Up int `json:"up,omitempty"`
+  Down int `json:"down,omitempty"`
+  Flat int `json:"flat,omitempty"`
+  Cooldown int `json:"cooldown,omitempty"`
+  Small int `json:"small,omitempty"`
+  Same int `json:"same,omitempty"`
+  Disabled int `json:"disabled,omitempty"`
+  Inactive int `json:"inactive,omitempty"`
+  InboundDisc int `json:"inbound_disc,omitempty"`
+  SuperSource int `json:"super_source,omitempty"`
+  Amboss int `json:"amboss,omitempty"`
+  Missing int `json:"missing,omitempty"`
+  Err int `json:"err,omitempty"`
+  Empty int `json:"empty,omitempty"`
+  Outrate int `json:"outrate,omitempty"`
+  Mem int `json:"mem,omitempty"`
+  Default int `json:"default,omitempty"`
+  CooldownIgnored bool `json:"cooldown_ignored,omitempty"`
+  Alias string `json:"alias,omitempty"`
+  ChannelID uint64 `json:"channel_id,omitempty"`
+  ChannelPoint string `json:"channel_point,omitempty"`
+  LocalPpm int `json:"local_ppm,omitempty"`
+  NewPpm int `json:"new_ppm,omitempty"`
+  Target int `json:"target,omitempty"`
+  OutRatio float64 `json:"out_ratio,omitempty"`
+  OutPpm7d int `json:"out_ppm7d,omitempty"`
+  RebalPpm7d int `json:"rebal_ppm7d,omitempty"`
+  Seed int `json:"seed,omitempty"`
+  Floor int `json:"floor,omitempty"`
+  FloorSrc string `json:"floor_src,omitempty"`
+  Margin int `json:"margin,omitempty"`
+  RevShare float64 `json:"rev_share,omitempty"`
+  Tags []string `json:"tags,omitempty"`
+  InboundDiscount int `json:"inbound_discount,omitempty"`
+  ClassLabel string `json:"class_label,omitempty"`
+  SkipReason string `json:"skip_reason,omitempty"`
+  Error string `json:"error,omitempty"`
+  Delta int `json:"delta,omitempty"`
+  DeltaPct float64 `json:"delta_pct,omitempty"`
+}
+
 type autofeeProfile struct {
   Name string
   StepCap float64
@@ -177,6 +224,11 @@ type loggerLike interface {
   Printf(format string, v ...any)
 }
 
+type autofeeLogEntry struct {
+  Line string
+  Payload *autofeeLogItem
+}
+
 func NewAutofeeService(db *pgxpool.Pool, lnd *lndclient.Client, notifier *Notifier, logger loggerLike) *AutofeeService {
   return &AutofeeService{
     db: db,
@@ -248,7 +300,8 @@ create table if not exists autofee_logs (
   occurred_at timestamptz not null default now(),
   run_id text,
   seq integer,
-  line text not null
+  line text not null,
+  payload jsonb
 );
 create index if not exists autofee_logs_occurred_at_idx on autofee_logs (occurred_at desc);
 create index if not exists autofee_logs_run_idx on autofee_logs (run_id, seq);
@@ -258,6 +311,7 @@ alter table autofee_config add column if not exists super_source_base_fee_msat i
 alter table autofee_state add column if not exists ss_active boolean;
 alter table autofee_state add column if not exists ss_ok_since timestamptz;
 alter table autofee_state add column if not exists ss_bad_since timestamptz;
+alter table autofee_logs add column if not exists payload jsonb;
 `)
   if err != nil {
     return err
@@ -562,18 +616,24 @@ func (s *AutofeeService) Status() AutofeeStatus {
   return status
 }
 
-func (s *AutofeeService) appendAutofeeLines(ctx context.Context, runID string, lines []string) error {
-  if s.db == nil || len(lines) == 0 {
+func (s *AutofeeService) appendAutofeeLines(ctx context.Context, runID string, entries []autofeeLogEntry) error {
+  if s.db == nil || len(entries) == 0 {
     return nil
   }
   batch := &pgx.Batch{}
   now := time.Now().UTC()
-  for i, line := range lines {
-    batch.Queue(`insert into autofee_logs (occurred_at, run_id, seq, line) values ($1,$2,$3,$4)`, now, runID, i, line)
+  for i, entry := range entries {
+    var payload any
+    if entry.Payload != nil {
+      raw, _ := json.Marshal(entry.Payload)
+      payload = raw
+    }
+    batch.Queue(`insert into autofee_logs (occurred_at, run_id, seq, line, payload) values ($1,$2,$3,$4,$5)`,
+      now, runID, i, entry.Line, payload)
   }
   br := s.db.SendBatch(ctx, batch)
   defer br.Close()
-  for range lines {
+  for range entries {
     if _, err := br.Exec(); err != nil {
       return err
     }
@@ -857,11 +917,11 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     header = header + " (dry-run)"
   }
   summary := autofeeRunSummary{total: len(channels)}
-  changedLines := []string{}
-  keptLines := []string{}
-  skippedLines := []string{}
-  errorLines := []string{}
-  explorerLines := []string{}
+  changedLines := []autofeeLogEntry{}
+  keptLines := []autofeeLogEntry{}
+  skippedLines := []autofeeLogEntry{}
+  errorLines := []autofeeLogEntry{}
+  explorerLines := []autofeeLogEntry{}
   for _, ch := range channels {
     if !ch.Active {
       summary.inactive++
@@ -895,7 +955,6 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
 
     e.persistState(ctx, decision.State)
 
-    line, category := formatAutofeeDecisionLine(decision, dryRun, false)
     if decision.Apply {
       summary.applied++
       if decision.NewPpm > decision.LocalPpm {
@@ -906,30 +965,38 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
         summary.kept++
       }
       if dryRun {
-        changedLines = append(changedLines, line)
+        changedLines = append(changedLines, buildAutofeeChannelLogEntry(decision, "changed", true, nil))
         continue
       }
       if err := e.applyDecision(ctx, ch, decision); err != nil {
         summary.applyErrors++
-        errLine, _ := formatAutofeeDecisionLine(decision.withError(err), dryRun, true)
-        errorLines = append(errorLines, errLine)
+        errorLines = append(errorLines, buildAutofeeChannelLogEntry(decision.withError(err), "error", dryRun, err))
         continue
       }
-      changedLines = append(changedLines, line)
+      changedLines = append(changedLines, buildAutofeeChannelLogEntry(decision, "changed", dryRun, nil))
     } else {
       if decision.NewPpm == decision.LocalPpm {
         summary.kept++
       }
-      switch category {
-      case "skipped":
-        skippedLines = append(skippedLines, line)
-      case "kept":
-        keptLines = append(keptLines, line)
-      default:
-        keptLines = append(keptLines, line)
+      cat := "kept"
+      if containsTag(decision.Tags, "cooldown") || containsTag(decision.Tags, "hold-small") {
+        cat = "skipped"
+      }
+      entry := buildAutofeeChannelLogEntry(decision, cat, dryRun, nil)
+      if cat == "skipped" {
+        skippedLines = append(skippedLines, entry)
+      } else {
+        keptLines = append(keptLines, entry)
       }
       if containsTag(decision.Tags, "explorer") {
-        explorerLines = append(explorerLines, fmt.Sprintf("🧭 %s explorer: ON", decision.Alias))
+        explorerLines = append(explorerLines, autofeeLogEntry{
+          Line: fmt.Sprintf("🧭 %s explorer: ON", decision.Alias),
+          Payload: &autofeeLogItem{
+            Kind: "explorer",
+            Category: "explorer",
+            Alias: decision.Alias,
+          },
+        })
       }
     }
   }
@@ -949,34 +1016,56 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     seedText = seedText + " | cooldown_ignored=1"
   }
 
-  report := []string{header, summaryText, seedText, ""}
-  if len(changedLines) > 0 {
-    report = append(report, "✅", "")
-    report = append(report, changedLines...)
-    report = append(report, "")
-  }
-  if len(keptLines) > 0 {
-    report = append(report, "🫤", "")
-    report = append(report, keptLines...)
-    report = append(report, "")
-  }
-  if len(skippedLines) > 0 {
-    report = append(report, "⏭️", "")
-    report = append(report, skippedLines...)
-    report = append(report, "")
-  }
-  if len(explorerLines) > 0 {
-    report = append(report, "🧭", "")
-    report = append(report, explorerLines...)
-    report = append(report, "")
-  }
-  if len(errorLines) > 0 {
-    report = append(report, "❌", "")
-    report = append(report, errorLines...)
-    report = append(report, "")
+  entries := []autofeeLogEntry{
+    {Line: header, Payload: &autofeeLogItem{Kind: "header", Reason: reason, DryRun: dryRun, Timestamp: e.now.UTC().Format(time.RFC3339)}},
+    {Line: summaryText, Payload: &autofeeLogItem{
+      Kind: "summary",
+      Up: summary.changedUp,
+      Down: summary.changedDown,
+      Flat: summary.kept,
+      Cooldown: summary.skippedCooldown,
+      Small: summary.skippedSmall,
+      Same: summary.skippedSame,
+      Disabled: summary.disabled,
+      Inactive: summary.inactive,
+      InboundDisc: summary.inboundDiscount,
+      SuperSource: summary.superSource,
+    }},
+    {Line: seedText, Payload: &autofeeLogItem{
+      Kind: "seed",
+      Amboss: summary.seedAmboss,
+      Missing: summary.seedAmbossMissing,
+      Err: summary.seedAmbossError,
+      Empty: summary.seedAmbossEmpty,
+      Outrate: summary.seedOutrate,
+      Mem: summary.seedMem,
+      Default: summary.seedDefault,
+      CooldownIgnored: e.ignoreCooldown,
+    }},
   }
 
-  if err := e.svc.appendAutofeeLines(ctx, runID, report); err != nil {
+  if len(changedLines) > 0 {
+    entries = append(entries, autofeeLogEntry{Line: "✅", Payload: &autofeeLogItem{Kind: "section", Category: "changed"}})
+    entries = append(entries, changedLines...)
+  }
+  if len(keptLines) > 0 {
+    entries = append(entries, autofeeLogEntry{Line: "🫤", Payload: &autofeeLogItem{Kind: "section", Category: "kept"}})
+    entries = append(entries, keptLines...)
+  }
+  if len(skippedLines) > 0 {
+    entries = append(entries, autofeeLogEntry{Line: "⏭️", Payload: &autofeeLogItem{Kind: "section", Category: "skipped"}})
+    entries = append(entries, skippedLines...)
+  }
+  if len(explorerLines) > 0 {
+    entries = append(entries, autofeeLogEntry{Line: "🧭", Payload: &autofeeLogItem{Kind: "section", Category: "explorer"}})
+    entries = append(entries, explorerLines...)
+  }
+  if len(errorLines) > 0 {
+    entries = append(entries, autofeeLogEntry{Line: "❌", Payload: &autofeeLogItem{Kind: "section", Category: "error"}})
+    entries = append(entries, errorLines...)
+  }
+
+  if err := e.svc.appendAutofeeLines(ctx, runID, entries); err != nil {
     e.svc.logger.Printf("autofee: log insert failed: %v", err)
   }
   return nil
@@ -1351,6 +1440,60 @@ func formatAutofeeDecisionLine(d *decision, dryRun bool, isError bool) (string, 
     tagLine,
   )
   return strings.TrimSpace(line), category
+}
+
+func buildAutofeeChannelLogEntry(d *decision, category string, dryRun bool, err error) autofeeLogEntry {
+  if d == nil {
+    return autofeeLogEntry{}
+  }
+  if category == "" {
+    category = "kept"
+  }
+  line, _ := formatAutofeeDecisionLine(d, dryRun, err != nil)
+  delta := d.NewPpm - d.LocalPpm
+  deltaPct := 0.0
+  if d.LocalPpm > 0 && d.NewPpm != d.LocalPpm {
+    deltaPct = math.Abs(float64(delta)) / float64(d.LocalPpm) * 100.0
+  }
+  skipReason := ""
+  if !d.Apply {
+    if containsTag(d.Tags, "cooldown") {
+      skipReason = "cooldown"
+    } else if containsTag(d.Tags, "hold-small") {
+      skipReason = "hold-small"
+    } else if containsTag(d.Tags, "same-ppm") {
+      skipReason = "same-ppm"
+    }
+  }
+  payload := &autofeeLogItem{
+    Kind: "channel",
+    Category: category,
+    DryRun: dryRun,
+    Alias: d.Alias,
+    ChannelID: d.ChannelID,
+    ChannelPoint: d.ChannelPoint,
+    LocalPpm: d.LocalPpm,
+    NewPpm: d.NewPpm,
+    Target: d.Target,
+    OutRatio: d.OutRatio,
+    OutPpm7d: d.OutPpm7d,
+    RebalPpm7d: d.RebalPpm,
+    Seed: d.Seed,
+    Floor: d.Floor,
+    FloorSrc: d.FloorSrc,
+    Margin: d.Margin,
+    RevShare: d.RevShare,
+    Tags: append([]string{}, d.Tags...),
+    InboundDiscount: d.InboundDiscount,
+    ClassLabel: d.ClassLabel,
+    SkipReason: skipReason,
+    Delta: delta,
+    DeltaPct: deltaPct,
+  }
+  if err != nil {
+    payload.Error = err.Error()
+  }
+  return autofeeLogEntry{Line: line, Payload: payload}
 }
 
 // ===== evaluation =====

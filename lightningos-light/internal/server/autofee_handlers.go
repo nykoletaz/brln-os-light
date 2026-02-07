@@ -2,6 +2,7 @@
 
 import (
   "context"
+  "encoding/json"
   "errors"
   "net/http"
   "strconv"
@@ -237,7 +238,7 @@ func (s *Server) handleAutofeeResults(w http.ResponseWriter, r *http.Request) {
   ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
   defer cancel()
   rows, err := s.db.Query(ctx, `
-select line
+select line, payload
 from autofee_logs
 order by coalesce(run_id, '0')::bigint desc, seq asc
 limit $1
@@ -248,15 +249,24 @@ limit $1
   }
   defer rows.Close()
   out := []string{}
+  items := []map[string]any{}
   for rows.Next() {
     var line string
-    if err := rows.Scan(&line); err != nil {
+    var raw []byte
+    if err := rows.Scan(&line, &raw); err != nil {
       writeError(w, http.StatusInternalServerError, err.Error())
       return
     }
     out = append(out, line)
+    var item map[string]any
+    if len(raw) > 0 {
+      if err := json.Unmarshal(raw, &item); err != nil {
+        item = nil
+      }
+    }
+    items = append(items, item)
   }
-  writeJSON(w, http.StatusOK, map[string]any{"lines": out})
+  writeJSON(w, http.StatusOK, map[string]any{"lines": out, "items": items})
 }
 
 func parseAutofeeLimit(raw string) int {

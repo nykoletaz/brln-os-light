@@ -110,6 +110,53 @@ type AutofeeChannelSetting = {
   enabled: boolean
 }
 
+type AutofeeResultItem = {
+  kind: string
+  category?: string
+  reason?: string
+  dry_run?: boolean
+  timestamp?: string
+  up?: number
+  down?: number
+  flat?: number
+  cooldown?: number
+  small?: number
+  same?: number
+  disabled?: number
+  inactive?: number
+  inbound_disc?: number
+  super_source?: number
+  amboss?: number
+  missing?: number
+  err?: number
+  empty?: number
+  outrate?: number
+  mem?: number
+  default?: number
+  cooldown_ignored?: boolean
+  alias?: string
+  channel_id?: number
+  channel_point?: string
+  local_ppm?: number
+  new_ppm?: number
+  target?: number
+  out_ratio?: number
+  out_ppm7d?: number
+  rebal_ppm7d?: number
+  seed?: number
+  floor?: number
+  floor_src?: string
+  margin?: number
+  rev_share?: number
+  tags?: string[]
+  inbound_discount?: number
+  class_label?: string
+  skip_reason?: string
+  error?: string
+  delta?: number
+  delta_pct?: number
+}
+
 export default function LightningOps() {
   const { t } = useTranslation()
   const [channels, setChannels] = useState<Channel[]>([])
@@ -172,6 +219,7 @@ export default function LightningOps() {
   const [autofeeOpen, setAutofeeOpen] = useState(false)
   const [autofeeResultsOpen, setAutofeeResultsOpen] = useState(false)
   const [autofeeResults, setAutofeeResults] = useState<string[]>([])
+  const [autofeeResultItems, setAutofeeResultItems] = useState<AutofeeResultItem[]>([])
   const [autofeeResultsStatus, setAutofeeResultsStatus] = useState('')
 
   const [chanStatusBusy, setChanStatusBusy] = useState<string | null>(null)
@@ -247,7 +295,7 @@ export default function LightningOps() {
 
   const formattedAutofeeResults = useMemo(() => {
     return autofeeResults.map((line) => {
-      if (!line.startsWith('⚡')) {
+      if (!line.startsWith('\u26a1')) {
         return line
       }
       const idx = line.lastIndexOf('|')
@@ -262,6 +310,264 @@ export default function LightningOps() {
       return `${line.slice(0, idx + 1)} ${parsed.toLocaleString()}`
     })
   }, [autofeeResults])
+
+  const formatAutofeeReasonLabel = (reason?: string) => {
+    const normalized = (reason || '').toLowerCase()
+    if (normalized === 'manual') return t('lightningOps.autofeeResultsReasonManual')
+    if (normalized === 'scheduled') return t('lightningOps.autofeeResultsReasonScheduled')
+    if (reason) return reason.toUpperCase()
+    return t('lightningOps.autofeeResultsReasonUnknown')
+  }
+
+  const formatAutofeeHeader = (item: AutofeeResultItem) => {
+    const reasonLabel = formatAutofeeReasonLabel(item.reason)
+    const dryLabel = item.dry_run ? t('lightningOps.autofeeResultsDryRunTag') : ''
+    const ts = item.timestamp ? new Date(item.timestamp) : null
+    const timeLabel = ts && !Number.isNaN(ts.getTime()) ? ts.toLocaleString() : t('common.na')
+    return t('lightningOps.autofeeResultsHeader', { reason: reasonLabel, dry: dryLabel, time: timeLabel })
+  }
+
+  const formatAutofeeSummary = (item: AutofeeResultItem) => {
+    const parts = [
+      `${t('lightningOps.autofeeResultsUp')} ${item.up ?? 0}`,
+      `${t('lightningOps.autofeeResultsDown')} ${item.down ?? 0}`,
+      `${t('lightningOps.autofeeResultsFlat')} ${item.flat ?? 0}`,
+      `${t('lightningOps.autofeeResultsCooldown')} ${item.cooldown ?? 0}`,
+      `${t('lightningOps.autofeeResultsSmall')} ${item.small ?? 0}`,
+      `${t('lightningOps.autofeeResultsSame')} ${item.same ?? 0}`,
+      `${t('lightningOps.autofeeResultsDisabled')} ${item.disabled ?? 0}`,
+      `${t('lightningOps.autofeeResultsInactive')} ${item.inactive ?? 0}`,
+      `${t('lightningOps.autofeeResultsInboundDisc')} ${item.inbound_disc ?? 0}`,
+      `${t('lightningOps.autofeeResultsSuperSource')} ${item.super_source ?? 0}`
+    ]
+    return `📊 ${parts.join(' | ')}`
+  }
+
+  const formatAutofeeSeed = (item: AutofeeResultItem) => {
+    const parts = [
+      `${t('lightningOps.autofeeResultsSeedAmboss')}=${item.amboss ?? 0}`,
+      `${t('lightningOps.autofeeResultsSeedMissing')}=${item.missing ?? 0}`,
+      `${t('lightningOps.autofeeResultsSeedErr')}=${item.err ?? 0}`,
+      `${t('lightningOps.autofeeResultsSeedEmpty')}=${item.empty ?? 0}`,
+      `${t('lightningOps.autofeeResultsSeedOutrate')}=${item.outrate ?? 0}`,
+      `${t('lightningOps.autofeeResultsSeedMem')}=${item.mem ?? 0}`,
+      `${t('lightningOps.autofeeResultsSeedDefault')}=${item.default ?? 0}`
+    ]
+    let line = `🌱 ${t('lightningOps.autofeeResultsSeedLabel')} ${parts.join(' ')}`
+    if (item.cooldown_ignored) {
+      line += ` | ${t('lightningOps.autofeeResultsCooldownIgnored')}=1`
+    }
+    return line
+  }
+
+  const formatAutofeeTags = (tags: string[] = [], inboundDiscount?: number, classLabel?: string) => {
+    const output: string[] = []
+    const seen = new Set<string>()
+    const add = (tag: string) => {
+      if (!tag) return
+      if (seen.has(tag)) return
+      seen.add(tag)
+      output.push(tag)
+    }
+
+    switch ((classLabel || '').toLowerCase().trim()) {
+      case 'sink':
+        add('🏷️sink')
+        break
+      case 'source':
+        add('🏷️source')
+        break
+      case 'router':
+        add('🏷️router')
+        break
+      case 'unknown':
+        add('🏷️unknown')
+        break
+      default:
+        break
+    }
+
+    tags.forEach((tag) => {
+      if (!tag) return
+      if (tag === 'discovery') {
+        add('🧭discovery')
+      } else if (tag === 'explorer') {
+        add('🧭explorer')
+      } else if (tag.startsWith('surge')) {
+        add(`📈${tag}`)
+      } else if (tag === 'top-rev') {
+        add('💎top-rev')
+      } else if (tag === 'neg-margin') {
+        add('⚠️neg-margin')
+      } else if (tag === 'peg') {
+        add('📌peg')
+      } else if (tag === 'cooldown') {
+        add('⏳cooldown')
+      } else if (tag === 'hold-small') {
+        add('🧊hold-small')
+      } else if (tag === 'same-ppm') {
+        add('🟰same-ppm')
+      } else if (tag === 'no-down-low') {
+        add('🚫down-low')
+      } else if (tag === 'super-source') {
+        add('🔥super-source')
+      } else if (tag === 'super-source-like') {
+        add('🔥super-source-like')
+      } else if (tag.startsWith('seed:amboss')) {
+        add(`🌐${tag.replace('seed:', 'seed-')}`)
+      } else if (tag.startsWith('seed:med')) {
+        add('📐seed-med')
+      } else if (tag.startsWith('seed:vol')) {
+        add(`📉${tag.replace('seed:', 'seed-')}`)
+      } else if (tag.startsWith('seed:ratio')) {
+        add(`🔁${tag.replace('seed:', 'seed-')}`)
+      } else if (tag.startsWith('seed:outrate')) {
+        add('📊seed-outrate')
+      } else if (tag.startsWith('seed:mem')) {
+        add('💾seed-mem')
+      } else if (tag.startsWith('seed:default')) {
+        add('⚙️seed-default')
+      } else if (tag.startsWith('seed:p95cap')) {
+        add('🧢seed-p95')
+      } else if (tag.startsWith('seed:absmax')) {
+        add('🧱seed-cap')
+      } else {
+        add(tag)
+      }
+    })
+
+    if (inboundDiscount && inboundDiscount > 0) {
+      add(`↘️inb-${inboundDiscount}`)
+    }
+    return output.join(' ')
+  }
+
+  const formatAutofeeChannelLine = (item: AutofeeResultItem) => {
+    const alias = (item.alias || '').trim() || (item.channel_id ? `chan-${item.channel_id}` : t('common.unknown'))
+    const localPpm = item.local_ppm ?? 0
+    const newPpm = item.new_ppm ?? localPpm
+    const delta = item.delta ?? (newPpm - localPpm)
+    const deltaPct = item.delta_pct ?? (localPpm > 0 && newPpm !== localPpm ? Math.abs(delta) / localPpm * 100 : 0)
+    const deltaStr = localPpm > 0 && newPpm !== localPpm ? ` (${delta >= 0 ? '+' : ''}${delta}, ${deltaPct.toFixed(1)}%)` : ''
+
+    let dir = '➡️'
+    if (newPpm > localPpm) {
+      dir = '🔺'
+    } else if (newPpm < localPpm) {
+      dir = '🔻'
+    }
+
+    const tags = item.tags ?? []
+    const isCooldown = tags.includes('cooldown')
+    const isHoldSmall = tags.includes('hold-small')
+    const isSame = tags.includes('same-ppm')
+
+    let prefix = '🫤'
+    if (item.category === 'changed') {
+      prefix = `✅${dir}`
+    } else if (item.category === 'skipped') {
+      if (isCooldown) {
+        prefix = '⏭️⏳'
+      } else if (isHoldSmall) {
+        prefix = '⏭️🧊'
+      } else {
+        prefix = '⏭️'
+      }
+    } else if (item.category === 'error') {
+      prefix = '❌'
+    } else if (isSame) {
+      prefix = '🫤⏸️'
+    }
+
+    let action = ''
+    if (item.category === 'error') {
+      action = t('lightningOps.autofeeResultsActionError', { error: item.error || item.skip_reason || t('common.unknown') })
+    } else if (item.category === 'changed') {
+      action = item.dry_run
+        ? t('lightningOps.autofeeResultsActionDrySet', { from: localPpm, to: newPpm })
+        : t('lightningOps.autofeeResultsActionSet', { from: localPpm, to: newPpm })
+    } else {
+      action = t('lightningOps.autofeeResultsActionKeep', { value: localPpm })
+    }
+
+    const outRatio = typeof item.out_ratio === 'number' ? item.out_ratio : 0
+    const outPpm7d = item.out_ppm7d ?? 0
+    const rebalPpm7d = item.rebal_ppm7d ?? 0
+    const seed = item.seed ?? 0
+    const floor = item.floor ?? 0
+    const floorSrc = item.floor_src ? `(${item.floor_src})` : ''
+    const margin = item.margin ?? 0
+    const revShare = typeof item.rev_share === 'number' ? item.rev_share : 0
+    const tagLine = formatAutofeeTags(tags, item.inbound_discount, item.class_label) || '-'
+
+    return `${prefix} ${alias}: ${action}${deltaStr} | ${t('lightningOps.autofeeResultsLabelTarget')} ${item.target ?? 0} | ${t('lightningOps.autofeeResultsLabelOutRatio')} ${outRatio.toFixed(2)} | ${t('lightningOps.autofeeResultsLabelOutPpm7d')}≈${outPpm7d} | ${t('lightningOps.autofeeResultsLabelRebalPpm7d')}≈${rebalPpm7d} | ${t('lightningOps.autofeeResultsLabelSeed')}≈${seed} | ${t('lightningOps.autofeeResultsLabelFloor')}≥${floor}${floorSrc} | ${t('lightningOps.autofeeResultsLabelMargin')}≈${margin} | ${t('lightningOps.autofeeResultsLabelRevShare')}≈${revShare.toFixed(2)} | ${tagLine}`
+  }
+
+  const formatAutofeeSectionLine = (category?: string) => {
+    switch ((category || '').toLowerCase()) {
+      case 'changed':
+        return '✅'
+      case 'kept':
+        return '🫤'
+      case 'skipped':
+        return '⏭️'
+      case 'explorer':
+        return '🧭'
+      case 'error':
+        return '❌'
+      default:
+        return ''
+    }
+  }
+
+  const formatAutofeeExplorerLine = (item: AutofeeResultItem) => {
+    const alias = (item.alias || '').trim() || (item.channel_id ? `chan-${item.channel_id}` : t('common.unknown'))
+    return `🧭 ${alias} ${t('lightningOps.autofeeResultsExplorerOn')}`
+  }
+
+  const localizedAutofeeResults = useMemo(() => {
+    if (!autofeeResultItems.length) {
+      return formattedAutofeeResults
+    }
+    const lines: string[] = []
+    const max = Math.max(autofeeResults.length, autofeeResultItems.length)
+    for (let i = 0; i < max; i += 1) {
+      const item = autofeeResultItems[i]
+      let line = ''
+      if (item && item.kind) {
+        switch (item.kind) {
+          case 'header':
+            line = formatAutofeeHeader(item)
+            break
+          case 'summary':
+            line = formatAutofeeSummary(item)
+            break
+          case 'seed':
+            line = formatAutofeeSeed(item)
+            break
+          case 'section':
+            line = formatAutofeeSectionLine(item.category)
+            break
+          case 'explorer':
+            line = formatAutofeeExplorerLine(item)
+            break
+          case 'channel':
+            line = formatAutofeeChannelLine(item)
+            break
+          default:
+            line = ''
+            break
+        }
+      }
+      if (!line && formattedAutofeeResults[i]) {
+        line = formattedAutofeeResults[i]
+      }
+      if (line) {
+        lines.push(line)
+      }
+    }
+    return lines.length ? lines : formattedAutofeeResults
+  }, [autofeeResultItems, autofeeResults.length, formattedAutofeeResults, t])
 
   const blockCadenceAvg = useMemo(() => {
     const buckets = bitcoinLocal?.block_cadence || []
@@ -435,8 +741,11 @@ export default function LightningOps() {
       setAutofeeSettings(map)
     }
     if (autofeeResultsResult.status === 'fulfilled') {
-      const lines = (autofeeResultsResult.value as any)?.lines
+      const payload = autofeeResultsResult.value as any
+      const lines = payload?.lines
+      const items = payload?.items
       setAutofeeResults(Array.isArray(lines) ? lines : [])
+      setAutofeeResultItems(Array.isArray(items) ? items : [])
       setAutofeeResultsStatus('')
     } else {
       const message = (autofeeResultsResult.reason as any)?.message || t('lightningOps.autofeeResultsUnavailable')
@@ -735,7 +1044,9 @@ export default function LightningOps() {
       const status = await getAutofeeStatus()
       setAutofeeStatus(status as AutofeeStatus)
       const results = await getAutofeeResults(50)
-      setAutofeeResults(Array.isArray((results as any)?.lines) ? (results as any).lines : [])
+      const payload = results as any
+      setAutofeeResults(Array.isArray(payload?.lines) ? payload.lines : [])
+      setAutofeeResultItems(Array.isArray(payload?.items) ? payload.items : [])
       setAutofeeResultsStatus('')
     } catch (err: any) {
       setAutofeeMessage(err?.message || t('lightningOps.autofeeRunFailed'))
@@ -748,7 +1059,9 @@ export default function LightningOps() {
     setAutofeeResultsStatus(t('lightningOps.autofeeResultsLoading'))
     try {
       const results = await getAutofeeResults(50)
-      setAutofeeResults(Array.isArray((results as any)?.lines) ? (results as any).lines : [])
+      const payload = results as any
+      setAutofeeResults(Array.isArray(payload?.lines) ? payload.lines : [])
+      setAutofeeResultItems(Array.isArray(payload?.items) ? payload.items : [])
       setAutofeeResultsStatus('')
     } catch (err: any) {
       setAutofeeResultsStatus(err?.message || t('lightningOps.autofeeResultsUnavailable'))
@@ -1159,7 +1472,7 @@ export default function LightningOps() {
           <>
             {autofeeResultsStatus && <p className="text-sm text-brass">{autofeeResultsStatus}</p>}
             <div className="bg-ink/70 border border-white/10 rounded-2xl p-4 text-xs font-mono whitespace-pre-wrap max-h-[420px] overflow-y-auto">
-              {formattedAutofeeResults.length ? formattedAutofeeResults.join('\n') : t('lightningOps.autofeeResultsEmpty')}
+              {localizedAutofeeResults.length ? localizedAutofeeResults.join('\n') : t('lightningOps.autofeeResultsEmpty')}
             </div>
           </>
         )}
