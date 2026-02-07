@@ -11,6 +11,7 @@ import (
   "math/rand"
   "net/http"
   "sort"
+  "strconv"
   "strings"
   "sync"
   "time"
@@ -1401,19 +1402,18 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     apply = false
     tags = append(tags, "hold-small")
   }
-  if st.LastTs.IsZero() {
-    st.LastTs = e.now
-  }
   if finalPpm != localPpm {
-    hoursSince := e.now.Sub(st.LastTs).Hours()
     fwdsSince := fwdCount - st.BaselineFwd7d
     cooldownHours := float64(e.cfg.CooldownDownSec) / 3600.0
     if finalPpm > localPpm {
       cooldownHours = float64(e.cfg.CooldownUpSec) / 3600.0
     }
-    if hoursSince < cooldownHours && fwdsSince < 2 {
-      apply = false
-      tags = append(tags, "cooldown")
+    if !st.LastTs.IsZero() {
+      hoursSince := e.now.Sub(st.LastTs).Hours()
+      if hoursSince < cooldownHours && fwdsSince < 2 {
+        apply = false
+        tags = append(tags, "cooldown")
+      }
     }
   }
 
@@ -1540,7 +1540,7 @@ type ambossSeriesResp struct {
 }
 
 func (e *autofeeEngine) fetchAmbossSeed(pubkey string, token string) (float64, []string, error) {
-  vals, err := fetchAmbossSeries(pubkey, token, e.cfg.LookbackDays)
+  vals, err := fetchAmbossSeries(pubkey, token, e.cfg.LookbackDays, "incoming_fee_rate_metrics", "weighted_corrected_mean")
   if err != nil {
     return 0, nil, err
   }
@@ -1551,6 +1551,40 @@ func (e *autofeeEngine) fetchAmbossSeed(pubkey string, token string) (float64, [
   p95 := percentile(vals, 0.95)
   seed := p65
   tags := []string{}
+
+  incMedian, _ := ambossAvgSeries(pubkey, token, e.cfg.LookbackDays, "incoming_fee_rate_metrics", "median")
+  incMean, _ := ambossAvgSeries(pubkey, token, e.cfg.LookbackDays, "incoming_fee_rate_metrics", "mean")
+  incStd, _ := ambossAvgSeries(pubkey, token, e.cfg.LookbackDays, "incoming_fee_rate_metrics", "std")
+
+  if incMedian > 0 {
+    seed = (1.0-0.30)*seed + 0.30*incMedian
+    tags = append(tags, "seed:med")
+  }
+  if incMean > 0 && incStd > 0 {
+    sigmaMu := incStd / incMean
+    pen := math.Min(0.15, 0.25*sigmaMu)
+    if pen > 0 {
+      seed = seed * (1.0 - pen)
+      tags = append(tags, fmt.Sprintf("seed:vol-%d%%", int(math.Round(pen*100))))
+    }
+  }
+
+  incWcorr, _ := ambossAvgSeries(pubkey, token, e.cfg.LookbackDays, "incoming_fee_rate_metrics", "weighted_corrected_mean")
+  outWcorr, _ := ambossAvgSeries(pubkey, token, e.cfg.LookbackDays, "outgoing_fee_rate_metrics", "weighted_corrected_mean")
+  if incWcorr > 0 && outWcorr > 0 {
+    ratio := outWcorr / incWcorr
+    f := 1.0 + 0.20*(ratio-1.0)
+    if f < 0.80 {
+      f = 0.80
+    } else if f > 1.50 {
+      f = 1.50
+    }
+    if math.Abs(f-1.0) > 0.001 {
+      seed = seed * f
+      tags = append(tags, fmt.Sprintf("seed:ratio×%.2f", f))
+    }
+  }
+
   if p95 > 0 && seed > p95 {
     seed = p95
     tags = append(tags, "seed:p95cap")
@@ -1563,7 +1597,22 @@ func (e *autofeeEngine) fetchAmbossSeed(pubkey string, token string) (float64, [
   return seed, tags, nil
 }
 
-func fetchAmbossSeries(pubkey string, token string, lookbackDays int) ([]float64, error) {
+func ambossAvgSeries(pubkey string, token string, lookbackDays int, metric string, submetric string) (float64, error) {
+  vals, err := fetchAmbossSeries(pubkey, token, lookbackDays, metric, submetric)
+  if err != nil {
+    return 0, err
+  }
+  if len(vals) == 0 {
+    return 0, nil
+  }
+  total := 0.0
+  for _, v := range vals {
+    total += v
+  }
+  return total / float64(len(vals)), nil
+}
+
+func fetchAmbossSeries(pubkey string, token string, lookbackDays int, metric string, submetric string) ([]float64, error) {
   if pubkey == "" || token == "" {
     return nil, nil
   }
@@ -1577,9 +1626,9 @@ func fetchAmbossSeries(pubkey string, token string, lookbackDays int) ([]float64
         }`,
     "variables": map[string]any{
       "from": fromDate,
-      "metric": "incoming_fee_rate_metrics",
+      "metric": metric,
       "pubkey": pubkey,
-      "submetric": "weighted_corrected_mean",
+      "submetric": submetric,
     },
   }
   body, _ := json.Marshal(payload)
@@ -1608,11 +1657,35 @@ func fetchAmbossSeries(pubkey string, token string, lookbackDays int) ([]float64
     if len(row) != 2 {
       continue
     }
-    if v, ok := row[1].(float64); ok {
+    if v, ok := ambossValueToFloat(row[1]); ok {
       vals = append(vals, v)
     }
   }
   return vals, nil
+}
+
+func ambossValueToFloat(raw any) (float64, bool) {
+  switch v := raw.(type) {
+  case float64:
+    return v, true
+  case float32:
+    return float64(v), true
+  case int:
+    return float64(v), true
+  case int64:
+    return float64(v), true
+  case json.Number:
+    f, err := v.Float64()
+    if err == nil {
+      return f, true
+    }
+  case string:
+    f, err := strconv.ParseFloat(v, 64)
+    if err == nil {
+      return f, true
+    }
+  }
+  return 0, false
 }
 func (e *autofeeEngine) applyDecision(ctx context.Context, ch lndclient.ChannelInfo, d *decision) error {
   if ch.ChannelPoint == "" {
