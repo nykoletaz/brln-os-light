@@ -1601,6 +1601,9 @@ func (n *Notifier) runForwards() {
         amount := int64(fwd.AmtOut)
         fee := int64(fwd.Fee)
         feeMsat := int64(fwd.FeeMsat)
+        if feeMsat == 0 && fee != 0 {
+          feeMsat = fee * 1000
+        }
         amtInMsat := int64(fwd.AmtInMsat)
         amtOutMsat := int64(fwd.AmtOutMsat)
         if amtInMsat == 0 && fwd.AmtIn != 0 {

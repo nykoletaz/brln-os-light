@@ -1005,11 +1005,14 @@ type rebalStats struct {
 
 func (e *autofeeEngine) fetchForwardStats(ctx context.Context, lookback int) (map[uint64]forwardStat, error) {
   rows, err := e.svc.db.Query(ctx, `
-select chan_id_out, coalesce(sum(fee_msat), 0), coalesce(sum(amount_out_msat), 0), count(*)
+select coalesce(chan_id_out, channel_id) as chan_id,
+  coalesce(sum(case when fee_msat > 0 then fee_msat else fee_sat * 1000 end), 0),
+  coalesce(sum(case when amount_out_msat > 0 then amount_out_msat else amount_sat * 1000 end), 0),
+  count(*)
 from notifications
 where type='forward' and occurred_at >= now() - ($1 * interval '1 day')
-  and chan_id_out is not null
-group by chan_id_out
+  and coalesce(chan_id_out, channel_id) is not null
+group by coalesce(chan_id_out, channel_id)
 `, lookback)
   if err != nil {
     return nil, err
@@ -1057,7 +1060,9 @@ group by chan_id_in
 func (e *autofeeEngine) fetchRebalanceStats(ctx context.Context, lookback int) (rebalStats, error) {
   stats := rebalStats{ByChannel: map[uint64]rebalStat{}}
   rows, err := e.svc.db.Query(ctx, `
-select rebal_target_chan_id, coalesce(sum(fee_msat), 0), coalesce(sum(amount_sat), 0)
+select rebal_target_chan_id,
+  coalesce(sum(case when fee_msat > 0 then fee_msat else fee_sat * 1000 end), 0),
+  coalesce(sum(amount_sat), 0)
 from notifications
 where type='rebalance' and occurred_at >= now() - ($1 * interval '1 day')
   and rebal_target_chan_id is not null
@@ -1081,7 +1086,8 @@ group by rebal_target_chan_id
   }
 
   err = e.svc.db.QueryRow(ctx, `
-select coalesce(sum(fee_msat), 0), coalesce(sum(amount_sat), 0)
+select coalesce(sum(case when fee_msat > 0 then fee_msat else fee_sat * 1000 end), 0),
+  coalesce(sum(amount_sat), 0)
 from notifications
 where type='rebalance' and occurred_at >= now() - ($1 * interval '1 day')
 `, lookback).Scan(&stats.Global.FeeMsat, &stats.Global.AmtMsat)
@@ -1499,10 +1505,35 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
 
   baseCostPpm := rebalGlobalPpm
   rebal := rebalStats.ByChannel[ch.ChannelID]
-  if rebal.AmtMsat >= 200_000*1000 && rebal.AmtMsat > 0 {
-    baseCostPpm = ppmMsat(rebal.FeeMsat, rebal.AmtMsat)
-    st.LastRebalCost = baseCostPpm
-    st.LastRebalCostTs = e.now
+  if rebal.AmtMsat > 0 {
+    perCost := ppmMsat(rebal.FeeMsat, rebal.AmtMsat)
+    if perCost > 0 {
+      capSat := ch.CapacitySat
+      if capSat <= 0 {
+        capSat = 20000
+      }
+      capThresh := int64(math.Round(float64(capSat) * 0.05))
+      if capThresh < 20000 {
+        capThresh = 20000
+      }
+      if capThresh > 500000 {
+        capThresh = 500000
+      }
+      rebalAmtSat := rebal.AmtMsat / 1000
+      weight := 0.0
+      if capThresh > 0 {
+        weight = float64(rebalAmtSat) / float64(capThresh)
+      }
+      if weight < 0 {
+        weight = 0
+      } else if weight > 1 {
+        weight = 1
+      }
+      blended := int(math.Round(weight*float64(perCost) + (1.0-weight)*float64(rebalGlobalPpm)))
+      baseCostPpm = blended
+      st.LastRebalCost = blended
+      st.LastRebalCostTs = e.now
+    }
   } else if st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour {
     baseCostPpm = st.LastRebalCost
   }
