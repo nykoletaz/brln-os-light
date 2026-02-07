@@ -91,6 +91,7 @@ func (s *Server) routes() http.Handler {
     r.Post("/autofee/channels", s.handleAutofeeChannelsPost)
     r.Post("/autofee/run", s.handleAutofeeRun)
     r.Get("/autofee/status", s.handleAutofeeStatus)
+    r.Get("/autofee/results", s.handleAutofeeResults)
     r.Get("/channel/auto-heal", s.handleLNChanHealGet)
     r.Post("/channel/auto-heal", s.handleLNChanHealPost)
     r.Get("/channel/fees", s.handleLNChannelFees)

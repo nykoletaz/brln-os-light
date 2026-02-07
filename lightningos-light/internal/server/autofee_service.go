@@ -243,6 +243,16 @@ create table if not exists autofee_state (
 
 create index if not exists autofee_channel_settings_enabled_idx on autofee_channel_settings (enabled);
 
+create table if not exists autofee_logs (
+  id bigserial primary key,
+  occurred_at timestamptz not null default now(),
+  run_id text,
+  seq integer,
+  line text not null
+);
+create index if not exists autofee_logs_occurred_at_idx on autofee_logs (occurred_at desc);
+create index if not exists autofee_logs_run_idx on autofee_logs (run_id, seq);
+
 alter table autofee_config add column if not exists super_source_enabled boolean not null default false;
 alter table autofee_config add column if not exists super_source_base_fee_msat integer not null default 1000;
 alter table autofee_state add column if not exists ss_active boolean;
@@ -552,6 +562,25 @@ func (s *AutofeeService) Status() AutofeeStatus {
   return status
 }
 
+func (s *AutofeeService) appendAutofeeLines(ctx context.Context, runID string, lines []string) error {
+  if s.db == nil || len(lines) == 0 {
+    return nil
+  }
+  batch := &pgx.Batch{}
+  now := time.Now().UTC()
+  for i, line := range lines {
+    batch.Queue(`insert into autofee_logs (occurred_at, run_id, seq, line) values ($1,$2,$3,$4)`, now, runID, i, line)
+  }
+  br := s.db.SendBatch(ctx, batch)
+  defer br.Close()
+  for range lines {
+    if _, err := br.Exec(); err != nil {
+      return err
+    }
+  }
+  return nil
+}
+
 func (s *AutofeeService) Start() {
   s.mu.Lock()
   if s.started {
@@ -682,6 +711,9 @@ type autofeeRunSummary struct {
   eligible int
   applied int
   applyErrors int
+  changedUp int
+  changedDown int
+  kept int
   skippedCooldown int
   skippedSmall int
   skippedSame int
@@ -820,7 +852,17 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   rebalGlobalPpm := ppmMsat(rebalGlobal.FeeMsat, rebalGlobal.AmtMsat)
 
   summary := autofeeRunSummary{total: len(channels)}
-  updates := 0
+  runID := fmt.Sprintf("%d", time.Now().UnixNano())
+  header := fmt.Sprintf("⚡ Autofee %s", strings.ToUpper(reason))
+  if dryRun {
+    header = header + " (dry-run)"
+  }
+  summary := autofeeRunSummary{total: len(channels)}
+  changedLines := []string{}
+  keptLines := []string{}
+  skippedLines := []string{}
+  errorLines := []string{}
+  explorerLines := []string{}
   for _, ch := range channels {
     if !ch.Active {
       summary.inactive++
@@ -840,6 +882,9 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     if decision == nil {
       continue
     }
+    if decision.Alias == "" {
+      decision.Alias = strings.TrimSpace(ch.RemotePubkey)
+    }
     summary.eligible++
     summary.addTags(decision.Tags)
     if decision.SuperSourceActive {
@@ -851,47 +896,90 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
 
     e.persistState(ctx, decision.State)
 
+    line, category := formatAutofeeDecisionLine(decision, dryRun, false)
     if decision.Apply {
-      updates++
       summary.applied++
+      if decision.NewPpm > decision.LocalPpm {
+        summary.changedUp++
+      } else if decision.NewPpm < decision.LocalPpm {
+        summary.changedDown++
+      } else {
+        summary.kept++
+      }
       if dryRun {
-        _ = e.logDecision(ctx, "dry-run", decision)
+        changedLines = append(changedLines, line)
         continue
       }
       if err := e.applyDecision(ctx, ch, decision); err != nil {
         summary.applyErrors++
-        _ = e.logDecision(ctx, "error", decision.withError(err))
+        errLine, _ := formatAutofeeDecisionLine(decision.withError(err), dryRun, true)
+        errorLines = append(errorLines, errLine)
         continue
       }
-      _ = e.logDecision(ctx, "apply", decision)
+      changedLines = append(changedLines, line)
     } else {
-      hasSkipTag := false
-      for _, tag := range decision.Tags {
-        switch tag {
-        case "cooldown", "hold-small", "same-ppm":
-          hasSkipTag = true
-        }
-        if hasSkipTag {
-          break
-        }
+      if decision.NewPpm == decision.LocalPpm {
+        summary.kept++
       }
-      if !hasSkipTag {
-        summary.skippedOther++
+      switch category {
+      case "skipped":
+        skippedLines = append(skippedLines, line)
+      case "kept":
+        keptLines = append(keptLines, line)
+      default:
+        keptLines = append(keptLines, line)
+      }
+      if containsTag(decision.Tags, "explorer") {
+        explorerLines = append(explorerLines, fmt.Sprintf("🧭 %s explorer: ON", decision.Alias))
       }
     }
   }
 
   summaryText := fmt.Sprintf(
-    "channels=%d eligible=%d applied=%d errors=%d skip{cooldown=%d small=%d same=%d other=%d disabled=%d inactive=%d} seed{amboss=%d missing=%d err=%d empty=%d outrate=%d mem=%d default=%d} super_source=%d inbound_disc=%d",
-    summary.total, summary.eligible, summary.applied, summary.applyErrors,
-    summary.skippedCooldown, summary.skippedSmall, summary.skippedSame, summary.skippedOther, summary.disabled, summary.inactive,
-    summary.seedAmboss, summary.seedAmbossMissing, summary.seedAmbossError, summary.seedAmbossEmpty, summary.seedOutrate, summary.seedMem, summary.seedDefault,
-    summary.superSource, summary.inboundDiscount,
+    "📊 up %d | down %d | flat %d | cooldown %d | small %d | same %d | disabled %d | inactive %d | inb_disc %d | super_source %d",
+    summary.changedUp, summary.changedDown, summary.kept,
+    summary.skippedCooldown, summary.skippedSmall, summary.skippedSame,
+    summary.disabled, summary.inactive, summary.inboundDiscount, summary.superSource,
+  )
+  seedText := fmt.Sprintf(
+    "🌱 seed amboss=%d missing=%d err=%d empty=%d outrate=%d mem=%d default=%d",
+    summary.seedAmboss, summary.seedAmbossMissing, summary.seedAmbossError, summary.seedAmbossEmpty,
+    summary.seedOutrate, summary.seedMem, summary.seedDefault,
   )
   if e.ignoreCooldown {
-    summaryText = summaryText + " cooldown_ignored=1"
+    seedText = seedText + " | cooldown_ignored=1"
   }
-  _ = e.logSummary(ctx, dryRun, reason, summaryText)
+
+  report := []string{header, summaryText, seedText, ""}
+  if len(changedLines) > 0 {
+    report = append(report, "✅ CANAIS ALTERADOS", "")
+    report = append(report, changedLines...)
+    report = append(report, "")
+  }
+  if len(keptLines) > 0 {
+    report = append(report, "🫤 CANAIS MANTIDOS", "")
+    report = append(report, keptLines...)
+    report = append(report, "")
+  }
+  if len(skippedLines) > 0 {
+    report = append(report, "⏭️ CANAIS IGNORADOS", "")
+    report = append(report, skippedLines...)
+    report = append(report, "")
+  }
+  if len(explorerLines) > 0 {
+    report = append(report, "🧭 EXPLORER STATUS", "")
+    report = append(report, explorerLines...)
+    report = append(report, "")
+  }
+  if len(errorLines) > 0 {
+    report = append(report, "❌ ERROS", "")
+    report = append(report, errorLines...)
+    report = append(report, "")
+  }
+
+  if err := e.svc.appendAutofeeLines(ctx, runID, report); err != nil {
+    e.svc.logger.Printf("autofee: log insert failed: %v", err)
+  }
   return nil
 }
 
@@ -1143,13 +1231,22 @@ insert into autofee_state (
 type decision struct {
   ChannelID uint64
   ChannelPoint string
+  Alias string
   LocalPpm int
   NewPpm int
   Target int
   Floor int
+  FloorSrc string
   Tags []string
   InboundDiscount int
   SuperSourceActive bool
+  OutRatio float64
+  OutPpm7d int
+  RebalPpm int
+  Seed int
+  Margin int
+  RevShare float64
+  ClassLabel string
   Apply bool
   Error error
   State *autofeeChannelState
@@ -1158,6 +1255,90 @@ type decision struct {
 func (d *decision) withError(err error) *decision {
   d.Error = err
   return d
+}
+
+func formatAutofeeDecisionLine(d *decision, dryRun bool, isError bool) (string, string) {
+  if d == nil {
+    return "", "kept"
+  }
+  alias := strings.TrimSpace(d.Alias)
+  if alias == "" {
+    alias = fmt.Sprintf("chan-%d", d.ChannelID)
+  }
+  dir := "➡️"
+  if d.NewPpm > d.LocalPpm {
+    dir = "🔺"
+  } else if d.NewPpm < d.LocalPpm {
+    dir = "🔻"
+  }
+  action := ""
+  category := "kept"
+  if isError {
+    action = fmt.Sprintf("erro: %v", d.Error)
+    category = "error"
+  } else if d.Apply {
+    if dryRun {
+      action = fmt.Sprintf("DRY set %d→%d ppm", d.LocalPpm, d.NewPpm)
+    } else {
+      action = fmt.Sprintf("set %d→%d ppm", d.LocalPpm, d.NewPpm)
+    }
+    category = "changed"
+  } else {
+    action = fmt.Sprintf("mantém %d ppm", d.LocalPpm)
+    if containsTag(d.Tags, "cooldown") || containsTag(d.Tags, "hold-small") {
+      category = "skipped"
+    }
+  }
+
+  deltaStr := ""
+  if d.LocalPpm > 0 && d.NewPpm != d.LocalPpm {
+    delta := d.NewPpm - d.LocalPpm
+    pct := math.Abs(float64(delta)) / float64(d.LocalPpm) * 100.0
+    deltaStr = fmt.Sprintf(" (%+d, %.1f%%)", delta, pct)
+  }
+
+  floorSrc := ""
+  if d.FloorSrc != "" {
+    floorSrc = fmt.Sprintf("(%s)", d.FloorSrc)
+  }
+  tagLine := formatAutofeeTags(d)
+  if tagLine == "" {
+    tagLine = "-"
+  }
+  prefix := "🫤"
+  if category == "changed" {
+    prefix = "✅" + dir
+  } else if category == "skipped" {
+    if containsTag(d.Tags, "cooldown") {
+      prefix = "⏭️⏳"
+    } else if containsTag(d.Tags, "hold-small") {
+      prefix = "⏭️🧊"
+    } else {
+      prefix = "⏭️"
+    }
+  } else if category == "error" {
+    prefix = "❌"
+  } else if containsTag(d.Tags, "same-ppm") {
+    prefix = "🫤⏸️"
+  }
+
+  line := fmt.Sprintf("%s %s: %s%s | alvo %d | out_ratio %.2f | out_ppm7d≈%d | rebal_ppm7d≈%d | seed≈%d | floor≥%d%s | marg≈%d | rev_share≈%.2f | %s",
+    prefix,
+    alias,
+    action,
+    deltaStr,
+    d.Target,
+    d.OutRatio,
+    d.OutPpm7d,
+    d.RebalPpm,
+    d.Seed,
+    d.Floor,
+    floorSrc,
+    d.Margin,
+    d.RevShare,
+    tagLine,
+  )
+  return strings.TrimSpace(line), category
 }
 
 // ===== evaluation =====
@@ -1378,16 +1559,19 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   rawStep := applyStepCap(localPpm, target, capFrac, 5)
 
   floor := int(math.Ceil(float64(baseCostPpm) * 1.10))
+  floorSrc := "rebal"
   if outPpm7d > 0 && fwdCount >= 4 {
     peg := int(math.Ceil(float64(outPpm7d) * 1.05))
     if peg > floor {
       floor = peg
+      floorSrc = "peg"
       tags = append(tags, "peg")
     }
   }
 
   if superSourceActive {
     floor = e.cfg.MinPpm
+    floorSrc = "super-source"
   }
 
   finalPpm := clampInt(maxInt(rawStep, floor), e.cfg.MinPpm, e.cfg.MaxPpm)
@@ -1455,13 +1639,22 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   return &decision{
     ChannelID: ch.ChannelID,
     ChannelPoint: ch.ChannelPoint,
+    Alias: strings.TrimSpace(ch.PeerAlias),
     LocalPpm: localPpm,
     NewPpm: finalPpm,
     Target: target,
     Floor: floor,
+    FloorSrc: floorSrc,
     Tags: tags,
     InboundDiscount: inboundDiscount,
     SuperSourceActive: superSourceActive,
+    OutRatio: outRatio,
+    OutPpm7d: outPpm7d,
+    RebalPpm: baseCostPpm,
+    Seed: int(seed),
+    Margin: marginPpm7d,
+    RevShare: revShare,
+    ClassLabel: classLabel,
     Apply: apply && finalPpm != localPpm,
     State: st,
   }
@@ -1895,6 +2088,102 @@ func classifyChannel(biasEma float64, outRatio float64, inCount int64, outCount 
     return prevLabel, prevConf
   }
   return label, math.Min(1.0, 0.5*prevConf+0.5*conf)
+}
+
+func containsTag(tags []string, want string) bool {
+  for _, tag := range tags {
+    if tag == want {
+      return true
+    }
+  }
+  return false
+}
+
+func formatAutofeeTags(d *decision) string {
+  if d == nil {
+    return ""
+  }
+  tags := []string{}
+  seen := map[string]struct{}{}
+  add := func(tag string) {
+    if tag == "" {
+      return
+    }
+    if _, ok := seen[tag]; ok {
+      return
+    }
+    seen[tag] = struct{}{}
+    tags = append(tags, tag)
+  }
+
+  switch strings.ToLower(strings.TrimSpace(d.ClassLabel)) {
+  case "sink":
+    add("🏷️sink")
+  case "source":
+    add("🏷️source")
+  case "router":
+    add("🏷️router")
+  case "unknown":
+    add("🏷️unknown")
+  }
+
+  for _, t := range d.Tags {
+    if t == "" {
+      continue
+    }
+    switch {
+    case t == "discovery":
+      add("🧭discovery")
+    case t == "explorer":
+      add("🧭explorer")
+    case strings.HasPrefix(t, "surge"):
+      add("📈" + t)
+    case t == "top-rev":
+      add("💎top-rev")
+    case t == "neg-margin":
+      add("⚠️neg-margin")
+    case t == "peg":
+      add("📌peg")
+    case t == "cooldown":
+      add("⏳cooldown")
+    case t == "hold-small":
+      add("🧊hold-small")
+    case t == "same-ppm":
+      add("🟰same-ppm")
+    case t == "no-down-low":
+      add("🚫down-low")
+    case t == "super-source":
+      add("🔥super-source")
+    case t == "super-source-like":
+      add("🔥super-source-like")
+    case strings.HasPrefix(t, "seed:amboss"):
+      add("🌐" + strings.ReplaceAll(t, "seed:", "seed-"))
+    case strings.HasPrefix(t, "seed:med"):
+      add("📐seed-med")
+    case strings.HasPrefix(t, "seed:vol"):
+      add("📉" + strings.ReplaceAll(t, "seed:", "seed-"))
+    case strings.HasPrefix(t, "seed:ratio"):
+      add("🔁" + strings.ReplaceAll(t, "seed:", "seed-"))
+    case strings.HasPrefix(t, "seed:outrate"):
+      add("📊seed-outrate")
+    case strings.HasPrefix(t, "seed:mem"):
+      add("💾seed-mem")
+    case strings.HasPrefix(t, "seed:default"):
+      add("⚙️seed-default")
+    case strings.HasPrefix(t, "seed:p95cap"):
+      add("🧢seed-p95")
+    case strings.HasPrefix(t, "seed:absmax"):
+      add("🧱seed-cap")
+    default:
+      add(t)
+    }
+  }
+
+  if d.InboundDiscount > 0 {
+    add(fmt.Sprintf("↘️inb-%d", d.InboundDiscount))
+  }
+
+  return strings.Join(tags, " ")
 }
 
 func nullableFloat(val float64) any {

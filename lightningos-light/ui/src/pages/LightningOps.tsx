@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnPeers, getMempoolFees, openChannel, runAutofee, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus } from '../api'
+import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeResults, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnPeers, getMempoolFees, openChannel, runAutofee, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus } from '../api'
 
 type Channel = {
   channel_point: string
@@ -165,6 +165,9 @@ export default function LightningOps() {
   const [autofeeSuperSource, setAutofeeSuperSource] = useState(false)
   const [autofeeSuperSourceBaseFee, setAutofeeSuperSourceBaseFee] = useState('1000')
   const [autofeeOpen, setAutofeeOpen] = useState(false)
+  const [autofeeResultsOpen, setAutofeeResultsOpen] = useState(false)
+  const [autofeeResults, setAutofeeResults] = useState<string[]>([])
+  const [autofeeResultsStatus, setAutofeeResultsStatus] = useState('')
 
   const [chanStatusBusy, setChanStatusBusy] = useState<string | null>(null)
   const [chanStatusMessage, setChanStatusMessage] = useState('')
@@ -317,7 +320,7 @@ export default function LightningOps() {
     setAmbossStatus(t('lightningOps.ambossHealthLoading'))
     setChanHealStatus(t('lightningOps.chanHealLoading'))
     setAutofeeMessage(t('lightningOps.autofeeLoading'))
-    const [channelsResult, peersResult, ambossResult, chanHealResult, bitcoinLocalResult, autofeeConfigResult, autofeeStatusResult, autofeeChannelsResult] = await Promise.allSettled([
+    const [channelsResult, peersResult, ambossResult, chanHealResult, bitcoinLocalResult, autofeeConfigResult, autofeeStatusResult, autofeeChannelsResult, autofeeResultsResult] = await Promise.allSettled([
       getLnChannels(),
       getLnPeers(),
       getAmbossHealth(),
@@ -325,7 +328,8 @@ export default function LightningOps() {
       getBitcoinLocalStatus(),
       getAutofeeConfig(),
       getAutofeeStatus(),
-      getAutofeeChannels()
+      getAutofeeChannels(),
+      getAutofeeResults(50)
     ])
     if (channelsResult.status === 'fulfilled') {
       const res = channelsResult.value
@@ -406,6 +410,14 @@ export default function LightningOps() {
         })
       }
       setAutofeeSettings(map)
+    }
+    if (autofeeResultsResult.status === 'fulfilled') {
+      const lines = (autofeeResultsResult.value as any)?.lines
+      setAutofeeResults(Array.isArray(lines) ? lines : [])
+      setAutofeeResultsStatus('')
+    } else {
+      const message = (autofeeResultsResult.reason as any)?.message || t('lightningOps.autofeeResultsUnavailable')
+      setAutofeeResultsStatus(message)
     }
   }
 
@@ -699,10 +711,24 @@ export default function LightningOps() {
       setAutofeeMessage(dryRun ? t('lightningOps.autofeeDryRunDone') : t('lightningOps.autofeeRunDone'))
       const status = await getAutofeeStatus()
       setAutofeeStatus(status as AutofeeStatus)
+      const results = await getAutofeeResults(50)
+      setAutofeeResults(Array.isArray((results as any)?.lines) ? (results as any).lines : [])
+      setAutofeeResultsStatus('')
     } catch (err: any) {
       setAutofeeMessage(err?.message || t('lightningOps.autofeeRunFailed'))
     } finally {
       setAutofeeBusy(false)
+    }
+  }
+
+  const handleAutofeeResultsRefresh = async () => {
+    setAutofeeResultsStatus(t('lightningOps.autofeeResultsLoading'))
+    try {
+      const results = await getAutofeeResults(50)
+      setAutofeeResults(Array.isArray((results as any)?.lines) ? (results as any).lines : [])
+      setAutofeeResultsStatus('')
+    } catch (err: any) {
+      setAutofeeResultsStatus(err?.message || t('lightningOps.autofeeResultsUnavailable'))
     }
   }
 
@@ -1045,6 +1071,35 @@ export default function LightningOps() {
               {autofeeStatus?.last_error && (
                 <div>{t('lightningOps.autofeeLastError')}: <span className="text-ember">{autofeeStatus.last_error}</span></div>
               )}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="section-card space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold">{t('lightningOps.autofeeResultsTitle')}</h3>
+            <p className="text-sm text-fog/60">{t('lightningOps.autofeeResultsSubtitle')}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="btn-secondary text-xs px-3 py-2"
+              onClick={() => setAutofeeResultsOpen((open) => !open)}
+            >
+              {autofeeResultsOpen ? t('common.hide') : t('lightningOps.autofeeResultsShow')}
+            </button>
+            <button className="btn-secondary text-xs px-3 py-2" onClick={handleAutofeeResultsRefresh}>
+              {t('lightningOps.autofeeResultsRefresh')}
+            </button>
+          </div>
+        </div>
+
+        {autofeeResultsOpen && (
+          <>
+            {autofeeResultsStatus && <p className="text-sm text-brass">{autofeeResultsStatus}</p>}
+            <div className="bg-ink/70 border border-white/10 rounded-2xl p-4 text-xs font-mono whitespace-pre-wrap max-h-[420px] overflow-y-auto">
+              {autofeeResults.length ? autofeeResults.join('\n') : t('lightningOps.autofeeResultsEmpty')}
             </div>
           </>
         )}

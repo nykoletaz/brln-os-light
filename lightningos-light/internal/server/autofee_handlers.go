@@ -190,10 +190,9 @@ func (s *Server) readAutofeeLogLines(ctx context.Context, limit int) ([]string, 
     limit = 1000
   }
   rows, err := s.db.Query(ctx, `
-select occurred_at, memo
-from notifications
-where type='autofee'
-order by occurred_at desc
+select occurred_at, line
+from autofee_logs
+order by id desc
 limit $1
 `, limit)
   if err != nil {
@@ -212,6 +211,48 @@ limit $1
     lines = append(lines, line)
   }
   return lines, rows.Err()
+}
+
+func (s *Server) handleAutofeeResults(w http.ResponseWriter, r *http.Request) {
+  svc, errMsg := s.autofeeService()
+  if svc == nil {
+    if errMsg == "" {
+      errMsg = "autofee unavailable"
+    }
+    writeError(w, http.StatusServiceUnavailable, errMsg)
+    return
+  }
+  limit := parseAutofeeLimit(r.URL.Query().Get("lines"))
+  if limit <= 0 {
+    limit = 50
+  }
+  ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+  defer cancel()
+  rows, err := s.db.Query(ctx, `
+select line
+from autofee_logs
+order by id desc
+limit $1
+`, limit)
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, err.Error())
+    return
+  }
+  defer rows.Close()
+  out := []string{}
+  for rows.Next() {
+    var line string
+    if err := rows.Scan(&line); err != nil {
+      writeError(w, http.StatusInternalServerError, err.Error())
+      return
+    }
+    out = append(out, line)
+  }
+  // reverse to show oldest first within the slice
+  for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+    out[i], out[j] = out[j], out[i]
+  }
+  writeJSON(w, http.StatusOK, map[string]any{"lines": out})
 }
 
 func parseAutofeeLimit(raw string) int {

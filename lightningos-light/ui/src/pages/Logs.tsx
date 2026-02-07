@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { getLogs } from '../api'
 
 const services = [
-  { labelKey: 'logs.services.autofee', value: 'autofee' },
   { labelKey: 'logs.services.lnd', value: 'lnd' },
+  { labelKey: 'logs.services.autofee', value: 'autofee' },
   { labelKey: 'logs.services.lndUpgrade', value: 'lnd-upgrade' },
   { labelKey: 'logs.services.manager', value: 'lightningos-manager' },
   { labelKey: 'logs.services.elements', value: 'lightningos-elements' },
