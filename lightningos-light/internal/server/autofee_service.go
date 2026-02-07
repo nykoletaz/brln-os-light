@@ -28,6 +28,8 @@ const (
   autofeeMaxLookbackDays = 21
 )
 
+const superSourceBaseFeeMsatDefault = 1000
+
 type AutofeeConfig struct {
   Enabled bool `json:"enabled"`
   Profile string `json:"profile"`
@@ -40,6 +42,8 @@ type AutofeeConfig struct {
   InboundPassiveEnabled bool `json:"inbound_passive_enabled"`
   DiscoveryEnabled bool `json:"discovery_enabled"`
   ExplorerEnabled bool `json:"explorer_enabled"`
+  SuperSourceEnabled bool `json:"super_source_enabled"`
+  SuperSourceBaseFeeMsat int `json:"super_source_base_fee_msat"`
   MinPpm int `json:"min_ppm"`
   MaxPpm int `json:"max_ppm"`
 }
@@ -56,6 +60,8 @@ type AutofeeConfigUpdate struct {
   InboundPassiveEnabled *bool `json:"inbound_passive_enabled,omitempty"`
   DiscoveryEnabled *bool `json:"discovery_enabled,omitempty"`
   ExplorerEnabled *bool `json:"explorer_enabled,omitempty"`
+  SuperSourceEnabled *bool `json:"super_source_enabled,omitempty"`
+  SuperSourceBaseFeeMsat *int `json:"super_source_base_fee_msat,omitempty"`
   MinPpm *int `json:"min_ppm,omitempty"`
   MaxPpm *int `json:"max_ppm,omitempty"`
 }
@@ -77,6 +83,15 @@ type autofeeProfile struct {
   CooldownUpSec int
   CooldownDownSec int
   DiscoveryStepCapDown float64
+}
+
+type superSourceThresholds struct {
+  OutRatioMin float64
+  OutAmt1dMult float64
+  OutAmt7dMult float64
+  MinFwds7d int
+  EnterHours int
+  ExitHours int
 }
 
 var autofeeProfiles = map[string]autofeeProfile{
@@ -112,6 +127,33 @@ var autofeeProfiles = map[string]autofeeProfile{
     CooldownUpSec: 1 * 3600,
     CooldownDownSec: 2 * 3600,
     DiscoveryStepCapDown: 0.20,
+  },
+}
+
+var superSourceThresholdsByProfile = map[string]superSourceThresholds{
+  "conservative": {
+    OutRatioMin: 0.65,
+    OutAmt1dMult: 0.70,
+    OutAmt7dMult: 5.0,
+    MinFwds7d: 15,
+    EnterHours: 6,
+    ExitHours: 96,
+  },
+  "moderate": {
+    OutRatioMin: 0.60,
+    OutAmt1dMult: 0.50,
+    OutAmt7dMult: 4.0,
+    MinFwds7d: 10,
+    EnterHours: 0,
+    ExitHours: 72,
+  },
+  "aggressive": {
+    OutRatioMin: 0.55,
+    OutAmt1dMult: 0.35,
+    OutAmt7dMult: 3.0,
+    MinFwds7d: 7,
+    EnterHours: 0,
+    ExitHours: 48,
   },
 }
 
@@ -161,6 +203,8 @@ create table if not exists autofee_config (
   inbound_passive_enabled boolean not null default false,
   discovery_enabled boolean not null default true,
   explorer_enabled boolean not null default true,
+  super_source_enabled boolean not null default false,
+  super_source_base_fee_msat integer not null default 1000,
   min_ppm integer not null default 10,
   max_ppm integer not null default 2000,
   created_at timestamptz not null default now(),
@@ -190,10 +234,19 @@ create table if not exists autofee_state (
   class_conf real,
   bias_ema real,
   first_seen_ts timestamptz,
+  ss_active boolean,
+  ss_ok_since timestamptz,
+  ss_bad_since timestamptz,
   explorer_state jsonb
 );
 
 create index if not exists autofee_channel_settings_enabled_idx on autofee_channel_settings (enabled);
+
+alter table autofee_config add column if not exists super_source_enabled boolean not null default false;
+alter table autofee_config add column if not exists super_source_base_fee_msat integer not null default 1000;
+alter table autofee_state add column if not exists ss_active boolean;
+alter table autofee_state add column if not exists ss_ok_since timestamptz;
+alter table autofee_state add column if not exists ss_bad_since timestamptz;
 `)
   if err != nil {
     return err
@@ -221,6 +274,8 @@ func (s *AutofeeService) defaultConfig() AutofeeConfig {
     InboundPassiveEnabled: false,
     DiscoveryEnabled: true,
     ExplorerEnabled: true,
+    SuperSourceEnabled: false,
+    SuperSourceBaseFeeMsat: superSourceBaseFeeMsatDefault,
     MinPpm: 10,
     MaxPpm: 2000,
   }
@@ -236,7 +291,7 @@ func (s *AutofeeService) GetConfig(ctx context.Context) (AutofeeConfig, error) {
   err := s.db.QueryRow(ctx, `
 select enabled, profile, lookback_days, run_interval_sec, cooldown_up_sec, cooldown_down_sec,
   amboss_enabled, amboss_token, inbound_passive_enabled, discovery_enabled, explorer_enabled,
-  min_ppm, max_ppm
+  super_source_enabled, super_source_base_fee_msat, min_ppm, max_ppm
 from autofee_config where id=$1
 `, autofeeConfigID).Scan(
     &cfg.Enabled,
@@ -250,6 +305,8 @@ from autofee_config where id=$1
     &cfg.InboundPassiveEnabled,
     &cfg.DiscoveryEnabled,
     &cfg.ExplorerEnabled,
+    &cfg.SuperSourceEnabled,
+    &cfg.SuperSourceBaseFeeMsat,
     &cfg.MinPpm,
     &cfg.MaxPpm,
   )
@@ -317,6 +374,12 @@ func (s *AutofeeService) UpdateConfig(ctx context.Context, req AutofeeConfigUpda
   if req.ExplorerEnabled != nil {
     current.ExplorerEnabled = *req.ExplorerEnabled
   }
+  if req.SuperSourceEnabled != nil {
+    current.SuperSourceEnabled = *req.SuperSourceEnabled
+  }
+  if req.SuperSourceBaseFeeMsat != nil {
+    current.SuperSourceBaseFeeMsat = *req.SuperSourceBaseFeeMsat
+  }
   if req.MinPpm != nil {
     current.MinPpm = *req.MinPpm
   }
@@ -335,6 +398,9 @@ func (s *AutofeeService) UpdateConfig(ctx context.Context, req AutofeeConfigUpda
   }
   if current.MaxPpm <= 0 {
     current.MaxPpm = 2000
+  }
+  if current.SuperSourceBaseFeeMsat < 0 {
+    current.SuperSourceBaseFeeMsat = 0
   }
 
   if current.RunIntervalSec < 3600 {
@@ -374,8 +440,10 @@ set enabled=$2,
   inbound_passive_enabled=$10,
   discovery_enabled=$11,
   explorer_enabled=$12,
-  min_ppm=$13,
-  max_ppm=$14,
+  super_source_enabled=$13,
+  super_source_base_fee_msat=$14,
+  min_ppm=$15,
+  max_ppm=$16,
   updated_at=now()
 where id=$1
 `, autofeeConfigID,
@@ -390,6 +458,8 @@ where id=$1
     current.InboundPassiveEnabled,
     current.DiscoveryEnabled,
     current.ExplorerEnabled,
+    current.SuperSourceEnabled,
+    current.SuperSourceBaseFeeMsat,
     current.MinPpm,
     current.MaxPpm,
   )
@@ -596,6 +666,7 @@ type autofeeEngine struct {
   svc *AutofeeService
   cfg AutofeeConfig
   profile autofeeProfile
+  superSource superSourceThresholds
   now time.Time
 }
 
@@ -604,10 +675,15 @@ func newAutofeeEngine(svc *AutofeeService, cfg AutofeeConfig) *autofeeEngine {
   if p.Name == "" {
     p = autofeeProfiles["moderate"]
   }
+  ss := superSourceThresholdsByProfile[p.Name]
+  if ss.OutRatioMin == 0 {
+    ss = superSourceThresholdsByProfile["moderate"]
+  }
   return &autofeeEngine{
     svc: svc,
     cfg: cfg,
     profile: p,
+    superSource: ss,
     now: time.Now().UTC(),
   }
 }
@@ -628,6 +704,9 @@ type autofeeChannelState struct {
   ClassConf float64
   BiasEma float64
   FirstSeen time.Time
+  SuperSourceActive bool
+  SuperSourceOkSince time.Time
+  SuperSourceBadSince time.Time
   ExplorerState explorerState
 }
 
@@ -660,6 +739,16 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   if err != nil {
     return err
   }
+  forwardStats1d, err := e.fetchForwardStats(ctx, 1)
+  if err != nil {
+    return err
+  }
+  forwardStats7d := forwardStats
+  if e.cfg.LookbackDays != 7 {
+    if stats7d, err := e.fetchForwardStats(ctx, 7); err == nil {
+      forwardStats7d = stats7d
+    }
+  }
   inboundStats, err := e.fetchInboundStats(ctx, e.cfg.LookbackDays)
   if err != nil {
     return err
@@ -690,7 +779,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     }
 
     st := state[ch.ChannelID]
-    decision := e.evaluateChannel(ch, st, forwardStats, inboundStats, rebalStats, totalOutFeeMsat, rebalGlobalPpm)
+    decision := e.evaluateChannel(ch, st, forwardStats, forwardStats1d, forwardStats7d, inboundStats, rebalStats, totalOutFeeMsat, rebalGlobalPpm)
     if decision == nil {
       continue
     }
@@ -834,7 +923,7 @@ func (e *autofeeEngine) loadState(ctx context.Context) (map[uint64]*autofeeChann
   rows, err := e.svc.db.Query(ctx, `
 select channel_id, last_ppm, last_inbound_discount_ppm, last_seed_ppm, last_outrate_ppm, last_outrate_ts,
   last_rebal_cost_ppm, last_rebal_cost_ts, last_ts, low_streak, baseline_fwd7d, class_label, class_conf, bias_ema,
-  first_seen_ts, explorer_state
+  first_seen_ts, ss_active, ss_ok_since, ss_bad_since, explorer_state
 from autofee_state
 `)
   if err != nil {
@@ -859,9 +948,12 @@ from autofee_state
     var classConf pgtype.Float8
     var biasEma pgtype.Float8
     var firstSeen pgtype.Timestamptz
+    var ssActive pgtype.Bool
+    var ssOkSince pgtype.Timestamptz
+    var ssBadSince pgtype.Timestamptz
     var explorerRaw []byte
     if err := rows.Scan(&channelID, &lastPpm, &lastInb, &lastSeed, &lastOut, &lastOutTs, &lastRebal, &lastRebalTs, &lastTs,
-      &lowStreak, &baseline, &classLabel, &classConf, &biasEma, &firstSeen, &explorerRaw); err != nil {
+      &lowStreak, &baseline, &classLabel, &classConf, &biasEma, &firstSeen, &ssActive, &ssOkSince, &ssBadSince, &explorerRaw); err != nil {
       return items, err
     }
     st.ChannelID = uint64(channelID)
@@ -903,6 +995,15 @@ from autofee_state
     if firstSeen.Valid {
       st.FirstSeen = firstSeen.Time
     }
+    if ssActive.Valid {
+      st.SuperSourceActive = ssActive.Bool
+    }
+    if ssOkSince.Valid {
+      st.SuperSourceOkSince = ssOkSince.Time
+    }
+    if ssBadSince.Valid {
+      st.SuperSourceBadSince = ssBadSince.Time
+    }
     if len(explorerRaw) > 0 {
       _ = json.Unmarshal(explorerRaw, &st.ExplorerState)
     }
@@ -920,8 +1021,8 @@ func (e *autofeeEngine) persistState(ctx context.Context, st *autofeeChannelStat
 insert into autofee_state (
   channel_id, last_ppm, last_inbound_discount_ppm, last_seed_ppm, last_outrate_ppm, last_outrate_ts,
   last_rebal_cost_ppm, last_rebal_cost_ts, last_ts, low_streak, baseline_fwd7d, class_label, class_conf, bias_ema,
-  first_seen_ts, explorer_state
-) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+  first_seen_ts, ss_active, ss_ok_since, ss_bad_since, explorer_state
+) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 `+
 `on conflict (channel_id) do update set
   last_ppm=excluded.last_ppm,
@@ -938,12 +1039,16 @@ insert into autofee_state (
   class_conf=excluded.class_conf,
   bias_ema=excluded.bias_ema,
   first_seen_ts=excluded.first_seen_ts,
+  ss_active=excluded.ss_active,
+  ss_ok_since=excluded.ss_ok_since,
+  ss_bad_since=excluded.ss_bad_since,
   explorer_state=excluded.explorer_state
 `, int64(st.ChannelID), nullableInt(int64(st.LastPpm)), nullableInt(int64(st.LastInboundDiscount)),
     nullableInt(int64(st.LastSeed)), nullableInt(int64(st.LastOutrate)), nullableTime(st.LastOutrateTs),
     nullableInt(int64(st.LastRebalCost)), nullableTime(st.LastRebalCostTs), nullableTime(st.LastTs),
     st.LowStreak, st.BaselineFwd7d, nullableString(st.ClassLabel), nullableFloat(st.ClassConf),
-    nullableFloat(st.BiasEma), nullableTime(st.FirstSeen), rawExplorer,
+    nullableFloat(st.BiasEma), nullableTime(st.FirstSeen), st.SuperSourceActive,
+    nullableTime(st.SuperSourceOkSince), nullableTime(st.SuperSourceBadSince), rawExplorer,
   )
 }
 // ===== decisions =====
@@ -957,6 +1062,7 @@ type decision struct {
   Floor int
   Tags []string
   InboundDiscount int
+  SuperSourceActive bool
   Apply bool
   Error error
   State *autofeeChannelState
@@ -970,7 +1076,8 @@ func (d *decision) withError(err error) *decision {
 // ===== evaluation =====
 
 func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeChannelState, forwardStats map[uint64]forwardStat,
-  inboundStats map[uint64]inboundStat, rebalStats rebalStats, totalOutFeeMsat int64, rebalGlobalPpm int) *decision {
+  forwardStats1d map[uint64]forwardStat, forwardStats7d map[uint64]forwardStat, inboundStats map[uint64]inboundStat,
+  rebalStats rebalStats, totalOutFeeMsat int64, rebalGlobalPpm int) *decision {
 
   localPpm := 0
   if ch.FeeRatePpm != nil {
@@ -989,12 +1096,17 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
 
   fwd := forwardStats[ch.ChannelID]
+  fwd1d := forwardStats1d[ch.ChannelID]
+  fwd7d := forwardStats7d[ch.ChannelID]
   inb := inboundStats[ch.ChannelID]
   outPpm7d := ppmMsat(fwd.FeeMsat, fwd.AmtMsat)
   fwdCount := int(fwd.Count)
+  fwdCount7d := int(fwd7d.Count)
 
   outAmtSat := fwd.AmtMsat / 1000
   inAmtSat := inb.AmtMsat / 1000
+  outAmt1dSat := fwd1d.AmtMsat / 1000
+  outAmt7dSat := fwd7d.AmtMsat / 1000
 
   totalVal := outAmtSat + inAmtSat
   biasRaw := 0.0
@@ -1018,6 +1130,50 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   classLabel, classConf := classifyChannel(biasEma, outRatio, inb.Count, fwd.Count, st.ClassLabel, st.ClassConf)
   st.ClassLabel = classLabel
   st.ClassConf = classConf
+
+  superSourceActive := false
+  superSourceLike := false
+  if e.cfg.SuperSourceEnabled {
+    superSourceLike = classLabel == "router"
+    ssRatio1d := 0.0
+    ssRatio7d := 0.0
+    if ch.CapacitySat > 0 {
+      ssRatio1d = float64(outAmt1dSat) / float64(ch.CapacitySat)
+      ssRatio7d = float64(outAmt7dSat) / float64(ch.CapacitySat)
+    }
+    ssVol1d := ssRatio1d >= e.superSource.OutAmt1dMult
+    ssVol7d := ssRatio7d >= e.superSource.OutAmt7dMult
+    ssOk := (classLabel == "source" || classLabel == "router") &&
+      outRatio >= e.superSource.OutRatioMin &&
+      ch.CapacitySat > 0 &&
+      (ssVol1d || ssVol7d) &&
+      fwdCount7d >= e.superSource.MinFwds7d
+
+    okSince := st.SuperSourceOkSince
+    badSince := st.SuperSourceBadSince
+    active := st.SuperSourceActive
+    if ssOk {
+      badSince = time.Time{}
+      if okSince.IsZero() {
+        okSince = e.now
+      }
+      if e.now.Sub(okSince) >= time.Duration(e.superSource.EnterHours)*time.Hour {
+        active = true
+      }
+    } else {
+      okSince = time.Time{}
+      if badSince.IsZero() {
+        badSince = e.now
+      }
+      if active && e.now.Sub(badSince) >= time.Duration(e.superSource.ExitHours)*time.Hour {
+        active = false
+      }
+    }
+    superSourceActive = active
+    st.SuperSourceActive = active
+    st.SuperSourceOkSince = okSince
+    st.SuperSourceBadSince = badSince
+  }
 
   seed, seedTags := e.seedForChannel(ch.RemotePubkey, st)
   if seed <= 0 {
@@ -1051,6 +1207,12 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
 
   tags := []string{}
+  if superSourceActive {
+    tags = append(tags, "super-source")
+    if superSourceLike {
+      tags = append(tags, "super-source-like")
+    }
+  }
   if outRatio < 0.10 {
     lack := (0.10 - outRatio) / 0.10
     bump := math.Min(e.profile.SurgeBumpMax, 0.5*lack)
@@ -1104,6 +1266,10 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     tags = append(tags, "no-down-low")
   }
 
+  if superSourceActive {
+    target = e.cfg.MinPpm
+  }
+
   target = clampInt(target, e.cfg.MinPpm, e.cfg.MaxPpm)
 
   capFrac := e.profile.StepCap
@@ -1131,6 +1297,10 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
       floor = peg
       tags = append(tags, "peg")
     }
+  }
+
+  if superSourceActive {
+    floor = e.cfg.MinPpm
   }
 
   finalPpm := clampInt(maxInt(rawStep, floor), e.cfg.MinPpm, e.cfg.MaxPpm)
@@ -1202,6 +1372,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     Floor: floor,
     Tags: tags,
     InboundDiscount: inboundDiscount,
+    SuperSourceActive: superSourceActive,
     Apply: apply && finalPpm != localPpm,
     State: st,
   }
@@ -1376,6 +1547,9 @@ func (e *autofeeEngine) applyDecision(ctx context.Context, ch lndclient.ChannelI
   }
   if timeLock <= 0 {
     timeLock = 144
+  }
+  if d.SuperSourceActive && e.cfg.SuperSourceBaseFeeMsat > 0 {
+    baseFee = int64(e.cfg.SuperSourceBaseFeeMsat)
   }
 
   return e.svc.lnd.UpdateChannelFees(ctx, ch.ChannelPoint, false, baseFee, feeRate, timeLock, inboundEnabled, 0, inboundRate)

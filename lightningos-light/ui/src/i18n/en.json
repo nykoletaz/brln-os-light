@@ -793,12 +793,16 @@
     "autofeeInterval": "Run interval (hours)",
     "autofeeCooldownUp": "Cooldown up (hours)",
     "autofeeCooldownDown": "Cooldown down (hours)",
-    "autofeeAmboss": "Use Amboss seed",
+    "autofeeMinPpm": "Min fee (ppm)",
+    "autofeeMaxPpm": "Max fee (ppm)",
+    "autofeeAmboss": "Amboss fee reference",
     "autofeeAmbossToken": "Amboss API token",
     "autofeeAmbossTokenSet": "Token saved",
     "autofeeInboundPassive": "Inbound passive rebalance",
     "autofeeDiscovery": "Discovery mode",
     "autofeeExplorer": "Explorer mode",
+    "autofeeSuperSource": "Super source",
+    "autofeeSuperSourceBaseFee": "Super source base fee (msats)",
     "autofeeDryRun": "Dry run",
     "autofeeRunNow": "Run now",
     "autofeeSaving": "Saving autofee settings...",
@@ -812,6 +816,8 @@
     "autofeeLoading": "Loading autofee settings...",
     "autofeeConfigUnavailable": "Autofee configuration unavailable.",
     "autofeeChannelUpdateFailed": "Failed to update autofee channel.",
+    "autofeeConfigure": "Configure",
+    "autofeeAll": "Autofee all",
     "autofeeIncludeAll": "Include all",
     "autofeeExcludeAll": "Exclude all",
     "autofeeIncludingAll": "Including all channels...",
@@ -1071,7 +1077,7 @@
       "targetOutbound": "Desired outbound liquidity percentage after the rebalance.",
       "saveTarget": "Save the target outbound percentage for this channel.",
       "rebalanceIn": "Start a rebalance to increase local (outbound) liquidity.",
-      "auto": "Allow auto mode to rebalance this channel.",
+      "auto": "Allow auto mode to rebalance in this channel.",
       "excludeSource": "Never use this channel as a source for rebalances."
     },
     "queue": {
@@ -1093,4 +1099,3 @@
     }
   }
 }
-

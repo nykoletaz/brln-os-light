@@ -92,6 +92,8 @@ type AutofeeConfig = {
   inbound_passive_enabled: boolean
   discovery_enabled: boolean
   explorer_enabled: boolean
+  super_source_enabled: boolean
+  super_source_base_fee_msat: number
   min_ppm: number
   max_ppm: number
 }
@@ -153,11 +155,16 @@ export default function LightningOps() {
   const [autofeeIntervalHours, setAutofeeIntervalHours] = useState('4')
   const [autofeeCooldownUp, setAutofeeCooldownUp] = useState('3')
   const [autofeeCooldownDown, setAutofeeCooldownDown] = useState('4')
+  const [autofeeMinPpm, setAutofeeMinPpm] = useState('10')
+  const [autofeeMaxPpm, setAutofeeMaxPpm] = useState('2000')
   const [autofeeAmbossEnabled, setAutofeeAmbossEnabled] = useState(false)
   const [autofeeAmbossToken, setAutofeeAmbossToken] = useState('')
   const [autofeeInboundPassive, setAutofeeInboundPassive] = useState(false)
   const [autofeeDiscovery, setAutofeeDiscovery] = useState(true)
   const [autofeeExplorer, setAutofeeExplorer] = useState(true)
+  const [autofeeSuperSource, setAutofeeSuperSource] = useState(false)
+  const [autofeeSuperSourceBaseFee, setAutofeeSuperSourceBaseFee] = useState('1000')
+  const [autofeeOpen, setAutofeeOpen] = useState(false)
 
   const [chanStatusBusy, setChanStatusBusy] = useState<string | null>(null)
   const [chanStatusMessage, setChanStatusMessage] = useState('')
@@ -224,6 +231,11 @@ export default function LightningOps() {
     moderate: { interval: 4, cooldownUp: 3, cooldownDown: 4 },
     aggressive: { interval: 2, cooldownUp: 1, cooldownDown: 2 }
   }
+
+  const autofeeAllChecked = useMemo(() => {
+    if (!channels.length) return true
+    return channels.every((ch) => (autofeeSettings[ch.channel_id] ?? true))
+  }, [channels, autofeeSettings])
 
   const blockCadenceAvg = useMemo(() => {
     const buckets = bitcoinLocal?.block_cadence || []
@@ -367,10 +379,14 @@ export default function LightningOps() {
       setAutofeeIntervalHours(String(Math.max(1, Math.round((cfg.run_interval_sec || 14400) / 3600))))
       setAutofeeCooldownUp(String(Math.max(1, Math.round((cfg.cooldown_up_sec || 10800) / 3600))))
       setAutofeeCooldownDown(String(Math.max(2, Math.round((cfg.cooldown_down_sec || 14400) / 3600))))
+      setAutofeeMinPpm(String(cfg.min_ppm ?? 10))
+      setAutofeeMaxPpm(String(cfg.max_ppm ?? 2000))
       setAutofeeAmbossEnabled(Boolean(cfg.amboss_enabled))
       setAutofeeInboundPassive(Boolean(cfg.inbound_passive_enabled))
       setAutofeeDiscovery(Boolean(cfg.discovery_enabled))
       setAutofeeExplorer(Boolean(cfg.explorer_enabled))
+      setAutofeeSuperSource(Boolean(cfg.super_source_enabled))
+      setAutofeeSuperSourceBaseFee(String(cfg.super_source_base_fee_msat ?? 1000))
       setAutofeeMessage('')
     } else {
       const message = (autofeeConfigResult.reason as any)?.message || t('lightningOps.autofeeConfigUnavailable')
@@ -636,6 +652,12 @@ export default function LightningOps() {
       const intervalSec = Math.max(1, Number(autofeeIntervalHours || 4)) * 3600
       const cooldownUpSec = Math.max(1, Number(autofeeCooldownUp || 3)) * 3600
       const cooldownDownSec = Math.max(2, Number(autofeeCooldownDown || 4)) * 3600
+      const minPpmRaw = Math.max(1, Number(autofeeMinPpm || 10))
+      let maxPpmRaw = Math.max(1, Number(autofeeMaxPpm || 2000))
+      if (maxPpmRaw < minPpmRaw) {
+        maxPpmRaw = minPpmRaw
+      }
+      const superSourceBaseFee = Math.max(0, Number(autofeeSuperSourceBaseFee || 1000))
       const payload: any = {
         enabled: autofeeEnabled,
         profile: autofeeProfile,
@@ -643,10 +665,14 @@ export default function LightningOps() {
         run_interval_sec: intervalSec,
         cooldown_up_sec: cooldownUpSec,
         cooldown_down_sec: cooldownDownSec,
+        min_ppm: minPpmRaw,
+        max_ppm: maxPpmRaw,
         amboss_enabled: autofeeAmbossEnabled,
         inbound_passive_enabled: autofeeInboundPassive,
         discovery_enabled: autofeeDiscovery,
-        explorer_enabled: autofeeExplorer
+        explorer_enabled: autofeeExplorer,
+        super_source_enabled: autofeeSuperSource,
+        super_source_base_fee_msat: superSourceBaseFee
       }
       if (autofeeAmbossToken.trim()) {
         payload.amboss_token = autofeeAmbossToken.trim()
@@ -904,94 +930,124 @@ export default function LightningOps() {
             {autofeeStatus?.running && (
               <span className="rounded-full px-3 py-1 text-xs bg-brass/20 text-brass">{t('lightningOps.autofeeRunning')}</span>
             )}
+            <button
+              className="btn-secondary text-xs px-3 py-2"
+              onClick={() => setAutofeeOpen((open) => !open)}
+            >
+              {autofeeOpen ? t('common.hide') : t('lightningOps.autofeeConfigure')}
+            </button>
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <label className="flex items-center gap-2 text-sm text-fog/70">
-            <input type="checkbox" checked={autofeeEnabled} onChange={(e) => setAutofeeEnabled(e.target.checked)} />
-            {t('lightningOps.autofeeEnabled')}
-          </label>
-          <label className="text-sm text-fog/70">
-            {t('lightningOps.autofeeProfile')}
-            <select
-              className="input-field mt-2"
-              value={autofeeProfile}
-              onChange={(e) => {
-                const value = e.target.value
-                setAutofeeProfile(value)
-                const defaults = autofeeProfileDefaults[value]
-                if (defaults) {
-                  setAutofeeIntervalHours(String(defaults.interval))
-                  setAutofeeCooldownUp(String(defaults.cooldownUp))
-                  setAutofeeCooldownDown(String(defaults.cooldownDown))
-                }
-              }}
-            >
-              <option value="conservative">{t('lightningOps.autofeeProfileConservative')}</option>
-              <option value="moderate">{t('lightningOps.autofeeProfileModerate')}</option>
-              <option value="aggressive">{t('lightningOps.autofeeProfileAggressive')}</option>
-            </select>
-          </label>
-          <label className="text-sm text-fog/70">
-            {t('lightningOps.autofeeLookback')}
-            <input className="input-field mt-2" type="number" min={5} max={21} value={autofeeLookback} onChange={(e) => setAutofeeLookback(e.target.value)} />
-          </label>
-          <label className="text-sm text-fog/70">
-            {t('lightningOps.autofeeInterval')}
-            <input className="input-field mt-2" type="number" min={1} max={24} value={autofeeIntervalHours} onChange={(e) => setAutofeeIntervalHours(e.target.value)} />
-          </label>
-          <label className="text-sm text-fog/70">
-            {t('lightningOps.autofeeCooldownUp')}
-            <input className="input-field mt-2" type="number" min={1} max={12} value={autofeeCooldownUp} onChange={(e) => setAutofeeCooldownUp(e.target.value)} />
-          </label>
-          <label className="text-sm text-fog/70">
-            {t('lightningOps.autofeeCooldownDown')}
-            <input className="input-field mt-2" type="number" min={2} max={24} value={autofeeCooldownDown} onChange={(e) => setAutofeeCooldownDown(e.target.value)} />
-          </label>
-        </div>
+        {autofeeOpen && (
+          <>
+            <div className="grid gap-4 lg:grid-cols-3">
+              <label className="flex items-center gap-2 text-sm text-fog/70">
+                <input type="checkbox" checked={autofeeEnabled} onChange={(e) => setAutofeeEnabled(e.target.checked)} />
+                {t('lightningOps.autofeeEnabled')}
+              </label>
+              <label className="text-sm text-fog/70">
+                {t('lightningOps.autofeeProfile')}
+                <select
+                  className="input-field mt-2"
+                  value={autofeeProfile}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setAutofeeProfile(value)
+                    const defaults = autofeeProfileDefaults[value]
+                    if (defaults) {
+                      setAutofeeIntervalHours(String(defaults.interval))
+                      setAutofeeCooldownUp(String(defaults.cooldownUp))
+                      setAutofeeCooldownDown(String(defaults.cooldownDown))
+                    }
+                  }}
+                >
+                  <option value="conservative">{t('lightningOps.autofeeProfileConservative')}</option>
+                  <option value="moderate">{t('lightningOps.autofeeProfileModerate')}</option>
+                  <option value="aggressive">{t('lightningOps.autofeeProfileAggressive')}</option>
+                </select>
+              </label>
+              <label className="text-sm text-fog/70">
+                {t('lightningOps.autofeeLookback')}
+                <input className="input-field mt-2" type="number" min={5} max={21} value={autofeeLookback} onChange={(e) => setAutofeeLookback(e.target.value)} />
+              </label>
+              <label className="text-sm text-fog/70">
+                {t('lightningOps.autofeeInterval')}
+                <input className="input-field mt-2" type="number" min={1} max={24} value={autofeeIntervalHours} onChange={(e) => setAutofeeIntervalHours(e.target.value)} />
+              </label>
+              <label className="text-sm text-fog/70">
+                {t('lightningOps.autofeeCooldownUp')}
+                <input className="input-field mt-2" type="number" min={1} max={12} value={autofeeCooldownUp} onChange={(e) => setAutofeeCooldownUp(e.target.value)} />
+              </label>
+              <label className="text-sm text-fog/70">
+                {t('lightningOps.autofeeCooldownDown')}
+                <input className="input-field mt-2" type="number" min={2} max={24} value={autofeeCooldownDown} onChange={(e) => setAutofeeCooldownDown(e.target.value)} />
+              </label>
+              <label className="text-sm text-fog/70">
+                {t('lightningOps.autofeeMinPpm')}
+                <input className="input-field mt-2" type="number" min={1} value={autofeeMinPpm} onChange={(e) => setAutofeeMinPpm(e.target.value)} />
+              </label>
+              <label className="text-sm text-fog/70">
+                {t('lightningOps.autofeeMaxPpm')}
+                <input className="input-field mt-2" type="number" min={1} value={autofeeMaxPpm} onChange={(e) => setAutofeeMaxPpm(e.target.value)} />
+              </label>
+            </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <label className="flex items-center gap-2 text-sm text-fog/70">
-            <input type="checkbox" checked={autofeeAmbossEnabled} onChange={(e) => setAutofeeAmbossEnabled(e.target.checked)} />
-            {t('lightningOps.autofeeAmboss')}
-          </label>
-          <label className="text-sm text-fog/70">
-            {t('lightningOps.autofeeAmbossToken')}
-            <input className="input-field mt-2" type="password" value={autofeeAmbossToken} onChange={(e) => setAutofeeAmbossToken(e.target.value)} placeholder={autofeeConfig?.amboss_token_set ? t('lightningOps.autofeeAmbossTokenSet') : ''} />
-          </label>
-          <label className="flex items-center gap-2 text-sm text-fog/70">
-            <input type="checkbox" checked={autofeeInboundPassive} onChange={(e) => setAutofeeInboundPassive(e.target.checked)} />
-            {t('lightningOps.autofeeInboundPassive')}
-          </label>
-          <label className="flex items-center gap-2 text-sm text-fog/70">
-            <input type="checkbox" checked={autofeeDiscovery} onChange={(e) => setAutofeeDiscovery(e.target.checked)} />
-            {t('lightningOps.autofeeDiscovery')}
-          </label>
-          <label className="flex items-center gap-2 text-sm text-fog/70">
-            <input type="checkbox" checked={autofeeExplorer} onChange={(e) => setAutofeeExplorer(e.target.checked)} />
-            {t('lightningOps.autofeeExplorer')}
-          </label>
-        </div>
+            <div className="grid gap-4 lg:grid-cols-3">
+              <label className="flex items-center gap-2 text-sm text-fog/70">
+                <input type="checkbox" checked={autofeeInboundPassive} onChange={(e) => setAutofeeInboundPassive(e.target.checked)} />
+                {t('lightningOps.autofeeInboundPassive')}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-fog/70">
+                <input type="checkbox" checked={autofeeDiscovery} onChange={(e) => setAutofeeDiscovery(e.target.checked)} />
+                {t('lightningOps.autofeeDiscovery')}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-fog/70">
+                <input type="checkbox" checked={autofeeExplorer} onChange={(e) => setAutofeeExplorer(e.target.checked)} />
+                {t('lightningOps.autofeeExplorer')}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-fog/70">
+                <input type="checkbox" checked={autofeeSuperSource} onChange={(e) => setAutofeeSuperSource(e.target.checked)} />
+                {t('lightningOps.autofeeSuperSource')}
+              </label>
+              {autofeeSuperSource && (
+                <label className="text-sm text-fog/70">
+                  {t('lightningOps.autofeeSuperSourceBaseFee')}
+                  <input className="input-field mt-2" type="number" min={0} value={autofeeSuperSourceBaseFee} onChange={(e) => setAutofeeSuperSourceBaseFee(e.target.value)} />
+                </label>
+              )}
+              <label className="flex items-center gap-2 text-sm text-fog/70">
+                <input type="checkbox" checked={autofeeAmbossEnabled} onChange={(e) => setAutofeeAmbossEnabled(e.target.checked)} />
+                {t('lightningOps.autofeeAmboss')}
+              </label>
+              {autofeeAmbossEnabled && (
+                <label className="text-sm text-fog/70 lg:col-span-2">
+                  {t('lightningOps.autofeeAmbossToken')}
+                  <input className="input-field mt-2" type="password" value={autofeeAmbossToken} onChange={(e) => setAutofeeAmbossToken(e.target.value)} placeholder={autofeeConfig?.amboss_token_set ? t('lightningOps.autofeeAmbossTokenSet') : ''} />
+                </label>
+              )}
+            </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <button className="btn-primary" onClick={handleAutofeeSave} disabled={autofeeBusy}>{t('common.save')}</button>
-          <button className="btn-secondary" onClick={() => handleAutofeeRun(true)} disabled={autofeeBusy}>{t('lightningOps.autofeeDryRun')}</button>
-          <button className="btn-secondary" onClick={() => handleAutofeeRun(false)} disabled={autofeeBusy}>{t('lightningOps.autofeeRunNow')}</button>
-        </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button className="btn-primary" onClick={handleAutofeeSave} disabled={autofeeBusy}>{t('common.save')}</button>
+              <button className="btn-secondary" onClick={() => handleAutofeeRun(true)} disabled={autofeeBusy}>{t('lightningOps.autofeeDryRun')}</button>
+              <button className="btn-secondary" onClick={() => handleAutofeeRun(false)} disabled={autofeeBusy}>{t('lightningOps.autofeeRunNow')}</button>
+            </div>
 
-        {autofeeMessage && <p className="text-sm text-brass">{autofeeMessage}</p>}
-        <div className="text-xs text-fog/60">
-          {autofeeStatus?.last_run_at && (
-            <div>{t('lightningOps.autofeeLastRun')}: <span className="text-fog">{new Date(autofeeStatus.last_run_at).toLocaleString()}</span></div>
-          )}
-          {autofeeStatus?.next_run_at && (
-            <div>{t('lightningOps.autofeeNextRun')}: <span className="text-fog">{new Date(autofeeStatus.next_run_at).toLocaleString()}</span></div>
-          )}
-          {autofeeStatus?.last_error && (
-            <div>{t('lightningOps.autofeeLastError')}: <span className="text-ember">{autofeeStatus.last_error}</span></div>
-          )}
-        </div>
+            {autofeeMessage && <p className="text-sm text-brass">{autofeeMessage}</p>}
+            <div className="text-xs text-fog/60">
+              {autofeeStatus?.last_run_at && (
+                <div>{t('lightningOps.autofeeLastRun')}: <span className="text-fog">{new Date(autofeeStatus.last_run_at).toLocaleString()}</span></div>
+              )}
+              {autofeeEnabled && autofeeStatus?.next_run_at && (
+                <div>{t('lightningOps.autofeeNextRun')}: <span className="text-fog">{new Date(autofeeStatus.next_run_at).toLocaleString()}</span></div>
+              )}
+              {autofeeStatus?.last_error && (
+                <div>{t('lightningOps.autofeeLastError')}: <span className="text-ember">{autofeeStatus.last_error}</span></div>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       <div className="section-card space-y-4">
@@ -1001,8 +1057,6 @@ export default function LightningOps() {
             <button className={filter === 'all' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('all')}>{t('common.all')}</button>
             <button className={filter === 'active' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('active')}>{t('common.active')}</button>
             <button className={filter === 'inactive' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('inactive')}>{t('common.inactive')}</button>
-            <button className="btn-secondary" onClick={() => handleAutofeeBulk(true)}>{t('lightningOps.autofeeIncludeAll')}</button>
-            <button className="btn-secondary" onClick={() => handleAutofeeBulk(false)}>{t('lightningOps.autofeeExcludeAll')}</button>
           </div>
         </div>
 
@@ -1181,6 +1235,15 @@ export default function LightningOps() {
                 <input type="checkbox" checked={showPrivate} onChange={(e) => setShowPrivate(e.target.checked)} />
               {t('lightningOps.showPrivate')}
               </label>
+              <label className="flex items-center gap-2 text-[11px] text-fog/70 sm:text-xs">
+                <input
+                  type="checkbox"
+                  checked={autofeeAllChecked}
+                  onChange={(e) => handleAutofeeBulk(e.target.checked)}
+                  disabled={autofeeBusy}
+                />
+                {t('lightningOps.autofeeAll')}
+              </label>
             </div>
           </div>
         {filteredChannels.length ? (
@@ -1215,14 +1278,6 @@ export default function LightningOps() {
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <label className="flex items-center gap-2 text-[11px] text-fog/70">
-                          <input
-                            type="checkbox"
-                            checked={autofeeChecked}
-                            onChange={(e) => handleAutofeeChannelToggle(ch, e.target.checked)}
-                          />
-                          {t('lightningOps.autofeeLabel')}
-                        </label>
                         <span className={`rounded-full px-3 py-1 text-xs ${ch.active ? 'bg-glow/20 text-glow' : 'bg-ember/20 text-ember'}`}>
                           {ch.active ? t('common.active') : t('common.inactive')}
                         </span>
@@ -1236,6 +1291,14 @@ export default function LightningOps() {
                             {localDisabled ? t('lightningOps.enableChannel') : t('lightningOps.disableChannel')}
                           </button>
                         )}
+                        <label className="flex items-center gap-2 text-[11px] text-fog/70">
+                          <input
+                            type="checkbox"
+                            checked={autofeeChecked}
+                            onChange={(e) => handleAutofeeChannelToggle(ch, e.target.checked)}
+                          />
+                          {t('lightningOps.autofeeLabel')}
+                        </label>
                       </div>
                     </div>
                     <div className="mt-3 grid gap-3 lg:grid-cols-5 text-xs text-fog/70">

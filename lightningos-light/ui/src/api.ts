@@ -130,6 +130,8 @@ export const updateAutofeeConfig = (payload: {
   inbound_passive_enabled?: boolean
   discovery_enabled?: boolean
   explorer_enabled?: boolean
+  super_source_enabled?: boolean
+  super_source_base_fee_msat?: number
   min_ppm?: number
   max_ppm?: number
 }) => request('/api/lnops/autofee/config', { method: 'POST', body: JSON.stringify(payload) })
