@@ -117,6 +117,32 @@ export const getLnPeers = () => request('/api/lnops/peers')
 export const getLnChanHeal = () => request('/api/lnops/channel/auto-heal')
 export const updateLnChanHeal = (payload: { enabled?: boolean; interval_sec?: number }) =>
   request('/api/lnops/channel/auto-heal', { method: 'POST', body: JSON.stringify(payload) })
+export const getAutofeeConfig = () => request('/api/lnops/autofee/config')
+export const updateAutofeeConfig = (payload: {
+  enabled?: boolean
+  profile?: string
+  lookback_days?: number
+  run_interval_sec?: number
+  cooldown_up_sec?: number
+  cooldown_down_sec?: number
+  amboss_enabled?: boolean
+  amboss_token?: string
+  inbound_passive_enabled?: boolean
+  discovery_enabled?: boolean
+  explorer_enabled?: boolean
+  min_ppm?: number
+  max_ppm?: number
+}) => request('/api/lnops/autofee/config', { method: 'POST', body: JSON.stringify(payload) })
+export const getAutofeeChannels = () => request('/api/lnops/autofee/channels')
+export const updateAutofeeChannels = (payload: {
+  apply_all?: boolean
+  enabled?: boolean
+  channel_id?: number
+  channel_point?: string
+}) => request('/api/lnops/autofee/channels', { method: 'POST', body: JSON.stringify(payload) })
+export const runAutofee = (payload: { dry_run: boolean }) =>
+  request('/api/lnops/autofee/run', { method: 'POST', body: JSON.stringify(payload) })
+export const getAutofeeStatus = () => request('/api/lnops/autofee/status')
 export const getLnChannelFees = (channelPoint: string) =>
   request(`/api/lnops/channel/fees?channel_point=${encodeURIComponent(channelPoint)}`)
 export const updateLnChannelStatus = (payload: { channel_point: string; enabled: boolean }) =>

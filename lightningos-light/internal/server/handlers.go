@@ -1185,6 +1185,8 @@ func mapService(name string) string {
   switch name {
   case "lnd":
     return "lnd"
+  case "autofee":
+    return "autofee"
   case "lightningos-manager":
     return "lightningos-manager"
   case "lightningos-elements", "elementsd":
@@ -1238,6 +1240,17 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 
   ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
   defer cancel()
+
+  if service == "autofee" {
+    lines := parseAutofeeLimit(linesRaw)
+    out, err := s.readAutofeeLogLines(ctx, lines)
+    if err != nil {
+      writeError(w, http.StatusInternalServerError, fmt.Sprintf("log read failed: %v", err))
+      return
+    }
+    writeJSON(w, http.StatusOK, map[string]any{"service": service, "lines": out})
+    return
+  }
 
   out, err := system.JournalTail(ctx, service, lines)
   if err != nil {

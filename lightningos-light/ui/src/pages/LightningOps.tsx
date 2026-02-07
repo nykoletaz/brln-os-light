@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnPeers, getMempoolFees, openChannel, updateAmbossHealth, updateChannelFees, updateLnChanHeal, updateLnChannelStatus } from '../api'
+import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnPeers, getMempoolFees, openChannel, runAutofee, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus } from '../api'
 
 type Channel = {
   channel_point: string
@@ -80,6 +80,34 @@ type BitcoinLocalStatus = {
   block_cadence?: BitcoinLocalCadenceBucket[]
 }
 
+type AutofeeConfig = {
+  enabled: boolean
+  profile: string
+  lookback_days: number
+  run_interval_sec: number
+  cooldown_up_sec: number
+  cooldown_down_sec: number
+  amboss_enabled: boolean
+  amboss_token_set: boolean
+  inbound_passive_enabled: boolean
+  discovery_enabled: boolean
+  explorer_enabled: boolean
+  min_ppm: number
+  max_ppm: number
+}
+
+type AutofeeStatus = {
+  running: boolean
+  last_run_at?: string
+  next_run_at?: string
+  last_error?: string
+}
+
+type AutofeeChannelSetting = {
+  channel_id: number
+  enabled: boolean
+}
+
 export default function LightningOps() {
   const { t } = useTranslation()
   const [channels, setChannels] = useState<Channel[]>([])
@@ -113,6 +141,23 @@ export default function LightningOps() {
   const [chanHealBusy, setChanHealBusy] = useState(false)
   const [chanHealInterval, setChanHealInterval] = useState('300')
   const [bitcoinLocal, setBitcoinLocal] = useState<BitcoinLocalStatus | null>(null)
+
+  const [autofeeConfig, setAutofeeConfig] = useState<AutofeeConfig | null>(null)
+  const [autofeeStatus, setAutofeeStatus] = useState<AutofeeStatus | null>(null)
+  const [autofeeSettings, setAutofeeSettings] = useState<Record<number, boolean>>({})
+  const [autofeeBusy, setAutofeeBusy] = useState(false)
+  const [autofeeMessage, setAutofeeMessage] = useState('')
+  const [autofeeEnabled, setAutofeeEnabled] = useState(false)
+  const [autofeeProfile, setAutofeeProfile] = useState('moderate')
+  const [autofeeLookback, setAutofeeLookback] = useState('7')
+  const [autofeeIntervalHours, setAutofeeIntervalHours] = useState('4')
+  const [autofeeCooldownUp, setAutofeeCooldownUp] = useState('3')
+  const [autofeeCooldownDown, setAutofeeCooldownDown] = useState('4')
+  const [autofeeAmbossEnabled, setAutofeeAmbossEnabled] = useState(false)
+  const [autofeeAmbossToken, setAutofeeAmbossToken] = useState('')
+  const [autofeeInboundPassive, setAutofeeInboundPassive] = useState(false)
+  const [autofeeDiscovery, setAutofeeDiscovery] = useState(true)
+  const [autofeeExplorer, setAutofeeExplorer] = useState(true)
 
   const [chanStatusBusy, setChanStatusBusy] = useState<string | null>(null)
   const [chanStatusMessage, setChanStatusMessage] = useState('')
@@ -172,6 +217,12 @@ export default function LightningOps() {
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return t('common.unknownTime')
     return date.toLocaleString()
+  }
+
+  const autofeeProfileDefaults: Record<string, { interval: number; cooldownUp: number; cooldownDown: number }> = {
+    conservative: { interval: 8, cooldownUp: 6, cooldownDown: 8 },
+    moderate: { interval: 4, cooldownUp: 3, cooldownDown: 4 },
+    aggressive: { interval: 2, cooldownUp: 1, cooldownDown: 2 }
   }
 
   const blockCadenceAvg = useMemo(() => {
@@ -253,12 +304,16 @@ export default function LightningOps() {
     setPeerListStatus(t('lightningOps.loadingPeers'))
     setAmbossStatus(t('lightningOps.ambossHealthLoading'))
     setChanHealStatus(t('lightningOps.chanHealLoading'))
-    const [channelsResult, peersResult, ambossResult, chanHealResult, bitcoinLocalResult] = await Promise.allSettled([
+    setAutofeeMessage(t('lightningOps.autofeeLoading'))
+    const [channelsResult, peersResult, ambossResult, chanHealResult, bitcoinLocalResult, autofeeConfigResult, autofeeStatusResult, autofeeChannelsResult] = await Promise.allSettled([
       getLnChannels(),
       getLnPeers(),
       getAmbossHealth(),
       getLnChanHeal(),
-      getBitcoinLocalStatus()
+      getBitcoinLocalStatus(),
+      getAutofeeConfig(),
+      getAutofeeStatus(),
+      getAutofeeChannels()
     ])
     if (channelsResult.status === 'fulfilled') {
       const res = channelsResult.value
@@ -302,6 +357,39 @@ export default function LightningOps() {
     }
     if (bitcoinLocalResult.status === 'fulfilled') {
       setBitcoinLocal(bitcoinLocalResult.value as BitcoinLocalStatus)
+    }
+    if (autofeeConfigResult.status === 'fulfilled') {
+      const cfg = autofeeConfigResult.value as AutofeeConfig
+      setAutofeeConfig(cfg)
+      setAutofeeEnabled(cfg.enabled)
+      setAutofeeProfile(cfg.profile || 'moderate')
+      setAutofeeLookback(String(cfg.lookback_days ?? 7))
+      setAutofeeIntervalHours(String(Math.max(1, Math.round((cfg.run_interval_sec || 14400) / 3600))))
+      setAutofeeCooldownUp(String(Math.max(1, Math.round((cfg.cooldown_up_sec || 10800) / 3600))))
+      setAutofeeCooldownDown(String(Math.max(2, Math.round((cfg.cooldown_down_sec || 14400) / 3600))))
+      setAutofeeAmbossEnabled(Boolean(cfg.amboss_enabled))
+      setAutofeeInboundPassive(Boolean(cfg.inbound_passive_enabled))
+      setAutofeeDiscovery(Boolean(cfg.discovery_enabled))
+      setAutofeeExplorer(Boolean(cfg.explorer_enabled))
+      setAutofeeMessage('')
+    } else {
+      const message = (autofeeConfigResult.reason as any)?.message || t('lightningOps.autofeeConfigUnavailable')
+      setAutofeeMessage(message)
+    }
+    if (autofeeStatusResult.status === 'fulfilled') {
+      setAutofeeStatus(autofeeStatusResult.value as AutofeeStatus)
+    }
+    if (autofeeChannelsResult.status === 'fulfilled') {
+      const settingsPayload = (autofeeChannelsResult.value as any)?.settings as AutofeeChannelSetting[] | undefined
+      const map: Record<number, boolean> = {}
+      if (Array.isArray(settingsPayload)) {
+        settingsPayload.forEach((entry) => {
+          if (typeof entry?.channel_id === 'number') {
+            map[entry.channel_id] = Boolean(entry.enabled)
+          }
+        })
+      }
+      setAutofeeSettings(map)
     }
   }
 
@@ -539,6 +627,87 @@ export default function LightningOps() {
     }
   }
 
+  const handleAutofeeSave = async () => {
+    if (autofeeBusy) return
+    setAutofeeBusy(true)
+    setAutofeeMessage(t('lightningOps.autofeeSaving'))
+    try {
+      const lookbackDays = Math.max(5, Math.min(21, Number(autofeeLookback || 7)))
+      const intervalSec = Math.max(1, Number(autofeeIntervalHours || 4)) * 3600
+      const cooldownUpSec = Math.max(1, Number(autofeeCooldownUp || 3)) * 3600
+      const cooldownDownSec = Math.max(2, Number(autofeeCooldownDown || 4)) * 3600
+      const payload: any = {
+        enabled: autofeeEnabled,
+        profile: autofeeProfile,
+        lookback_days: lookbackDays,
+        run_interval_sec: intervalSec,
+        cooldown_up_sec: cooldownUpSec,
+        cooldown_down_sec: cooldownDownSec,
+        amboss_enabled: autofeeAmbossEnabled,
+        inbound_passive_enabled: autofeeInboundPassive,
+        discovery_enabled: autofeeDiscovery,
+        explorer_enabled: autofeeExplorer
+      }
+      if (autofeeAmbossToken.trim()) {
+        payload.amboss_token = autofeeAmbossToken.trim()
+      }
+      const res = await updateAutofeeConfig(payload)
+      setAutofeeConfig(res as AutofeeConfig)
+      setAutofeeMessage(t('lightningOps.autofeeSaved'))
+      setAutofeeAmbossToken('')
+      const status = await getAutofeeStatus()
+      setAutofeeStatus(status as AutofeeStatus)
+    } catch (err: any) {
+      setAutofeeMessage(err?.message || t('lightningOps.autofeeSaveFailed'))
+    } finally {
+      setAutofeeBusy(false)
+    }
+  }
+
+  const handleAutofeeRun = async (dryRun: boolean) => {
+    if (autofeeBusy) return
+    setAutofeeBusy(true)
+    setAutofeeMessage(dryRun ? t('lightningOps.autofeeDryRunning') : t('lightningOps.autofeeRunning'))
+    try {
+      await runAutofee({ dry_run: dryRun })
+      setAutofeeMessage(dryRun ? t('lightningOps.autofeeDryRunDone') : t('lightningOps.autofeeRunDone'))
+      const status = await getAutofeeStatus()
+      setAutofeeStatus(status as AutofeeStatus)
+    } catch (err: any) {
+      setAutofeeMessage(err?.message || t('lightningOps.autofeeRunFailed'))
+    } finally {
+      setAutofeeBusy(false)
+    }
+  }
+
+  const handleAutofeeChannelToggle = async (channel: Channel, enabled: boolean) => {
+    try {
+      await updateAutofeeChannels({ channel_id: channel.channel_id, channel_point: channel.channel_point, enabled })
+      setAutofeeSettings((prev) => ({ ...prev, [channel.channel_id]: enabled }))
+    } catch (err: any) {
+      setAutofeeMessage(err?.message || t('lightningOps.autofeeChannelUpdateFailed'))
+    }
+  }
+
+  const handleAutofeeBulk = async (enabled: boolean) => {
+    if (autofeeBusy) return
+    setAutofeeBusy(true)
+    setAutofeeMessage(enabled ? t('lightningOps.autofeeIncludingAll') : t('lightningOps.autofeeExcludingAll'))
+    try {
+      await updateAutofeeChannels({ apply_all: true, enabled })
+      const map: Record<number, boolean> = {}
+      channels.forEach((ch) => {
+        map[ch.channel_id] = enabled
+      })
+      setAutofeeSettings(map)
+      setAutofeeMessage(t('lightningOps.autofeeBulkDone'))
+    } catch (err: any) {
+      setAutofeeMessage(err?.message || t('lightningOps.autofeeBulkFailed'))
+    } finally {
+      setAutofeeBusy(false)
+    }
+  }
+
   const handleToggleChanHeal = async () => {
     if (chanHealBusy) return
     const nextEnabled = !chanHeal?.enabled
@@ -724,11 +893,116 @@ export default function LightningOps() {
 
       <div className="section-card space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold">{t('lightningOps.autofeeTitle')}</h3>
+            <p className="text-sm text-fog/60">{t('lightningOps.autofeeSubtitle')}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded-full px-3 py-1 text-xs ${autofeeEnabled ? 'bg-glow/20 text-glow' : 'bg-ember/20 text-ember'}`}>
+              {autofeeEnabled ? t('common.enabled') : t('common.disabled')}
+            </span>
+            {autofeeStatus?.running && (
+              <span className="rounded-full px-3 py-1 text-xs bg-brass/20 text-brass">{t('lightningOps.autofeeRunning')}</span>
+            )}
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <label className="flex items-center gap-2 text-sm text-fog/70">
+            <input type="checkbox" checked={autofeeEnabled} onChange={(e) => setAutofeeEnabled(e.target.checked)} />
+            {t('lightningOps.autofeeEnabled')}
+          </label>
+          <label className="text-sm text-fog/70">
+            {t('lightningOps.autofeeProfile')}
+            <select
+              className="input-field mt-2"
+              value={autofeeProfile}
+              onChange={(e) => {
+                const value = e.target.value
+                setAutofeeProfile(value)
+                const defaults = autofeeProfileDefaults[value]
+                if (defaults) {
+                  setAutofeeIntervalHours(String(defaults.interval))
+                  setAutofeeCooldownUp(String(defaults.cooldownUp))
+                  setAutofeeCooldownDown(String(defaults.cooldownDown))
+                }
+              }}
+            >
+              <option value="conservative">{t('lightningOps.autofeeProfileConservative')}</option>
+              <option value="moderate">{t('lightningOps.autofeeProfileModerate')}</option>
+              <option value="aggressive">{t('lightningOps.autofeeProfileAggressive')}</option>
+            </select>
+          </label>
+          <label className="text-sm text-fog/70">
+            {t('lightningOps.autofeeLookback')}
+            <input className="input-field mt-2" type="number" min={5} max={21} value={autofeeLookback} onChange={(e) => setAutofeeLookback(e.target.value)} />
+          </label>
+          <label className="text-sm text-fog/70">
+            {t('lightningOps.autofeeInterval')}
+            <input className="input-field mt-2" type="number" min={1} max={24} value={autofeeIntervalHours} onChange={(e) => setAutofeeIntervalHours(e.target.value)} />
+          </label>
+          <label className="text-sm text-fog/70">
+            {t('lightningOps.autofeeCooldownUp')}
+            <input className="input-field mt-2" type="number" min={1} max={12} value={autofeeCooldownUp} onChange={(e) => setAutofeeCooldownUp(e.target.value)} />
+          </label>
+          <label className="text-sm text-fog/70">
+            {t('lightningOps.autofeeCooldownDown')}
+            <input className="input-field mt-2" type="number" min={2} max={24} value={autofeeCooldownDown} onChange={(e) => setAutofeeCooldownDown(e.target.value)} />
+          </label>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-3">
+          <label className="flex items-center gap-2 text-sm text-fog/70">
+            <input type="checkbox" checked={autofeeAmbossEnabled} onChange={(e) => setAutofeeAmbossEnabled(e.target.checked)} />
+            {t('lightningOps.autofeeAmboss')}
+          </label>
+          <label className="text-sm text-fog/70">
+            {t('lightningOps.autofeeAmbossToken')}
+            <input className="input-field mt-2" type="password" value={autofeeAmbossToken} onChange={(e) => setAutofeeAmbossToken(e.target.value)} placeholder={autofeeConfig?.amboss_token_set ? t('lightningOps.autofeeAmbossTokenSet') : ''} />
+          </label>
+          <label className="flex items-center gap-2 text-sm text-fog/70">
+            <input type="checkbox" checked={autofeeInboundPassive} onChange={(e) => setAutofeeInboundPassive(e.target.checked)} />
+            {t('lightningOps.autofeeInboundPassive')}
+          </label>
+          <label className="flex items-center gap-2 text-sm text-fog/70">
+            <input type="checkbox" checked={autofeeDiscovery} onChange={(e) => setAutofeeDiscovery(e.target.checked)} />
+            {t('lightningOps.autofeeDiscovery')}
+          </label>
+          <label className="flex items-center gap-2 text-sm text-fog/70">
+            <input type="checkbox" checked={autofeeExplorer} onChange={(e) => setAutofeeExplorer(e.target.checked)} />
+            {t('lightningOps.autofeeExplorer')}
+          </label>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button className="btn-primary" onClick={handleAutofeeSave} disabled={autofeeBusy}>{t('common.save')}</button>
+          <button className="btn-secondary" onClick={() => handleAutofeeRun(true)} disabled={autofeeBusy}>{t('lightningOps.autofeeDryRun')}</button>
+          <button className="btn-secondary" onClick={() => handleAutofeeRun(false)} disabled={autofeeBusy}>{t('lightningOps.autofeeRunNow')}</button>
+        </div>
+
+        {autofeeMessage && <p className="text-sm text-brass">{autofeeMessage}</p>}
+        <div className="text-xs text-fog/60">
+          {autofeeStatus?.last_run_at && (
+            <div>{t('lightningOps.autofeeLastRun')}: <span className="text-fog">{new Date(autofeeStatus.last_run_at).toLocaleString()}</span></div>
+          )}
+          {autofeeStatus?.next_run_at && (
+            <div>{t('lightningOps.autofeeNextRun')}: <span className="text-fog">{new Date(autofeeStatus.next_run_at).toLocaleString()}</span></div>
+          )}
+          {autofeeStatus?.last_error && (
+            <div>{t('lightningOps.autofeeLastError')}: <span className="text-ember">{autofeeStatus.last_error}</span></div>
+          )}
+        </div>
+      </div>
+
+      <div className="section-card space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-semibold">{t('lightningOps.channels')}</h3>
           <div className="flex flex-wrap gap-2 text-xs">
             <button className={filter === 'all' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('all')}>{t('common.all')}</button>
             <button className={filter === 'active' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('active')}>{t('common.active')}</button>
             <button className={filter === 'inactive' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('inactive')}>{t('common.inactive')}</button>
+            <button className="btn-secondary" onClick={() => handleAutofeeBulk(true)}>{t('lightningOps.autofeeIncludeAll')}</button>
+            <button className="btn-secondary" onClick={() => handleAutofeeBulk(false)}>{t('lightningOps.autofeeExcludeAll')}</button>
           </div>
         </div>
 
@@ -916,6 +1190,7 @@ export default function LightningOps() {
                 const localDisabled = ch.local_disabled ?? isLocalChanDisabled(ch.chan_status_flags)
                 const statusBusy = chanStatusBusy === ch.channel_point
                 const showToggle = ch.active
+                const autofeeChecked = autofeeSettings[ch.channel_id] ?? true
                 const cardClass = localDisabled && ch.active
                   ? 'rounded-2xl border border-ember/40 bg-ember/10 p-4'
                   : 'rounded-2xl border border-white/10 bg-ink/60 p-4'
@@ -940,6 +1215,14 @@ export default function LightningOps() {
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
+                        <label className="flex items-center gap-2 text-[11px] text-fog/70">
+                          <input
+                            type="checkbox"
+                            checked={autofeeChecked}
+                            onChange={(e) => handleAutofeeChannelToggle(ch, e.target.checked)}
+                          />
+                          {t('lightningOps.autofeeLabel')}
+                        </label>
                         <span className={`rounded-full px-3 py-1 text-xs ${ch.active ? 'bg-glow/20 text-glow' : 'bg-ember/20 text-ember'}`}>
                           {ch.active ? t('common.active') : t('common.inactive')}
                         </span>

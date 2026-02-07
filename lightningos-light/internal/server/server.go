@@ -33,6 +33,10 @@ type Server struct {
   rebalanceInitAt time.Time
   rebalance *RebalanceService
   rebalanceErr string
+  autofeeInitAt time.Time
+  autofeeMu sync.Mutex
+  autofee *AutofeeService
+  autofeeErr string
   lndRestartMu sync.RWMutex
   lastLNDRestart time.Time
   walletActivityMu sync.Mutex
@@ -54,6 +58,7 @@ func (s *Server) Run() error {
   s.initNotifications()
   s.initReports()
   s.initRebalance()
+  s.initAutofee()
   if s.chat != nil {
     s.chat.Start()
   }
@@ -65,6 +70,9 @@ func (s *Server) Run() error {
   }
   if s.rebalance != nil {
     s.rebalance.Start()
+  }
+  if s.autofee != nil {
+    s.autofee.Start()
   }
 
   addr := fmt.Sprintf("%s:%d", s.cfg.Server.Host, s.cfg.Server.Port)
