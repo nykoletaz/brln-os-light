@@ -1006,7 +1006,14 @@ type rebalStats struct {
 func (e *autofeeEngine) fetchForwardStats(ctx context.Context, lookback int) (map[uint64]forwardStat, error) {
   rows, err := e.svc.db.Query(ctx, `
 select coalesce(chan_id_out, channel_id) as chan_id,
-  coalesce(sum(case when fee_msat > 0 then fee_msat else fee_sat * 1000 end), 0),
+  coalesce(sum(
+    case
+      when fee_msat > 0 then fee_msat
+      when fee_sat > 0 then fee_sat * 1000
+      when amount_in_msat > 0 and amount_out_msat > 0 and amount_in_msat > amount_out_msat then amount_in_msat - amount_out_msat
+      else 0
+    end
+  ), 0),
   coalesce(sum(case when amount_out_msat > 0 then amount_out_msat else amount_sat * 1000 end), 0),
   count(*)
 from notifications

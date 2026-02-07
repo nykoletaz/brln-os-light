@@ -1612,6 +1612,9 @@ func (n *Notifier) runForwards() {
         if amtOutMsat == 0 && fwd.AmtOut != 0 {
           amtOutMsat = int64(fwd.AmtOut) * 1000
         }
+        if feeMsat == 0 && amtInMsat > 0 && amtOutMsat > 0 && amtInMsat > amtOutMsat {
+          feeMsat = amtInMsat - amtOutMsat
+        }
         inInfo, _ := channelMap[uint64(fwd.ChanIdIn)]
         outInfo, _ := channelMap[uint64(fwd.ChanIdOut)]
         evt := Notification{
