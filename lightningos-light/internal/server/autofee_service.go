@@ -852,7 +852,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   rebalGlobalPpm := ppmMsat(rebalGlobal.FeeMsat, rebalGlobal.AmtMsat)
 
   runID := fmt.Sprintf("%d", time.Now().UnixNano())
-  header := fmt.Sprintf("⚡ Autofee %s", strings.ToUpper(reason))
+  header := fmt.Sprintf("⚡ Autofee %s | %s", strings.ToUpper(reason), e.now.Format("2006-01-02 15:04:05Z"))
   if dryRun {
     header = header + " (dry-run)"
   }
@@ -1060,13 +1060,13 @@ group by chan_id_in
 func (e *autofeeEngine) fetchRebalanceStats(ctx context.Context, lookback int) (rebalStats, error) {
   stats := rebalStats{ByChannel: map[uint64]rebalStat{}}
   rows, err := e.svc.db.Query(ctx, `
-select rebal_target_chan_id,
+select coalesce(rebal_target_chan_id, rebal_source_chan_id) as chan_id,
   coalesce(sum(case when fee_msat > 0 then fee_msat else fee_sat * 1000 end), 0),
   coalesce(sum(amount_sat), 0)
 from notifications
 where type='rebalance' and occurred_at >= now() - ($1 * interval '1 day')
-  and rebal_target_chan_id is not null
-group by rebal_target_chan_id
+  and (rebal_target_chan_id is not null or rebal_source_chan_id is not null)
+group by coalesce(rebal_target_chan_id, rebal_source_chan_id)
 `, lookback)
   if err != nil {
     return stats, err

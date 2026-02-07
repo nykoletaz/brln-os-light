@@ -231,7 +231,7 @@ func (s *Server) handleAutofeeResults(w http.ResponseWriter, r *http.Request) {
   rows, err := s.db.Query(ctx, `
 select line
 from autofee_logs
-order by id desc
+order by coalesce(run_id, '0')::bigint desc, seq asc
 limit $1
 `, limit)
   if err != nil {
@@ -247,10 +247,6 @@ limit $1
       return
     }
     out = append(out, line)
-  }
-  // reverse to show oldest first within the slice
-  for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-    out[i], out[j] = out[j], out[i]
   }
   writeJSON(w, http.StatusOK, map[string]any{"lines": out})
 }
