@@ -851,7 +851,6 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   rebalGlobal := rebalStats.Global
   rebalGlobalPpm := ppmMsat(rebalGlobal.FeeMsat, rebalGlobal.AmtMsat)
 
-  summary := autofeeRunSummary{total: len(channels)}
   runID := fmt.Sprintf("%d", time.Now().UnixNano())
   header := fmt.Sprintf("⚡ Autofee %s", strings.ToUpper(reason))
   if dryRun {
