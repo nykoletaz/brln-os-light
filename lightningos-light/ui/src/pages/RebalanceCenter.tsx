@@ -137,6 +137,8 @@ export default function RebalanceCenter() {
   const [queueAttempts, setQueueAttempts] = useState<RebalanceAttempt[]>([])
   const [historyJobs, setHistoryJobs] = useState<RebalanceJob[]>([])
   const [historyAttempts, setHistoryAttempts] = useState<RebalanceAttempt[]>([])
+  const [serverConfig, setServerConfig] = useState<RebalanceConfig | null>(null)
+  const [configDirty, setConfigDirty] = useState(false)
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('')
   const [saving, setSaving] = useState(false)
@@ -151,6 +153,32 @@ export default function RebalanceCenter() {
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return value
     return dateTimeFormatter.format(date)
+  }
+  const configSignature = (cfg?: RebalanceConfig | null) => {
+    if (!cfg) return ''
+    return JSON.stringify({
+      auto_enabled: cfg.auto_enabled,
+      scan_interval_sec: cfg.scan_interval_sec,
+      deadband_pct: cfg.deadband_pct,
+      source_min_local_pct: cfg.source_min_local_pct,
+      econ_ratio: cfg.econ_ratio,
+      roi_min: cfg.roi_min,
+      daily_budget_pct: cfg.daily_budget_pct,
+      max_concurrent: cfg.max_concurrent,
+      min_amount_sat: cfg.min_amount_sat,
+      max_amount_sat: cfg.max_amount_sat,
+      fee_ladder_steps: cfg.fee_ladder_steps,
+      amount_probe_steps: cfg.amount_probe_steps,
+      amount_probe_adaptive: cfg.amount_probe_adaptive,
+      attempt_timeout_sec: cfg.attempt_timeout_sec,
+      rebalance_timeout_sec: cfg.rebalance_timeout_sec,
+      payback_mode_flags: cfg.payback_mode_flags,
+      unlock_days: cfg.unlock_days,
+      critical_release_pct: cfg.critical_release_pct,
+      critical_min_sources: cfg.critical_min_sources,
+      critical_min_available_sats: cfg.critical_min_available_sats,
+      critical_cycles: cfg.critical_cycles
+    })
   }
   const sortedChannels = useMemo(
     () => channels.filter((ch) => ch.active).sort((a, b) => a.local_pct - b.local_pct),
@@ -168,6 +196,10 @@ export default function RebalanceCenter() {
     return totals
   }
   const historyTotals = useMemo(() => buildAttemptTotals(historyAttempts), [historyAttempts])
+
+  useEffect(() => {
+    setConfigDirty(configSignature(config) !== configSignature(serverConfig))
+  }, [config, serverConfig])
   const parseRemaining = (reason?: string) => {
     if (!reason) return null
     const match = reason.match(/remaining\s+(\d+)/i)
@@ -198,13 +230,19 @@ export default function RebalanceCenter() {
           getRebalanceHistory(50)
         ])
         const nextConfig = cfg as RebalanceConfig
-        setConfig({
+        const normalizedConfig = {
           ...nextConfig,
           amount_probe_steps: nextConfig.amount_probe_steps || 4,
           amount_probe_adaptive: nextConfig.amount_probe_adaptive ?? true,
           attempt_timeout_sec: nextConfig.attempt_timeout_sec || 20,
           rebalance_timeout_sec: nextConfig.rebalance_timeout_sec || 600
-        })
+        }
+        setServerConfig(normalizedConfig)
+        const currentSig = configSignature(config)
+        const nextSig = configSignature(normalizedConfig)
+        if (!autoOpen || currentSig === '' || currentSig === nextSig) {
+          setConfig(normalizedConfig)
+        }
       setOverview(ovw as RebalanceOverview)
       const channelList = Array.isArray((ch as any)?.channels) ? (ch as any).channels : []
       setChannels(channelList)
