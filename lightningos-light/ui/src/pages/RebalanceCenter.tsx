@@ -730,7 +730,7 @@ export default function RebalanceCenter() {
                 <th className="pb-2 pl-6">{t('rebalanceCenter.channels.balance')}</th>
                 <th className="pb-2 pl-6">{t('rebalanceCenter.channels.fees')}</th>
                 <th className="pb-2 pl-6">{t('rebalanceCenter.channels.target')}</th>
-                <th className="pb-2">{t('rebalanceCenter.channels.protected')}</th>
+                <th className="pb-2 text-center">{t('rebalanceCenter.channels.protected')}</th>
                 <th className="pb-2">
                   <div className="flex flex-col gap-2">
                     <span>{t('rebalanceCenter.channels.actions')}</span>
@@ -806,7 +806,7 @@ export default function RebalanceCenter() {
                       {t('rebalanceCenter.channels.amount', { value: formatSats(ch.target_amount_sat) })}
                     </div>
                   </td>
-                  <td className="py-3">
+                  <td className="py-3 text-center">
                     <div>{formatSats(ch.protected_liquidity_sat)}</div>
                     <div className="text-xs text-fog/50">{t('rebalanceCenter.channels.payback', { value: (ch.payback_progress * 100).toFixed(0) })}</div>
                   </td>
