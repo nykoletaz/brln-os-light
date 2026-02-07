@@ -670,6 +670,55 @@ type autofeeEngine struct {
   now time.Time
 }
 
+type autofeeRunSummary struct {
+  total int
+  inactive int
+  disabled int
+  eligible int
+  applied int
+  applyErrors int
+  skippedCooldown int
+  skippedSmall int
+  skippedSame int
+  skippedOther int
+  seedAmboss int
+  seedAmbossMissing int
+  seedAmbossError int
+  seedAmbossEmpty int
+  seedOutrate int
+  seedMem int
+  seedDefault int
+  superSource int
+  inboundDiscount int
+}
+
+func (s *autofeeRunSummary) addTags(tags []string) {
+  for _, tag := range tags {
+    switch tag {
+    case "seed:amboss":
+      s.seedAmboss++
+    case "seed:amboss-missing":
+      s.seedAmbossMissing++
+    case "seed:amboss-error":
+      s.seedAmbossError++
+    case "seed:amboss-empty":
+      s.seedAmbossEmpty++
+    case "seed:outrate":
+      s.seedOutrate++
+    case "seed:mem":
+      s.seedMem++
+    case "seed:default":
+      s.seedDefault++
+    case "cooldown":
+      s.skippedCooldown++
+    case "hold-small":
+      s.skippedSmall++
+    case "same-ppm":
+      s.skippedSame++
+    }
+  }
+}
+
 func newAutofeeEngine(svc *AutofeeService, cfg AutofeeConfig) *autofeeEngine {
   p := autofeeProfiles[cfg.Profile]
   if p.Name == "" {
@@ -765,9 +814,11 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   rebalGlobal := rebalStats.Global
   rebalGlobalPpm := ppmMsat(rebalGlobal.FeeMsat, rebalGlobal.AmtMsat)
 
+  summary := autofeeRunSummary{total: len(channels)}
   updates := 0
   for _, ch := range channels {
     if !ch.Active {
+      summary.inactive++
       continue
     }
     if ch.ChannelID == 0 {
@@ -775,6 +826,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     }
     enabled, ok := settings[ch.ChannelID]
     if ok && !enabled {
+      summary.disabled++
       continue
     }
 
@@ -783,28 +835,55 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     if decision == nil {
       continue
     }
+    summary.eligible++
+    summary.addTags(decision.Tags)
+    if decision.SuperSourceActive {
+      summary.superSource++
+    }
+    if decision.InboundDiscount > 0 {
+      summary.inboundDiscount++
+    }
 
     e.persistState(ctx, decision.State)
 
     if decision.Apply {
       updates++
+      summary.applied++
       if dryRun {
         _ = e.logDecision(ctx, "dry-run", decision)
         continue
       }
       if err := e.applyDecision(ctx, ch, decision); err != nil {
+        summary.applyErrors++
         _ = e.logDecision(ctx, "error", decision.withError(err))
         continue
       }
       _ = e.logDecision(ctx, "apply", decision)
+    } else {
+      hasSkipTag := false
+      for _, tag := range decision.Tags {
+        switch tag {
+        case "cooldown", "hold-small", "same-ppm":
+          hasSkipTag = true
+        }
+        if hasSkipTag {
+          break
+        }
+      }
+      if !hasSkipTag {
+        summary.skippedOther++
+      }
     }
   }
 
-  if updates == 0 {
-    _ = e.logSummary(ctx, dryRun, reason, "no updates")
-  } else {
-    _ = e.logSummary(ctx, dryRun, reason, fmt.Sprintf("updates=%d", updates))
-  }
+  summaryText := fmt.Sprintf(
+    "channels=%d eligible=%d applied=%d errors=%d skip{cooldown=%d small=%d same=%d other=%d disabled=%d inactive=%d} seed{amboss=%d missing=%d err=%d empty=%d outrate=%d mem=%d default=%d} super_source=%d inbound_disc=%d",
+    summary.total, summary.eligible, summary.applied, summary.applyErrors,
+    summary.skippedCooldown, summary.skippedSmall, summary.skippedSame, summary.skippedOther, summary.disabled, summary.inactive,
+    summary.seedAmboss, summary.seedAmbossMissing, summary.seedAmbossError, summary.seedAmbossEmpty, summary.seedOutrate, summary.seedMem, summary.seedDefault,
+    summary.superSource, summary.inboundDiscount,
+  )
+  _ = e.logSummary(ctx, dryRun, reason, summaryText)
   return nil
 }
 
@@ -1354,6 +1433,9 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     st.LastOutrateTs = e.now
   }
 
+  if finalPpm == localPpm {
+    tags = append(tags, "same-ppm")
+  }
   if apply && finalPpm != localPpm {
     st.LastTs = e.now
   }
@@ -1409,23 +1491,32 @@ func (e *autofeeEngine) evalExplorer(st *autofeeChannelState, outRatio float64, 
   return true
 }
 func (e *autofeeEngine) seedForChannel(pubkey string, st *autofeeChannelState) (float64, []string) {
+  tags := []string{}
   if e.cfg.AmbossEnabled {
     token, err := e.fetchAmbossToken(context.Background())
-    if err == nil && token != "" && pubkey != "" {
-      seed, tags := e.fetchAmbossSeed(pubkey, token)
-      if seed > 0 {
-        return seed, tags
+    if err != nil {
+      tags = append(tags, "seed:amboss-error")
+    } else if token == "" {
+      tags = append(tags, "seed:amboss-missing")
+    } else if pubkey != "" {
+      seed, seedTags, err := e.fetchAmbossSeed(pubkey, token)
+      if err != nil {
+        tags = append(tags, "seed:amboss-error")
+      } else if seed > 0 {
+        return seed, append(tags, seedTags...)
+      } else {
+        tags = append(tags, "seed:amboss-empty")
       }
     }
   }
 
   if st.LastOutrate > 0 && !st.LastOutrateTs.IsZero() && e.now.Sub(st.LastOutrateTs) <= 21*24*time.Hour {
-    return float64(st.LastOutrate), []string{"seed:outrate"}
+    return float64(st.LastOutrate), append(tags, "seed:outrate")
   }
   if st.LastSeed > 0 {
-    return float64(st.LastSeed), []string{"seed:mem"}
+    return float64(st.LastSeed), append(tags, "seed:mem")
   }
-  return 200.0, []string{"seed:default"}
+  return 200.0, append(tags, "seed:default")
 }
 
 func (e *autofeeEngine) fetchAmbossToken(ctx context.Context) (string, error) {
@@ -1448,10 +1539,13 @@ type ambossSeriesResp struct {
   } `json:"data"`
 }
 
-func (e *autofeeEngine) fetchAmbossSeed(pubkey string, token string) (float64, []string) {
-  vals := fetchAmbossSeries(pubkey, token, e.cfg.LookbackDays)
+func (e *autofeeEngine) fetchAmbossSeed(pubkey string, token string) (float64, []string, error) {
+  vals, err := fetchAmbossSeries(pubkey, token, e.cfg.LookbackDays)
+  if err != nil {
+    return 0, nil, err
+  }
   if len(vals) == 0 {
-    return 0, nil
+    return 0, nil, nil
   }
   p65 := percentile(vals, 0.65)
   p95 := percentile(vals, 0.95)
@@ -1466,12 +1560,12 @@ func (e *autofeeEngine) fetchAmbossSeed(pubkey string, token string) (float64, [
     tags = append(tags, "seed:absmax")
   }
   tags = append(tags, "seed:amboss")
-  return seed, tags
+  return seed, tags, nil
 }
 
-func fetchAmbossSeries(pubkey string, token string, lookbackDays int) []float64 {
+func fetchAmbossSeries(pubkey string, token string, lookbackDays int) ([]float64, error) {
   if pubkey == "" || token == "" {
-    return nil
+    return nil, nil
   }
   fromDate := time.Now().UTC().Add(-time.Duration(lookbackDays) * 24 * time.Hour).Format("2006-01-02")
   payload := map[string]any{
@@ -1491,22 +1585,22 @@ func fetchAmbossSeries(pubkey string, token string, lookbackDays int) []float64 
   body, _ := json.Marshal(payload)
   req, err := http.NewRequest("POST", "https://api.amboss.space/graphql", bytes.NewReader(body))
   if err != nil {
-    return nil
+    return nil, err
   }
   req.Header.Set("Content-Type", "application/json")
   req.Header.Set("Authorization", "Bearer "+token)
   client := &http.Client{Timeout: 20 * time.Second}
   resp, err := client.Do(req)
   if err != nil {
-    return nil
+    return nil, err
   }
   defer resp.Body.Close()
   if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-    return nil
+    return nil, fmt.Errorf("amboss status %d", resp.StatusCode)
   }
   var result ambossSeriesResp
   if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-    return nil
+    return nil, err
   }
   rows := result.Data.GetNodeMetrics.HistoricalSeries
   vals := make([]float64, 0, len(rows))
@@ -1518,7 +1612,7 @@ func fetchAmbossSeries(pubkey string, token string, lookbackDays int) []float64 
       vals = append(vals, v)
     }
   }
-  return vals
+  return vals, nil
 }
 func (e *autofeeEngine) applyDecision(ctx context.Context, ch lndclient.ChannelInfo, d *decision) error {
   if ch.ChannelPoint == "" {
@@ -1595,9 +1689,9 @@ on conflict (event_key) do nothing
 }
 
 func (e *autofeeEngine) logSummary(ctx context.Context, dryRun bool, reason, summary string) error {
-  action := "apply"
+  action := "summary"
   if dryRun {
-    action = "dry-run"
+    action = "summary-dry"
   }
   memo := fmt.Sprintf("autofee summary (%s): %s", reason, summary)
   evt := Notification{
