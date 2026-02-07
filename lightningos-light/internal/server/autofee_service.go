@@ -643,6 +643,9 @@ func (s *AutofeeService) Run(ctx context.Context, dryRun bool, reason string) er
   }
 
   engine := newAutofeeEngine(s, cfg)
+  if reason == "manual" {
+    engine.ignoreCooldown = true
+  }
   err = engine.Execute(ctx, dryRun, reason)
   if err != nil {
     s.setLastError(err)
@@ -668,6 +671,7 @@ type autofeeEngine struct {
   cfg AutofeeConfig
   profile autofeeProfile
   superSource superSourceThresholds
+  ignoreCooldown bool
   now time.Time
 }
 
@@ -884,6 +888,9 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     summary.seedAmboss, summary.seedAmbossMissing, summary.seedAmbossError, summary.seedAmbossEmpty, summary.seedOutrate, summary.seedMem, summary.seedDefault,
     summary.superSource, summary.inboundDiscount,
   )
+  if e.ignoreCooldown {
+    summaryText = summaryText + " cooldown_ignored=1"
+  }
   _ = e.logSummary(ctx, dryRun, reason, summaryText)
   return nil
 }
@@ -1402,7 +1409,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     apply = false
     tags = append(tags, "hold-small")
   }
-  if finalPpm != localPpm {
+  if finalPpm != localPpm && !e.ignoreCooldown {
     fwdsSince := fwdCount - st.BaselineFwd7d
     cooldownHours := float64(e.cfg.CooldownDownSec) / 3600.0
     if finalPpm > localPpm {
