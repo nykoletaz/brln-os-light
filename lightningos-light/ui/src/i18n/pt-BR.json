@@ -790,6 +790,7 @@
     "applyToOne": "Aplicar a um",
     "baseFeeMsats": "Base fee (msats)",
     "blocksToMaturity": "Blocos até maturidade: {{count}}",
+    "maturityEta": "Tempo estimado: {{time}}",
     "boostComplete": "Boost concluído. Conectados {{connected}}, pulados {{skipped}}, falharam {{failed}}.",
     "boostFailed": "Boost falhou.",
     "boostHint": "Este processo pode levar um tempo.",

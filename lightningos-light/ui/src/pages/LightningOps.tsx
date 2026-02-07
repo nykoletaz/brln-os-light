@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getLnChanHeal, getLnChannelFees, getLnChannels, getLnPeers, getMempoolFees, openChannel, updateAmbossHealth, updateChannelFees, updateLnChanHeal, updateLnChannelStatus } from '../api'
+import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnPeers, getMempoolFees, openChannel, updateAmbossHealth, updateChannelFees, updateLnChanHeal, updateLnChannelStatus } from '../api'
 
 type Channel = {
   channel_point: string
@@ -71,6 +71,15 @@ type ChanHealStatus = {
   last_updated?: number
 }
 
+type BitcoinLocalCadenceBucket = {
+  count: number
+}
+
+type BitcoinLocalStatus = {
+  block_cadence_window_sec?: number
+  block_cadence?: BitcoinLocalCadenceBucket[]
+}
+
 export default function LightningOps() {
   const { t } = useTranslation()
   const [channels, setChannels] = useState<Channel[]>([])
@@ -103,6 +112,7 @@ export default function LightningOps() {
   const [chanHealStatus, setChanHealStatus] = useState('')
   const [chanHealBusy, setChanHealBusy] = useState(false)
   const [chanHealInterval, setChanHealInterval] = useState('300')
+  const [bitcoinLocal, setBitcoinLocal] = useState<BitcoinLocalStatus | null>(null)
 
   const [chanStatusBusy, setChanStatusBusy] = useState<string | null>(null)
   const [chanStatusMessage, setChanStatusMessage] = useState('')
@@ -164,6 +174,32 @@ export default function LightningOps() {
     return date.toLocaleString()
   }
 
+  const blockCadenceAvg = useMemo(() => {
+    const buckets = bitcoinLocal?.block_cadence || []
+    if (!buckets.length) return 0
+    const windowSec = bitcoinLocal?.block_cadence_window_sec || 600
+    const cadenceHours = (buckets.length * windowSec) / 3600
+    if (cadenceHours <= 0) return 0
+    const total = buckets.reduce((sum, bucket) => sum + (bucket?.count || 0), 0)
+    return cadenceHours > 0 ? total / cadenceHours : 0
+  }, [bitcoinLocal])
+
+  const estimateMaturitySeconds = (blocks?: number) => {
+    if (typeof blocks !== 'number') return null
+    const secondsPerBlock = blockCadenceAvg > 0 ? 3600 / blockCadenceAvg : 600
+    return Math.max(0, Math.round(blocks * secondsPerBlock))
+  }
+
+  const formatMaturityDuration = (totalSeconds?: number | null) => {
+    if (totalSeconds === null || totalSeconds === undefined) return ''
+    const seconds = Math.max(0, Math.floor(totalSeconds))
+    const days = Math.floor(seconds / 86400)
+    const hours = Math.floor((seconds % 86400) / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
+    const remSeconds = seconds % 60
+    return `${days}d ${hours}h ${minutes}m ${remSeconds}s`
+  }
+
   const isLocalChanDisabled = (flags?: string) => {
     if (!flags) return false
     const normalized = flags.toLowerCase()
@@ -217,11 +253,12 @@ export default function LightningOps() {
     setPeerListStatus(t('lightningOps.loadingPeers'))
     setAmbossStatus(t('lightningOps.ambossHealthLoading'))
     setChanHealStatus(t('lightningOps.chanHealLoading'))
-    const [channelsResult, peersResult, ambossResult, chanHealResult] = await Promise.allSettled([
+    const [channelsResult, peersResult, ambossResult, chanHealResult, bitcoinLocalResult] = await Promise.allSettled([
       getLnChannels(),
       getLnPeers(),
       getAmbossHealth(),
-      getLnChanHeal()
+      getLnChanHeal(),
+      getBitcoinLocalStatus()
     ])
     if (channelsResult.status === 'fulfilled') {
       const res = channelsResult.value
@@ -262,6 +299,9 @@ export default function LightningOps() {
     } else {
       const message = (chanHealResult.reason as any)?.message || t('lightningOps.chanHealStatusUnavailable')
       setChanHealStatus(message)
+    }
+    if (bitcoinLocalResult.status === 'fulfilled') {
+      setBitcoinLocal(bitcoinLocalResult.value as BitcoinLocalStatus)
     }
   }
 
@@ -774,6 +814,7 @@ export default function LightningOps() {
                   <div className="mt-3 space-y-3">
                     {pendingClose.map((ch) => {
                       const pointLink = mempoolLink(ch.channel_point)
+                      const maturitySeconds = estimateMaturitySeconds(ch.blocks_til_maturity)
                       return (
                         <div key={ch.channel_point} className="rounded-xl border border-white/10 bg-ink/70 p-3">
                           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -812,7 +853,14 @@ export default function LightningOps() {
                           <div className="mt-2 grid gap-2 lg:grid-cols-2 text-[11px] text-fog/60">
                             <div>{t('lightningOps.capacityLabel', { value: ch.capacity_sat })}</div>
                             {typeof ch.blocks_til_maturity === 'number' && (
-                              <div>{t('lightningOps.blocksToMaturity', { count: ch.blocks_til_maturity })}</div>
+                              <div className="space-y-1">
+                                <div>{t('lightningOps.blocksToMaturity', { count: ch.blocks_til_maturity })}</div>
+                                {maturitySeconds !== null && (
+                                  <div className="text-fog/50">
+                                    {t('lightningOps.maturityEta', { time: formatMaturityDuration(maturitySeconds) })}
+                                  </div>
+                                )}
+                              </div>
                             )}
                           </div>
                           {ch.closing_txid && (

@@ -790,6 +790,7 @@
     "applyToOne": "Apply to one",
     "baseFeeMsats": "Base fee (msats)",
     "blocksToMaturity": "Blocks to maturity: {{count}}",
+    "maturityEta": "ETA: {{time}}",
     "boostComplete": "Boost complete. Connected {{connected}}, skipped {{skipped}}, failed {{failed}}.",
     "boostFailed": "Boost failed.",
     "boostHint": "This process can take a while.",
