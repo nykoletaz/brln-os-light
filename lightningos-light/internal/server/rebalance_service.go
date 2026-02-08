@@ -1308,7 +1308,6 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       if !success {
         continue
       }
-      sourceSucceeded = true
       routeCap := int64(0)
       if applySuccess(probeAmount, routeMax, &routeCap, &sourceRemaining) {
         return
