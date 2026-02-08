@@ -217,7 +217,7 @@ func (s *Server) handleRebalanceHistory(w http.ResponseWriter, r *http.Request) 
     writeError(w, http.StatusServiceUnavailable, "rebalance unavailable")
     return
   }
-  limit := 50
+  limit := 0
   if raw := r.URL.Query().Get("limit"); raw != "" {
     if parsed, err := strconv.Atoi(raw); err == nil {
       limit = parsed

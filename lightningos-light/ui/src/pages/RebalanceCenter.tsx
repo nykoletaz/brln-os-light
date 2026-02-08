@@ -235,7 +235,7 @@ export default function RebalanceCenter() {
           getRebalanceOverview(),
           getRebalanceChannels(),
           getRebalanceQueue(),
-          getRebalanceHistory(200)
+          getRebalanceHistory()
         ])
         const nextConfig = cfg as RebalanceConfig
         const normalizedConfig = {

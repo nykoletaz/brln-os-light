@@ -15,6 +15,7 @@ import (
   "lightningos-light/internal/lndclient"
   "lightningos-light/lnrpc"
 
+  "github.com/jackc/pgx/v5"
   "github.com/jackc/pgx/v5/pgtype"
   "github.com/jackc/pgx/v5/pgxpool"
 )
@@ -2222,14 +2223,19 @@ func (s *RebalanceService) History(ctx context.Context, limit int) ([]RebalanceJ
   if limit <= 0 {
     limit = 50
   }
-  rows, err := s.db.Query(ctx, `
+  baseQuery := `
 select id, created_at, completed_at, source, status, reason, target_channel_id,
   target_channel_point, target_outbound_pct, target_amount_sat
 from rebalance_jobs
 where status in ('succeeded','failed','cancelled','partial')
-  and created_at >= now() - interval '1 day'
-order by created_at desc
-limit $1`, limit)
+  and completed_at >= now() - interval '1 day'
+order by created_at desc`
+  var rows pgx.Rows
+  if limit > 0 {
+    rows, err = s.db.Query(ctx, baseQuery+"\nlimit $1", limit)
+  } else {
+    rows, err = s.db.Query(ctx, baseQuery)
+  }
   if err != nil {
     return jobs, attempts, err
   }
@@ -2256,20 +2262,24 @@ limit $1`, limit)
     jobs = append(jobs, job)
   }
 
-  attemptRows, err := s.db.Query(ctx, `
+  attemptBase := `
 with recent as (
   select id from rebalance_jobs
   where status in ('succeeded','failed','cancelled','partial')
-    and created_at >= now() - interval '1 day'
+    and completed_at >= now() - interval '1 day'
   order by created_at desc
-  limit $1
 )
 select id, job_id, attempt_index, source_channel_id, amount_sat, fee_limit_ppm,
   fee_paid_sat, status, payment_hash, fail_reason, started_at, finished_at
 from rebalance_attempts
 where job_id in (select id from recent)
-order by started_at desc
-`, limit)
+order by started_at desc`
+  var attemptRows pgx.Rows
+  if limit > 0 {
+    attemptRows, err = s.db.Query(ctx, attemptBase+"\nlimit $1", limit)
+  } else {
+    attemptRows, err = s.db.Query(ctx, attemptBase)
+  }
   if err != nil {
     return jobs, attempts, err
   }
