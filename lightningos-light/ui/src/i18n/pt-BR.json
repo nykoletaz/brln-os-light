@@ -1045,14 +1045,15 @@
         "lastScan": "Última varredura: {{value}}",
         "lastScanDisabled": "Auto desativado",
         "budgetLast24h": "Baseado na receita das últimas 24h",
-        "scanStatus": {
-          "scanned": "Varredura concluída",
-          "queued": "Rebalances enfileirados",
-          "no_sources": "Sem fontes elegíveis",
-          "no_candidates": "Sem candidatos elegíveis",
-          "budget_exhausted": "Orçamento esgotado",
-          "budget_insufficient": "Orçamento insuficiente"
-        },
+      "scanStatus": {
+        "scanned": "Varredura concluída",
+        "queued": "Rebalances enfileirados",
+        "no_sources": "Sem fontes elegíveis",
+        "no_candidates": "Sem candidatos elegíveis",
+        "profit_guardrail": "Nenhum alvo passou pelo guardrail de lucro",
+        "budget_exhausted": "Orçamento esgotado",
+        "budget_insufficient": "Orçamento insuficiente"
+      },
         "budgetPaused": {
           "budget_exhausted": "Auto pausado: orçamento diário esgotado.",
           "budget_insufficient": "Auto pausado: orçamento baixo para o alvo."
@@ -1061,8 +1062,10 @@
         "roi": "ROI 7d: {{value}}",
         "dailyBudget": "Orçamento diário",
         "dailySpent": "Gasto: {{value}}",
-        "dailySpentAuto": "Gasto auto: {{value}}",
-        "dailySpentManual": "Gasto manual: {{value}}",
+      "dailySpentAuto": "Gasto auto: {{value}}",
+      "dailySpentManual": "Gasto manual: {{value}}",
+      "topScore": "Score econômico (topo): {{value}}",
+      "profitSkipped": "Pulados pelo guardrail de lucro: {{count}}",
       "autoMode": "Modo automático",
       "scanInterval": "Varredura: {{value}}s"
     },

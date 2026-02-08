@@ -43,6 +43,8 @@ type RebalanceOverview = {
   auto_enabled: boolean
   last_scan_at?: string
   last_scan_status?: string
+  last_scan_top_score_sat?: number
+  last_scan_profit_skipped?: number
   eligible_sources?: number
   targets_needing?: number
   daily_budget_sat: number
@@ -505,6 +507,16 @@ export default function RebalanceCenter() {
               {overview.auto_enabled && overview.last_scan_status && (
                 <p className="text-xs text-fog/50">
                   {t(`rebalanceCenter.overview.scanStatus.${overview.last_scan_status}`)}
+                </p>
+              )}
+              {overview.auto_enabled && typeof overview.last_scan_top_score_sat === 'number' && overview.last_scan_top_score_sat > 0 && (
+                <p className="text-xs text-fog/50">
+                  {t('rebalanceCenter.overview.topScore', { value: formatSats(overview.last_scan_top_score_sat) })}
+                </p>
+              )}
+              {overview.auto_enabled && (overview.last_scan_profit_skipped ?? 0) > 0 && (
+                <p className="text-xs text-amber-200">
+                  {t('rebalanceCenter.overview.profitSkipped', { count: overview.last_scan_profit_skipped })}
                 </p>
               )}
             </div>

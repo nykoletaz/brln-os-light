@@ -1045,14 +1045,15 @@
         "lastScan": "Last scan: {{value}}",
         "lastScanDisabled": "Auto disabled",
         "budgetLast24h": "Based on last 24h revenue",
-        "scanStatus": {
-          "scanned": "Scan complete",
-          "queued": "Rebalances queued",
-          "no_sources": "No eligible sources",
-          "no_candidates": "No eligible targets",
-          "budget_exhausted": "Budget exhausted",
-          "budget_insufficient": "Budget insufficient"
-        },
+      "scanStatus": {
+        "scanned": "Scan complete",
+        "queued": "Rebalances queued",
+        "no_sources": "No eligible sources",
+        "no_candidates": "No eligible targets",
+        "profit_guardrail": "No targets passed profit guardrail",
+        "budget_exhausted": "Budget exhausted",
+        "budget_insufficient": "Budget insufficient"
+      },
         "budgetPaused": {
           "budget_exhausted": "Auto paused: daily budget exhausted.",
           "budget_insufficient": "Auto paused: budget too low for target."
@@ -1061,8 +1062,10 @@
         "roi": "ROI 7d: {{value}}",
         "dailyBudget": "Daily budget",
         "dailySpent": "Spent: {{value}}",
-        "dailySpentAuto": "Auto spent: {{value}}",
-        "dailySpentManual": "Manual spent: {{value}}",
+      "dailySpentAuto": "Auto spent: {{value}}",
+      "dailySpentManual": "Manual spent: {{value}}",
+      "topScore": "Top economic score: {{value}}",
+      "profitSkipped": "Skipped by profit guardrail: {{count}}",
       "autoMode": "Auto mode",
       "scanInterval": "Scan: {{value}}s"
     },

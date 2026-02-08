@@ -185,12 +185,16 @@ Key behavior:
 - Auto rebalances respect the daily budget and only target channels explicitly marked as `Auto`.
 - Source channels are selected from those with enough local liquidity and not excluded; a channel filled by rebalance becomes **protected** and cannot be used as a source until payback rules release it.
 - Targets are chosen when outbound liquidity deficit exceeds the deadband and fee spread is positive; ROI estimate uses last 7 days of routing revenue vs estimated rebalance cost.
-- The overview shows **Last scan** in local time and a scan status (e.g., no sources, no candidates, budget exhausted).
+- Auto targets are ranked by **economic score** = (expected gain − estimated cost), so higher-margin channels are prioritized.
+- A **profit guardrail** prevents auto enqueues when expected gain is lower than estimated cost (when both are known). If ROI is indeterminate (cost = 0 with positive spread), auto is still allowed.
+- Source selection is weighted by pair history: recent successful pairs with lower fees are prioritized, while recent failures are de‑prioritized.
+- The overview shows **Last scan** in local time and a scan status (e.g., no sources, no candidates, budget exhausted) plus economic telemetry (top score, profit guardrail skips).
 
 Channel Workbench:
 - Set per-channel target outbound percentage.
 - Toggle `Auto` to allow auto mode to rebalance that channel.
 - Toggle `Exclude source` to block a channel from ever being used as a source.
+- Sort toggle: **Economic** (score-based) or **Emptiest** (lowest local % first).
 
 Color coding (channel rows):
 - Green background = eligible source (can fund rebalances).

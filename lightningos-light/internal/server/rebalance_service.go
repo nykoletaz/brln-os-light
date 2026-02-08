@@ -65,6 +65,8 @@ type RebalanceOverview struct {
   AutoEnabled bool `json:"auto_enabled"`
   LastScanAt string `json:"last_scan_at,omitempty"`
   LastScanStatus string `json:"last_scan_status,omitempty"`
+  LastScanTopScoreSat int64 `json:"last_scan_top_score_sat"`
+  LastScanProfitSkipped int `json:"last_scan_profit_skipped"`
   DailyBudgetSat int64 `json:"daily_budget_sat"`
   DailySpentSat int64 `json:"daily_spent_sat"`
   DailySpentAutoSat int64 `json:"daily_spent_auto_sat"`
@@ -181,6 +183,8 @@ type RebalanceService struct {
   cfgLoaded bool
   lastScan time.Time
   lastScanStatus string
+  lastScanTopScoreSat int64
+  lastScanProfitSkipped int
   criticalMissCount int
   sem chan struct{}
   channelLocks map[uint64]bool
@@ -417,10 +421,14 @@ func (s *RebalanceService) runAutoScan() {
   }
   scanAt := time.Now()
   scanStatus := "scanned"
+  profitSkipped := 0
+  topScore := int64(0)
   defer func() {
     s.mu.Lock()
     s.lastScan = scanAt
     s.lastScanStatus = scanStatus
+    s.lastScanTopScoreSat = topScore
+    s.lastScanProfitSkipped = profitSkipped
     s.mu.Unlock()
   }()
 
@@ -433,6 +441,8 @@ func (s *RebalanceService) runAutoScan() {
   candidates := []rebalanceTarget{}
   eligibleSources := 0
   totalAvailable := int64(0)
+  roiSkipped := 0
+  topScoreSet := false
   for _, ch := range channels {
     setting := settings[ch.ChannelID]
     targetPct := setting.TargetOutboundPct
@@ -451,15 +461,26 @@ func (s *RebalanceService) runAutoScan() {
       estimatedCost := estimateMaxCost(targetAmount, snapshot.OutgoingFeePpm, cfg.EconRatio, snapshot.PeerFeeRatePpm)
       expectedGain := estimateTargetGain(targetAmount, snapshot.Revenue7dSat, snapshot.LocalBalanceSat, snapshot.CapacitySat)
       expectedROI, roiValid := estimateTargetROI(expectedGain, estimatedCost, targetAmount, snapshot.OutgoingFeePpm, snapshot.PeerFeeRatePpm)
-      if cfg.ROIMin <= 0 || !roiValid || expectedROI >= cfg.ROIMin {
-        candidates = append(candidates, rebalanceTarget{
-          Channel: snapshot,
-          ExpectedGainSat: expectedGain,
-          EstimatedCostSat: estimatedCost,
-          ExpectedROI: expectedROI,
-          ExpectedROIValid: roiValid,
-          Score: expectedGain - estimatedCost,
-        })
+      if cfg.ROIMin > 0 && roiValid && expectedROI < cfg.ROIMin {
+        roiSkipped++
+        continue
+      }
+      if expectedGain > 0 && estimatedCost > 0 && expectedGain < estimatedCost {
+        profitSkipped++
+        continue
+      }
+      score := expectedGain - estimatedCost
+      candidates = append(candidates, rebalanceTarget{
+        Channel: snapshot,
+        ExpectedGainSat: expectedGain,
+        EstimatedCostSat: estimatedCost,
+        ExpectedROI: expectedROI,
+        ExpectedROIValid: roiValid,
+        Score: score,
+      })
+      if !topScoreSet || score > topScore {
+        topScore = score
+        topScoreSet = true
       }
     }
   }
@@ -478,7 +499,14 @@ func (s *RebalanceService) runAutoScan() {
     s.mu.Lock()
     s.criticalMissCount++
     s.mu.Unlock()
-    scanStatus = "no_candidates"
+    if profitSkipped > 0 {
+      scanStatus = "profit_guardrail"
+      if s.logger != nil {
+        s.logger.Printf("rebalance scan: profit guardrail skipped all targets (skipped=%d, roi_skipped=%d)", profitSkipped, roiSkipped)
+      }
+    } else {
+      scanStatus = "no_candidates"
+    }
     return
   }
 
@@ -550,6 +578,10 @@ func (s *RebalanceService) runAutoScan() {
     scanStatus = "queued"
   } else if remaining > 0 {
     scanStatus = "budget_insufficient"
+  }
+
+  if s.logger != nil {
+    s.logger.Printf("rebalance scan: candidates=%d profit_skipped=%d roi_skipped=%d top_score=%d sats", len(candidates), profitSkipped, roiSkipped, topScore)
   }
 }
 
@@ -723,6 +755,50 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
   pairStats := s.loadPairStatsForTarget(ctx, targetChannelID)
 
   sort.Slice(sources, func(i, j int) bool {
+    rank := func(ch RebalanceChannel) (bool, bool, int64, int64, time.Duration) {
+      stat, ok := pairStats[ch.ChannelID]
+      if !ok {
+        return false, false, 0, 0, 0
+      }
+      hasRecentSuccess := false
+      if !stat.LastSuccessAt.IsZero() && time.Since(stat.LastSuccessAt) <= pairSuccessTTL {
+        if stat.LastFailAt.IsZero() || stat.LastSuccessAt.After(stat.LastFailAt) {
+          hasRecentSuccess = true
+        }
+      }
+      hasRecentFail := false
+      if !stat.LastFailAt.IsZero() && time.Since(stat.LastFailAt) <= pairFailTTL {
+        if stat.LastSuccessAt.IsZero() || stat.LastFailAt.After(stat.LastSuccessAt) {
+          hasRecentFail = true
+        }
+      }
+      age := time.Duration(0)
+      if !stat.LastSuccessAt.IsZero() {
+        age = time.Since(stat.LastSuccessAt)
+      }
+      return hasRecentSuccess, hasRecentFail, stat.SuccessFeePpm, stat.SuccessAmountSat, age
+    }
+
+    iSuccess, iFail, iFee, iAmt, iAge := rank(sources[i])
+    jSuccess, jFail, jFee, jAmt, jAge := rank(sources[j])
+
+    if iSuccess != jSuccess {
+      return iSuccess
+    }
+    if iFail != jFail {
+      return !iFail
+    }
+    if iSuccess && jSuccess {
+      if iFee != jFee {
+        return iFee < jFee
+      }
+      if iAge != jAge {
+        return iAge < jAge
+      }
+      if iAmt != jAmt {
+        return iAmt > jAmt
+      }
+    }
     return sources[i].MaxSourceSat > sources[j].MaxSourceSat
   })
 
@@ -2448,6 +2524,8 @@ where report_date >= current_date - interval '6 days'
   s.mu.Lock()
   lastScan := s.lastScan
   lastScanStatus := s.lastScanStatus
+  lastScanTopScore := s.lastScanTopScoreSat
+  lastScanProfitSkipped := s.lastScanProfitSkipped
   s.mu.Unlock()
 
   overview := RebalanceOverview{
@@ -2460,6 +2538,8 @@ where report_date >= current_date - interval '6 days'
     Effectiveness7d: effectiveness,
     ROI7d: roi,
     LastScanStatus: lastScanStatus,
+    LastScanTopScoreSat: lastScanTopScore,
+    LastScanProfitSkipped: lastScanProfitSkipped,
     EligibleSources: eligibleSources,
     TargetsNeeding: targetsNeeding,
   }
