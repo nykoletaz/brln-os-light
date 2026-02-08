@@ -2668,7 +2668,7 @@ select id, created_at, completed_at, source, status, reason, target_channel_id,
   target_channel_point, target_outbound_pct, target_amount_sat
 from rebalance_jobs
 where status in ('running','queued')
-   or completed_at >= now() - ($1 || ' seconds')::interval
+   or completed_at >= now() - ($1::int * interval '1 second')
 order by created_at desc
 `, queueLingerSeconds)
   if err != nil {
@@ -2705,7 +2705,7 @@ where job_id in (
   select id
   from rebalance_jobs
   where status in ('running','queued')
-     or completed_at >= now() - ($1 || ' seconds')::interval
+     or completed_at >= now() - ($1::int * interval '1 second')
 )
 order by started_at desc
 `, queueLingerSeconds)
