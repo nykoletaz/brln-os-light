@@ -1290,7 +1290,6 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       continue
     }
 
-    sourceSucceeded := false
     sourceTimedOut := false
     for step := 1; step <= feeSteps; step++ {
       feePpm := calcFeeStepPpm(maxFeePpm, feeSteps, step)
