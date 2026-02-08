@@ -131,6 +131,13 @@ type autofeeProfile struct {
   CooldownUpSec int
   CooldownDownSec int
   DiscoveryStepCapDown float64
+  SeedGuardMaxJump float64
+  OutratePegGraceHours int
+  ProfitDownMarginMin int
+  ProfitDownFwdsMin int
+  ProfitDownExtraHours int
+  RevfloorBaselineThresh int
+  RevfloorMinAbs int
 }
 
 type superSourceThresholds struct {
@@ -153,6 +160,13 @@ var autofeeProfiles = map[string]autofeeProfile{
     CooldownUpSec: 6 * 3600,
     CooldownDownSec: 8 * 3600,
     DiscoveryStepCapDown: 0.10,
+    SeedGuardMaxJump: 0.30,
+    OutratePegGraceHours: 24,
+    ProfitDownMarginMin: 20,
+    ProfitDownFwdsMin: 10,
+    ProfitDownExtraHours: 4,
+    RevfloorBaselineThresh: 80,
+    RevfloorMinAbs: 160,
   },
   "moderate": {
     Name: "moderate",
@@ -164,6 +178,13 @@ var autofeeProfiles = map[string]autofeeProfile{
     CooldownUpSec: 3 * 3600,
     CooldownDownSec: 4 * 3600,
     DiscoveryStepCapDown: 0.15,
+    SeedGuardMaxJump: 0.50,
+    OutratePegGraceHours: 16,
+    ProfitDownMarginMin: 10,
+    ProfitDownFwdsMin: 8,
+    ProfitDownExtraHours: 2,
+    RevfloorBaselineThresh: 60,
+    RevfloorMinAbs: 140,
   },
   "aggressive": {
     Name: "aggressive",
@@ -175,8 +196,20 @@ var autofeeProfiles = map[string]autofeeProfile{
     CooldownUpSec: 1 * 3600,
     CooldownDownSec: 2 * 3600,
     DiscoveryStepCapDown: 0.20,
+    SeedGuardMaxJump: 0.70,
+    OutratePegGraceHours: 8,
+    ProfitDownMarginMin: 5,
+    ProfitDownFwdsMin: 5,
+    ProfitDownExtraHours: 1,
+    RevfloorBaselineThresh: 40,
+    RevfloorMinAbs: 120,
   },
 }
+
+const (
+  outratePegHeadroom = 1.05
+  outratePegSeedMult = 1.10
+)
 
 var superSourceThresholdsByProfile = map[string]superSourceThresholds{
   "conservative": {
@@ -1741,11 +1774,33 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   floor := int(math.Ceil(float64(baseCostPpm) * 1.10))
   floorSrc := "rebal"
   if outPpm7d > 0 && fwdCount >= 4 {
-    peg := int(math.Ceil(float64(outPpm7d) * 1.05))
-    if peg > floor {
+    peg := int(math.Ceil(float64(outPpm7d) * outratePegHeadroom))
+    withinGrace := true
+    if !st.LastTs.IsZero() && e.profile.OutratePegGraceHours > 0 {
+      hoursSince := e.now.Sub(st.LastTs).Hours()
+      withinGrace = hoursSince < float64(e.profile.OutratePegGraceHours)
+    }
+    demandPeg := seed > 0 && float64(outPpm7d) >= seed*outratePegSeedMult
+    if peg > floor && (withinGrace || demandPeg) {
       floor = peg
       floorSrc = "peg"
       tags = append(tags, "peg")
+      if withinGrace {
+        tags = append(tags, "peg-grace")
+      }
+      if demandPeg {
+        tags = append(tags, "peg-demand")
+      }
+    }
+  }
+
+  if !superSourceActive && e.profile.RevfloorBaselineThresh > 0 && st.BaselineFwd7d >= e.profile.RevfloorBaselineThresh {
+    revFloor := int(math.Round(math.Max(float64(seed)*0.40, float64(e.profile.RevfloorMinAbs))))
+    revFloor = clampInt(revFloor, e.cfg.MinPpm, e.cfg.MaxPpm)
+    if revFloor > floor {
+      floor = revFloor
+      floorSrc = "revfloor"
+      tags = append(tags, "revfloor")
     }
   }
 
@@ -1783,7 +1838,24 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
       hoursSince := e.now.Sub(st.LastTs).Hours()
       if hoursSince < cooldownHours && fwdsSince < 2 {
         apply = false
+        if !containsTag(tags, "cooldown") {
+          tags = append(tags, "cooldown")
+        }
+      }
+    }
+  }
+
+  if finalPpm < localPpm && !e.ignoreCooldown && !st.LastTs.IsZero() &&
+    marginPpm7d >= e.profile.ProfitDownMarginMin && fwdCount >= e.profile.ProfitDownFwdsMin {
+    hoursSince := e.now.Sub(st.LastTs).Hours()
+    profitCooldown := float64(e.cfg.CooldownDownSec)/3600.0 + float64(e.profile.ProfitDownExtraHours)
+    if hoursSince < profitCooldown {
+      apply = false
+      if !containsTag(tags, "cooldown") {
         tags = append(tags, "cooldown")
+      }
+      if !containsTag(tags, "cooldown-profit") {
+        tags = append(tags, "cooldown-profit")
       }
     }
   }
@@ -1883,7 +1955,16 @@ func (e *autofeeEngine) seedForChannel(pubkey string, st *autofeeChannelState) (
       if err != nil {
         tags = append(tags, "seed:amboss-error")
       } else if seed > 0 {
-        return seed, append(tags, seedTags...)
+        tags = append(tags, seedTags...)
+        if st != nil && st.LastSeed > 0 && e.profile.SeedGuardMaxJump > 0 {
+          maxJump := 1.0 + e.profile.SeedGuardMaxJump
+          maxAllowed := float64(st.LastSeed) * maxJump
+          if seed > maxAllowed {
+            seed = maxAllowed
+            tags = append(tags, "seed:guard")
+          }
+        }
+        return seed, tags
       } else {
         tags = append(tags, "seed:amboss-empty")
       }
@@ -2322,10 +2403,18 @@ func formatAutofeeTags(d *decision) string {
       add("💎top-rev")
     case t == "neg-margin":
       add("⚠️neg-margin")
+    case t == "revfloor":
+      add("🧱revfloor")
     case t == "peg":
       add("📌peg")
+    case t == "peg-grace":
+      add("📌peg-grace")
+    case t == "peg-demand":
+      add("📌peg-demand")
     case t == "cooldown":
       add("⏳cooldown")
+    case t == "cooldown-profit":
+      add("⏳profit-hold")
     case t == "hold-small":
       add("🧊hold-small")
     case t == "same-ppm":
@@ -2350,6 +2439,8 @@ func formatAutofeeTags(d *decision) string {
       add("💾seed-mem")
     case strings.HasPrefix(t, "seed:default"):
       add("⚙️seed-default")
+    case strings.HasPrefix(t, "seed:guard"):
+      add("🛡️seed-guard")
     case strings.HasPrefix(t, "seed:p95cap"):
       add("🧢seed-p95")
     case strings.HasPrefix(t, "seed:absmax"):

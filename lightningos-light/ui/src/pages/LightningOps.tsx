@@ -399,10 +399,18 @@ export default function LightningOps() {
         add('💎top-rev')
       } else if (tag === 'neg-margin') {
         add('⚠️neg-margin')
+      } else if (tag === 'revfloor') {
+        add('🧱revfloor')
       } else if (tag === 'peg') {
         add('📌peg')
+      } else if (tag === 'peg-grace') {
+        add('📌peg-grace')
+      } else if (tag === 'peg-demand') {
+        add('📌peg-demand')
       } else if (tag === 'cooldown') {
         add('⏳cooldown')
+      } else if (tag === 'cooldown-profit') {
+        add('⏳profit-hold')
       } else if (tag === 'hold-small') {
         add('🧊hold-small')
       } else if (tag === 'same-ppm') {
@@ -427,6 +435,8 @@ export default function LightningOps() {
         add('💾seed-mem')
       } else if (tag.startsWith('seed:default')) {
         add('⚙️seed-default')
+      } else if (tag.startsWith('seed:guard')) {
+        add('🛡️seed-guard')
       } else if (tag.startsWith('seed:p95cap')) {
         add('🧢seed-p95')
       } else if (tag.startsWith('seed:absmax')) {
