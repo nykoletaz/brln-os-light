@@ -197,36 +197,51 @@ func (c *Client) QueryRoutes(ctx context.Context, destPubkey string, amtSat int6
 
   client := lnrpc.NewLightningClient(conn)
 
-  req := &lnrpc.QueryRoutesRequest{
-    PubKey: trimmedDest,
-    Amt: amtSat,
-    OutgoingChanId: outgoingChanID,
-    NumRoutes: numRoutes,
-  }
-  if feeLimitMsat > 0 {
-    req.FeeLimit = &lnrpc.FeeLimit{
-      Limit: &lnrpc.FeeLimit_FixedMsat{FixedMsat: feeLimitMsat},
+  routes := make([]*lnrpc.Route, 0, numRoutes)
+  ignoredEdges := make([]*lnrpc.EdgeLocator, 0)
+
+  for i := int32(0); i < numRoutes; i++ {
+    req := &lnrpc.QueryRoutesRequest{
+      PubKey: trimmedDest,
+      Amt: amtSat,
+      OutgoingChanId: outgoingChanID,
+      IgnoredEdges: ignoredEdges,
     }
-  }
-  if trimmedHop := strings.TrimSpace(lastHopPubkey); trimmedHop != "" {
-    hopBytes, err := hex.DecodeString(trimmedHop)
+    if feeLimitMsat > 0 {
+      req.FeeLimit = &lnrpc.FeeLimit{
+        Limit: &lnrpc.FeeLimit_FixedMsat{FixedMsat: feeLimitMsat},
+      }
+    }
+    if trimmedHop := strings.TrimSpace(lastHopPubkey); trimmedHop != "" {
+      hopBytes, err := hex.DecodeString(trimmedHop)
+      if err != nil {
+        return nil, fmt.Errorf("invalid last hop pubkey")
+      }
+      req.LastHopPubkey = hopBytes
+    }
+
+    resp, err := client.QueryRoutes(ctx, req)
     if err != nil {
-      return nil, fmt.Errorf("invalid last hop pubkey")
+      if len(routes) > 0 {
+        break
+      }
+      return nil, err
     }
-    req.LastHopPubkey = hopBytes
+    if resp == nil || len(resp.Routes) == 0 {
+      break
+    }
+    route := resp.Routes[0]
+    routes = append(routes, route)
+    ignoredEdges = append(ignoredEdges, routeToEdgeLocators(route)...)
   }
 
-  resp, err := client.QueryRoutes(ctx, req)
-  if err != nil {
-    return nil, err
-  }
-  if resp == nil || len(resp.Routes) == 0 {
+  if len(routes) == 0 {
     return nil, errors.New("no route")
   }
-  return resp.Routes, nil
+  return routes, nil
 }
 
-func (c *Client) SendToRoute(ctx context.Context, paymentHash string, route *lnrpc.Route) (*routerrpc.HTLCAttempt, error) {
+func (c *Client) SendToRoute(ctx context.Context, paymentHash string, route *lnrpc.Route) (*lnrpc.HTLCAttempt, error) {
   if route == nil {
     return nil, errors.New("route required")
   }
@@ -256,13 +271,33 @@ func (c *Client) SendToRoute(ctx context.Context, paymentHash string, route *lnr
   if resp == nil {
     return nil, errors.New("empty send response")
   }
-  if resp.Status != routerrpc.HTLCAttempt_SUCCEEDED {
+  if resp.Status != lnrpc.HTLCAttempt_SUCCEEDED {
     if resp.Failure != nil {
       return resp, fmt.Errorf("route failed: %s", resp.Failure.Code.String())
     }
     return resp, errors.New("route failed")
   }
   return resp, nil
+}
+
+func routeToEdgeLocators(route *lnrpc.Route) []*lnrpc.EdgeLocator {
+  if route == nil || len(route.Hops) == 0 {
+    return nil
+  }
+  edges := make([]*lnrpc.EdgeLocator, 0, len(route.Hops)*2)
+  for _, hop := range route.Hops {
+    if hop == nil {
+      continue
+    }
+    edges = append(edges, &lnrpc.EdgeLocator{
+      ChannelId: hop.ChanId,
+      DirectionReverse: false,
+    }, &lnrpc.EdgeLocator{
+      ChannelId: hop.ChanId,
+      DirectionReverse: true,
+    })
+  }
+  return edges
 }
 
 func (c *Client) SendPaymentWithConstraints(ctx context.Context, paymentRequest string, outgoingChanID uint64, lastHopPubkey string, feeLimitMsat int64, timeoutSec int32, maxParts uint32) (*lnrpc.Payment, error) {

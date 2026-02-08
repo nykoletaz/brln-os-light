@@ -864,10 +864,20 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     attemptTimeoutSec = 60
   }
 
+  finishOnTimeout := func() {
+    if anySuccess {
+      reason := fmt.Sprintf("timeout with %d sats remaining", remaining)
+      s.finishJob(jobID, "partial", reason)
+      s.broadcast(RebalanceEvent{Type: "job", JobID: jobID, Status: "partial", Message: reason})
+    } else {
+      s.finishJob(jobID, "failed", "timeout")
+    }
+  }
+
   attemptPayment := func(sourceID uint64, amountTry int64, feePpm int64, logRouteFailure bool) (bool, bool, int64) {
     if ctx.Err() != nil {
       if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-        s.finishJob(jobID, "failed", "timeout")
+        finishOnTimeout()
       } else {
         s.finishJob(jobID, "cancelled", "cancelled")
       }
@@ -894,7 +904,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       cancelAttempt()
       if ctx.Err() != nil {
         if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-          s.finishJob(jobID, "failed", "timeout")
+          finishOnTimeout()
         } else {
           s.finishJob(jobID, "cancelled", "cancelled")
         }
@@ -918,7 +928,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       cancelAttempt()
       if ctx.Err() != nil {
         if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-          s.finishJob(jobID, "failed", "timeout")
+          finishOnTimeout()
         } else {
           s.finishJob(jobID, "cancelled", "cancelled")
         }
@@ -979,7 +989,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     cancelAttempt()
     if ctx.Err() != nil {
       if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-        s.finishJob(jobID, "failed", "timeout")
+        finishOnTimeout()
       } else {
         s.finishJob(jobID, "cancelled", "cancelled")
       }
@@ -1136,7 +1146,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
   for _, source := range sources {
     if ctx.Err() != nil {
       if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-        s.finishJob(jobID, "failed", "timeout")
+        finishOnTimeout()
       } else {
         s.finishJob(jobID, "cancelled", "cancelled")
       }
@@ -1215,6 +1225,12 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     amountCandidates := buildAmountProbe(sendAmount, cfg.MinAmountSat, amountSteps)
     if len(amountCandidates) == 0 {
       continue
+    }
+    preferSmallFirst := cfg.MinAmountSat > 0 && sendAmount >= cfg.MinAmountSat*4
+    if preferSmallFirst && len(amountCandidates) > 1 {
+      for i, j := 0, len(amountCandidates)-1; i < j; i, j = i+1, j-1 {
+        amountCandidates[i], amountCandidates[j] = amountCandidates[j], amountCandidates[i]
+      }
     }
 
     sourceSucceeded := false
@@ -1781,6 +1797,9 @@ func buildAmountProbe(maxAmount int64, minAmount int64, steps int) []int64 {
       next = minAmount
     }
     current = next
+  }
+  if len(amounts) == 0 || amounts[len(amounts)-1] != minAmount {
+    amounts = append(amounts, minAmount)
   }
   return amounts
 }
@@ -2758,7 +2777,17 @@ func (s *RebalanceService) cleanupStaleJobs(ctx context.Context) {
   cutoff := time.Now().Add(-time.Duration(timeoutSec) * time.Second)
   _, _ = s.db.Exec(ctx, `
 update rebalance_jobs
-set status='failed', reason='timeout', completed_at=now()
+set status = case
+  when exists (select 1 from rebalance_attempts a where a.job_id=rebalance_jobs.id and a.status='succeeded')
+    then 'partial'
+  else 'failed'
+end,
+reason = case
+  when exists (select 1 from rebalance_attempts a where a.job_id=rebalance_jobs.id and a.status='succeeded')
+    then 'timeout (partial)'
+  else 'timeout'
+end,
+completed_at=now()
 where status in ('running','queued') and created_at < $1
 `, cutoff)
 }
