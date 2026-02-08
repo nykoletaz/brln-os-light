@@ -1167,7 +1167,10 @@
       "remaining": "Restante: {{value}}",
       "attempt": "Tentativa {{index}} - {{amount}} - fee cap {{fee}} ppm",
       "source": "Fonte: {{value}}",
-      "reason": "Motivo: {{value}}"
+      "reason": "Motivo: {{value}}",
+      "routeFound": "Rota: encontrada",
+      "routeNotFound": "Rota: não encontrada",
+      "routeFailed": "Rota: falhou"
     },
     "history": {
       "title": "Histórico recente",

@@ -27,7 +27,7 @@ const (
 )
 
 const (
-  pairFailTTL = 6 * time.Hour
+  pairFailTTL = 30 * time.Second
   pairSuccessTTL = 24 * time.Hour
 )
 
@@ -858,6 +858,8 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
 
   remaining := amount
   anySuccess := false
+  attemptedAny := false
+  skippedByCache := 0
   attemptIndex := 0
   adaptiveMaxAmount := int64(0)
   attemptTimeoutSec := cfg.AttemptTimeoutSec
@@ -876,6 +878,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
   }
 
   attemptPayment := func(sourceID uint64, amountTry int64, feePpm int64, logRouteFailure bool) (bool, bool, int64) {
+    attemptedAny = true
     if ctx.Err() != nil {
       if errors.Is(ctx.Err(), context.DeadlineExceeded) {
         finishOnTimeout()
@@ -1157,6 +1160,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     if jobSource == "auto" {
       if stat, ok := pairStats[source.ChannelID]; ok {
         if !stat.LastFailAt.IsZero() && time.Since(stat.LastFailAt) <= pairFailTTL && (stat.LastSuccessAt.IsZero() || stat.LastSuccessAt.Before(stat.LastFailAt)) {
+          skippedByCache++
           continue
         }
       }
@@ -1234,6 +1238,11 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     if len(amountCandidates) == 0 {
       continue
     }
+    if len(amountCandidates) > 1 {
+      for i, j := 0, len(amountCandidates)-1; i < j; i, j = i+1, j-1 {
+        amountCandidates[i], amountCandidates[j] = amountCandidates[j], amountCandidates[i]
+      }
+    }
 
     sourceSucceeded := false
     for step := 1; step <= feeSteps; step++ {
@@ -1277,6 +1286,10 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     return
   }
 
+  if !attemptedAny && skippedByCache > 0 {
+    s.finishJob(jobID, "failed", "all sources skipped (recent failures)")
+    return
+  }
   s.finishJob(jobID, "failed", "all sources failed")
 }
 

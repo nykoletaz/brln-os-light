@@ -1049,6 +1049,31 @@ export default function RebalanceCenter() {
                       amount: formatSats(attempt.amount_sat),
                       fee: attempt.fee_limit_ppm
                     })}
+                    {(() => {
+                      if (attempt.status === 'succeeded') {
+                        return (
+                          <div className="mt-1 text-xs text-emerald-200">
+                            {t('rebalanceCenter.queue.routeFound')}
+                          </div>
+                        )
+                      }
+                      const reason = attempt.fail_reason?.toLowerCase() || ''
+                      if (reason.includes('no route')) {
+                        return (
+                          <div className="mt-1 text-xs text-amber-200">
+                            {t('rebalanceCenter.queue.routeNotFound')}
+                          </div>
+                        )
+                      }
+                      if (reason.includes('route failed') || reason.includes('fee exceeds limit')) {
+                        return (
+                          <div className="mt-1 text-xs text-amber-200">
+                            {t('rebalanceCenter.queue.routeFailed')}
+                          </div>
+                        )
+                      }
+                      return null
+                    })()}
                     {attempt.source_peer_alias && (
                       <div className="mt-1 text-xs text-fog/50">
                         {t('rebalanceCenter.queue.source', { value: attempt.source_peer_alias })}

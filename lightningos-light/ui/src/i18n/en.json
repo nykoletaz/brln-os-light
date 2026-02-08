@@ -1167,7 +1167,10 @@
       "remaining": "Remaining: {{value}}",
       "attempt": "Attempt {{index}} · {{amount}} · fee cap {{fee}} ppm",
       "source": "Source: {{value}}",
-      "reason": "Reason: {{value}}"
+      "reason": "Reason: {{value}}",
+      "routeFound": "Route: found",
+      "routeNotFound": "Route: not found",
+      "routeFailed": "Route: failed"
     },
     "history": {
       "title": "Recent History",
