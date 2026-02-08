@@ -43,6 +43,7 @@ type RebalanceOverview = {
   auto_enabled: boolean
   last_scan_at?: string
   last_scan_status?: string
+  last_scan_detail?: string
   last_scan_top_score_sat?: number
   last_scan_profit_skipped?: number
   last_scan_queued?: number
@@ -509,6 +510,11 @@ export default function RebalanceCenter() {
               {overview.auto_enabled && overview.last_scan_status && (
                 <p className="text-xs text-fog/50">
                   {t(`rebalanceCenter.overview.scanStatus.${overview.last_scan_status}`)}
+                </p>
+              )}
+              {overview.auto_enabled && overview.last_scan_detail && (
+                <p className="text-xs text-amber-200">
+                  {t('rebalanceCenter.overview.scanDetail', { value: overview.last_scan_detail })}
                 </p>
               )}
               {overview.auto_enabled && (overview.last_scan_queued ?? 0) > 0 && (

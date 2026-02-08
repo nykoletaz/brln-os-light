@@ -1051,9 +1051,11 @@
         "no_sources": "Sem fontes elegíveis",
         "no_candidates": "Sem candidatos elegíveis",
         "profit_guardrail": "Nenhum alvo passou pelo guardrail de lucro",
+        "no_queue": "Nenhum rebalance enfileirado",
         "budget_exhausted": "Orçamento esgotado",
         "budget_insufficient": "Orçamento insuficiente"
       },
+        "scanDetail": "Diagnóstico: {{value}}",
         "budgetPaused": {
           "budget_exhausted": "Auto pausado: orçamento diário esgotado.",
           "budget_insufficient": "Auto pausado: orçamento baixo para o alvo."
