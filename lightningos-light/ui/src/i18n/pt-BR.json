@@ -1121,6 +1121,12 @@
     "channels": {
       "title": "Workbench de Canais",
       "count": "{{count}} canais",
+      "sortLabel": "Ordenar",
+      "sortEconomic": "Econômico",
+      "sortEmptiest": "Mais vazio",
+      "scoreLabel": "Score",
+      "scoreRoiNA": "n/a",
+      "scoreHint": "Score econômico: {{score}} (ganho {{gain}} · custo {{cost}} · ROI {{roi}})",
       "channel": "Canal",
       "balance": "Saldo",
       "fees": "Fees (out / peer rate)",

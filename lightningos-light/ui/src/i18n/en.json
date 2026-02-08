@@ -1118,10 +1118,16 @@
       "criticalRelease": "Percent of protected liquidity released per critical cycle.",
       "criticalCycles": "Number of consecutive critical scans before releasing."
     },
-      "channels": {
-        "title": "Channel Workbench",
-        "count": "{{count}} channels",
-        "channel": "Channel",
+    "channels": {
+      "title": "Channel Workbench",
+      "count": "{{count}} channels",
+      "sortLabel": "Sort",
+      "sortEconomic": "Economic",
+      "sortEmptiest": "Emptiest",
+      "scoreLabel": "Score",
+      "scoreRoiNA": "n/a",
+      "scoreHint": "Economic score: {{score}} (gain {{gain}} · cost {{cost}} · ROI {{roi}})",
+      "channel": "Channel",
         "balance": "Balance",
         "fees": "Fees (out / peer rate)",
       "feeOut": "Out {{value}} ppm",

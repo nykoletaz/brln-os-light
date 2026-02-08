@@ -145,6 +145,7 @@ export default function RebalanceCenter() {
   const [saving, setSaving] = useState(false)
   const [autoOpen, setAutoOpen] = useState(false)
   const [editTargets, setEditTargets] = useState<Record<number, string>>({})
+  const [channelSort, setChannelSort] = useState<'economic' | 'emptiest'>('economic')
 
   const formatSats = (value: number) => `${formatter.format(Math.round(value))} sats`
   const formatPct = (value: number) => `${pctFormatter.format(value)}%`
@@ -181,10 +182,55 @@ export default function RebalanceCenter() {
       critical_cycles: cfg.critical_cycles
     })
   }
-  const sortedChannels = useMemo(
-    () => channels.filter((ch) => ch.active).sort((a, b) => a.local_pct - b.local_pct),
-    [channels]
-  )
+  const calcMaxFeePpm = (outgoingFee: number, peerFee: number, econRatio: number) => {
+    const spread = outgoingFee - peerFee
+    if (spread <= 0) return 0
+    const scaled = Math.round(outgoingFee * econRatio)
+    if (scaled <= 0) return 0
+    return Math.min(scaled, spread)
+  }
+  const estimateMaxCost = (amountSat: number, outgoingFee: number, econRatio: number, peerFee: number) => {
+    const maxFee = calcMaxFeePpm(outgoingFee, peerFee, econRatio)
+    if (maxFee <= 0 || amountSat <= 0) return 0
+    return Math.floor((amountSat * maxFee) / 1_000_000)
+  }
+  const estimateTargetGain = (amountSat: number, revenue7d: number, localBalance: number, capacity: number) => {
+    if (amountSat <= 0 || revenue7d <= 0) return 0
+    let denom = localBalance > 0 ? localBalance : capacity
+    if (denom <= 0) return 0
+    if (amountSat > denom) denom = amountSat
+    return Math.round(revenue7d * (amountSat / denom))
+  }
+  const computeChannelScore = (ch: RebalanceChannel, econRatio: number) => {
+    const expectedGain = estimateTargetGain(ch.target_amount_sat, ch.revenue_7d_sat, ch.local_balance_sat, ch.capacity_sat)
+    const estimatedCost = estimateMaxCost(ch.target_amount_sat, ch.outgoing_fee_ppm, econRatio, ch.peer_fee_rate_ppm)
+    return {
+      score: expectedGain - estimatedCost,
+      expectedRoi: estimatedCost > 0 ? expectedGain / estimatedCost : -1,
+      expectedGain,
+      estimatedCost
+    }
+  }
+  const sortedChannels = useMemo(() => {
+    const active = channels.filter((ch) => ch.active)
+    if (channelSort === 'emptiest' || !config) {
+      return active.sort((a, b) => a.local_pct - b.local_pct)
+    }
+    return active.sort((a, b) => {
+      const scoreA = computeChannelScore(a, config.econ_ratio)
+      const scoreB = computeChannelScore(b, config.econ_ratio)
+      if (scoreA.score !== scoreB.score) {
+        return scoreB.score - scoreA.score
+      }
+      if (scoreA.expectedRoi !== scoreB.expectedRoi) {
+        return scoreB.expectedRoi - scoreA.expectedRoi
+      }
+      if (a.target_amount_sat !== b.target_amount_sat) {
+        return b.target_amount_sat - a.target_amount_sat
+      }
+      return a.local_pct - b.local_pct
+    })
+  }, [channels, config, channelSort])
   const buildAttemptTotals = (attempts: RebalanceAttempt[]) => {
     const totals = new Map<number, { amount: number; fee: number }>()
     attempts.forEach((attempt) => {
@@ -208,6 +254,17 @@ export default function RebalanceCenter() {
   useEffect(() => {
     setConfigDirty(configSignature(config) !== configSignature(serverConfig))
   }, [config, serverConfig])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const stored = window.localStorage.getItem('rebalance_center_channel_sort')
+    if (stored === 'economic' || stored === 'emptiest') {
+      setChannelSort(stored)
+    }
+  }, [])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('rebalance_center_channel_sort', channelSort)
+  }, [channelSort])
   const parseRemaining = (reason?: string) => {
     if (!reason) return null
     const match = reason.match(/remaining\s+(\d+)/i)
@@ -766,7 +823,26 @@ export default function RebalanceCenter() {
       <div className="section-card space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-semibold">{t('rebalanceCenter.channels.title')}</h3>
-          <span className="text-xs text-fog/60">{t('rebalanceCenter.channels.count', { count: channels.length })}</span>
+          <div className="flex flex-wrap items-center gap-4 text-xs text-fog/60">
+            <span>{t('rebalanceCenter.channels.count', { count: channels.length })}</span>
+            <div className="flex items-center gap-2">
+              <span>{t('rebalanceCenter.channels.sortLabel')}</span>
+              <div className="flex items-center rounded-full border border-white/10 bg-white/5 p-1">
+                <button
+                  className={`px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${channelSort === 'economic' ? 'rounded-full bg-emerald-500/20 text-emerald-100' : 'text-fog/60'}`}
+                  onClick={() => setChannelSort('economic')}
+                >
+                  {t('rebalanceCenter.channels.sortEconomic')}
+                </button>
+                <button
+                  className={`px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${channelSort === 'emptiest' ? 'rounded-full bg-sky-500/20 text-sky-100' : 'text-fog/60'}`}
+                  onClick={() => setChannelSort('emptiest')}
+                >
+                  {t('rebalanceCenter.channels.sortEmptiest')}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
         <div className="max-h-[520px] overflow-x-auto overflow-y-auto pr-1">
             <table className="w-full text-sm text-fog/70">
@@ -804,6 +880,16 @@ export default function RebalanceCenter() {
               {sortedChannels.map((ch) => {
                 const meetsRoi = !config || config.roi_min <= 0 || !ch.roi_estimate_valid || ch.roi_estimate >= config.roi_min
                 const isAutoTarget = ch.eligible_as_target && ch.auto_enabled && meetsRoi
+                const scoreMeta = config ? computeChannelScore(ch, config.econ_ratio) : null
+                const scoreTitle =
+                  scoreMeta
+                    ? t('rebalanceCenter.channels.scoreHint', {
+                        score: formatSats(scoreMeta.score),
+                        gain: formatSats(scoreMeta.expectedGain),
+                        cost: formatSats(scoreMeta.estimatedCost),
+                        roi: scoreMeta.estimatedCost > 0 ? formatRoi(scoreMeta.expectedRoi) : t('rebalanceCenter.channels.scoreRoiNA')
+                      })
+                    : undefined
                 const highlight = isAutoTarget
                   ? 'bg-rose-500/10'
                   : ch.eligible_as_target
@@ -812,10 +898,15 @@ export default function RebalanceCenter() {
                       ? 'bg-emerald-500/10'
                       : ''
                 return (
-                  <tr key={ch.channel_point || String(ch.channel_id)} className={`border-t border-white/5 ${highlight}`}>
-                    <td className="py-3">
+                  <tr key={ch.channel_point || String(ch.channel_id)} className={`border-t border-white/5 group ${highlight}`}>
+                    <td className="py-3" title={scoreTitle}>
                       <div className="text-fog">{ch.peer_alias || ch.remote_pubkey}</div>
                       <div className="text-xs text-fog/50">{ch.channel_point}</div>
+                      {scoreMeta && (
+                        <div className="text-xs text-fog/40 opacity-0 transition group-hover:opacity-100">
+                          {t('rebalanceCenter.channels.scoreLabel')}: {formatSats(scoreMeta.score)}
+                        </div>
+                      )}
                     </td>
                   <td className="py-3 pl-6">
                     <div>{formatPct(ch.local_pct)} / {formatPct(ch.remote_pct)}</div>
