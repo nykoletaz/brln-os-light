@@ -94,6 +94,8 @@ type AutofeeConfig = {
   explorer_enabled: boolean
   super_source_enabled: boolean
   super_source_base_fee_msat: number
+  revfloor_enabled: boolean
+  circuit_breaker_enabled: boolean
   min_ppm: number
   max_ppm: number
 }
@@ -216,6 +218,8 @@ export default function LightningOps() {
   const [autofeeExplorer, setAutofeeExplorer] = useState(true)
   const [autofeeSuperSource, setAutofeeSuperSource] = useState(false)
   const [autofeeSuperSourceBaseFee, setAutofeeSuperSourceBaseFee] = useState('1000')
+  const [autofeeRevfloor, setAutofeeRevfloor] = useState(true)
+  const [autofeeCircuitBreaker, setAutofeeCircuitBreaker] = useState(true)
   const [autofeeOpen, setAutofeeOpen] = useState(false)
   const [autofeeResultsOpen, setAutofeeResultsOpen] = useState(false)
   const [autofeeResults, setAutofeeResults] = useState<string[]>([])
@@ -391,6 +395,8 @@ export default function LightningOps() {
       if (!tag) return
       if (tag === 'discovery') {
         add('🧭discovery')
+      } else if (tag === 'discovery-hard') {
+        add('🧨harddrop')
       } else if (tag === 'explorer') {
         add('🧭explorer')
       } else if (tag.startsWith('surge')) {
@@ -399,6 +405,10 @@ export default function LightningOps() {
         add('💎top-rev')
       } else if (tag === 'neg-margin') {
         add('⚠️neg-margin')
+      } else if (tag === 'outrate-floor') {
+        add('📊outrate-floor')
+      } else if (tag === 'circuit-breaker') {
+        add('🧯cb')
       } else if (tag === 'revfloor') {
         add('🧱revfloor')
       } else if (tag === 'peg') {
@@ -411,6 +421,8 @@ export default function LightningOps() {
         add('⏳cooldown')
       } else if (tag === 'cooldown-profit') {
         add('⏳profit-hold')
+      } else if (tag === 'cooldown-skip') {
+        add('🧭skip-cooldown')
       } else if (tag === 'hold-small') {
         add('🧊hold-small')
       } else if (tag === 'same-ppm') {
@@ -516,15 +528,11 @@ export default function LightningOps() {
   const formatAutofeeSectionLine = (category?: string) => {
     switch ((category || '').toLowerCase()) {
       case 'changed':
-        return '✅'
+        return `✅ ${t('lightningOps.autofeeResultsSectionChanged')}`
       case 'kept':
-        return '🫤'
+        return `🟰 ${t('lightningOps.autofeeResultsSectionNoChange')}`
       case 'skipped':
-        return '⏭️'
-      case 'explorer':
-        return '🧭'
-      case 'error':
-        return '❌'
+        return `🟰 ${t('lightningOps.autofeeResultsSectionNoChange')}`
       default:
         return ''
     }
@@ -730,6 +738,8 @@ export default function LightningOps() {
       setAutofeeExplorer(Boolean(cfg.explorer_enabled))
       setAutofeeSuperSource(Boolean(cfg.super_source_enabled))
       setAutofeeSuperSourceBaseFee(String(cfg.super_source_base_fee_msat ?? 1000))
+      setAutofeeRevfloor(cfg.revfloor_enabled !== false)
+      setAutofeeCircuitBreaker(cfg.circuit_breaker_enabled !== false)
       setAutofeeMessage('')
     } else {
       const message = (autofeeConfigResult.reason as any)?.message || t('lightningOps.autofeeConfigUnavailable')
@@ -1026,7 +1036,9 @@ export default function LightningOps() {
         discovery_enabled: autofeeDiscovery,
         explorer_enabled: autofeeExplorer,
         super_source_enabled: autofeeSuperSource,
-        super_source_base_fee_msat: superSourceBaseFee
+        super_source_base_fee_msat: superSourceBaseFee,
+        revfloor_enabled: autofeeRevfloor,
+        circuit_breaker_enabled: autofeeCircuitBreaker
       }
       if (autofeeAmbossToken.trim()) {
         payload.amboss_token = autofeeAmbossToken.trim()
@@ -1414,6 +1426,14 @@ export default function LightningOps() {
               <label className="flex items-center gap-2 text-sm text-fog/70">
                 <input type="checkbox" checked={autofeeExplorer} onChange={(e) => setAutofeeExplorer(e.target.checked)} />
                 {t('lightningOps.autofeeExplorer')}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-fog/70">
+                <input type="checkbox" checked={autofeeRevfloor} onChange={(e) => setAutofeeRevfloor(e.target.checked)} />
+                {t('lightningOps.autofeeRevfloor')}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-fog/70">
+                <input type="checkbox" checked={autofeeCircuitBreaker} onChange={(e) => setAutofeeCircuitBreaker(e.target.checked)} />
+                {t('lightningOps.autofeeCircuitBreaker')}
               </label>
               <label className="flex items-center gap-2 text-sm text-fog/70">
                 <input type="checkbox" checked={autofeeSuperSource} onChange={(e) => setAutofeeSuperSource(e.target.checked)} />

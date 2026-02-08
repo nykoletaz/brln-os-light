@@ -45,6 +45,8 @@ type AutofeeConfig struct {
   ExplorerEnabled bool `json:"explorer_enabled"`
   SuperSourceEnabled bool `json:"super_source_enabled"`
   SuperSourceBaseFeeMsat int `json:"super_source_base_fee_msat"`
+  RevfloorEnabled bool `json:"revfloor_enabled"`
+  CircuitBreakerEnabled bool `json:"circuit_breaker_enabled"`
   MinPpm int `json:"min_ppm"`
   MaxPpm int `json:"max_ppm"`
 }
@@ -63,6 +65,8 @@ type AutofeeConfigUpdate struct {
   ExplorerEnabled *bool `json:"explorer_enabled,omitempty"`
   SuperSourceEnabled *bool `json:"super_source_enabled,omitempty"`
   SuperSourceBaseFeeMsat *int `json:"super_source_base_fee_msat,omitempty"`
+  RevfloorEnabled *bool `json:"revfloor_enabled,omitempty"`
+  CircuitBreakerEnabled *bool `json:"circuit_breaker_enabled,omitempty"`
   MinPpm *int `json:"min_ppm,omitempty"`
   MaxPpm *int `json:"max_ppm,omitempty"`
 }
@@ -138,6 +142,16 @@ type autofeeProfile struct {
   ProfitDownExtraHours int
   RevfloorBaselineThresh int
   RevfloorMinAbs int
+  DiscHarddropDaysNoBase int
+  DiscHarddropCapFrac float64
+  DiscHarddropCushion int
+  DiscRequireExplorer bool
+  DiscAfterExplorerDays int
+  OutrateFloorFactorLow float64
+  ExplorerSkipCooldownDown bool
+  CircuitBreakerDropRatio float64
+  CircuitBreakerReduceStep float64
+  CircuitBreakerGraceDays int
 }
 
 type superSourceThresholds struct {
@@ -167,6 +181,16 @@ var autofeeProfiles = map[string]autofeeProfile{
     ProfitDownExtraHours: 4,
     RevfloorBaselineThresh: 80,
     RevfloorMinAbs: 160,
+    DiscHarddropDaysNoBase: 8,
+    DiscHarddropCapFrac: 0.10,
+    DiscHarddropCushion: 15,
+    DiscRequireExplorer: true,
+    DiscAfterExplorerDays: 14,
+    OutrateFloorFactorLow: 0.90,
+    ExplorerSkipCooldownDown: false,
+    CircuitBreakerDropRatio: 0.75,
+    CircuitBreakerReduceStep: 0.08,
+    CircuitBreakerGraceDays: 10,
   },
   "moderate": {
     Name: "moderate",
@@ -185,6 +209,16 @@ var autofeeProfiles = map[string]autofeeProfile{
     ProfitDownExtraHours: 2,
     RevfloorBaselineThresh: 60,
     RevfloorMinAbs: 140,
+    DiscHarddropDaysNoBase: 6,
+    DiscHarddropCapFrac: 0.20,
+    DiscHarddropCushion: 10,
+    DiscRequireExplorer: true,
+    DiscAfterExplorerDays: 10,
+    OutrateFloorFactorLow: 0.85,
+    ExplorerSkipCooldownDown: true,
+    CircuitBreakerDropRatio: 0.70,
+    CircuitBreakerReduceStep: 0.10,
+    CircuitBreakerGraceDays: 7,
   },
   "aggressive": {
     Name: "aggressive",
@@ -203,12 +237,26 @@ var autofeeProfiles = map[string]autofeeProfile{
     ProfitDownExtraHours: 1,
     RevfloorBaselineThresh: 40,
     RevfloorMinAbs: 120,
+    DiscHarddropDaysNoBase: 3,
+    DiscHarddropCapFrac: 0.25,
+    DiscHarddropCushion: 5,
+    DiscRequireExplorer: false,
+    DiscAfterExplorerDays: 5,
+    OutrateFloorFactorLow: 0.80,
+    ExplorerSkipCooldownDown: true,
+    CircuitBreakerDropRatio: 0.60,
+    CircuitBreakerReduceStep: 0.15,
+    CircuitBreakerGraceDays: 5,
   },
 }
 
 const (
   outratePegHeadroom = 1.05
   outratePegSeedMult = 1.10
+  outrateFloorFactor = 1.00
+  outrateFloorMinFwds = 4
+  outrateFloorDisableBelowFwds = 5
+  outrateFloorLowFwds = 10
 )
 
 var superSourceThresholdsByProfile = map[string]superSourceThresholds{
@@ -291,6 +339,8 @@ create table if not exists autofee_config (
   explorer_enabled boolean not null default true,
   super_source_enabled boolean not null default false,
   super_source_base_fee_msat integer not null default 1000,
+  revfloor_enabled boolean not null default true,
+  circuit_breaker_enabled boolean not null default true,
   min_ppm integer not null default 10,
   max_ppm integer not null default 2000,
   created_at timestamptz not null default now(),
@@ -314,6 +364,7 @@ create table if not exists autofee_state (
   last_rebal_cost_ppm integer,
   last_rebal_cost_ts timestamptz,
   last_ts timestamptz,
+  last_dir text,
   low_streak integer not null default 0,
   baseline_fwd7d integer not null default 0,
   class_label text,
@@ -341,9 +392,12 @@ create index if not exists autofee_logs_run_idx on autofee_logs (run_id, seq);
 
 alter table autofee_config add column if not exists super_source_enabled boolean not null default false;
 alter table autofee_config add column if not exists super_source_base_fee_msat integer not null default 1000;
+alter table autofee_config add column if not exists revfloor_enabled boolean not null default true;
+alter table autofee_config add column if not exists circuit_breaker_enabled boolean not null default true;
 alter table autofee_state add column if not exists ss_active boolean;
 alter table autofee_state add column if not exists ss_ok_since timestamptz;
 alter table autofee_state add column if not exists ss_bad_since timestamptz;
+alter table autofee_state add column if not exists last_dir text;
 alter table autofee_logs add column if not exists payload jsonb;
 `)
   if err != nil {
@@ -374,6 +428,8 @@ func (s *AutofeeService) defaultConfig() AutofeeConfig {
     ExplorerEnabled: true,
     SuperSourceEnabled: false,
     SuperSourceBaseFeeMsat: superSourceBaseFeeMsatDefault,
+    RevfloorEnabled: true,
+    CircuitBreakerEnabled: true,
     MinPpm: 10,
     MaxPpm: 2000,
   }
@@ -389,7 +445,7 @@ func (s *AutofeeService) GetConfig(ctx context.Context) (AutofeeConfig, error) {
   err := s.db.QueryRow(ctx, `
 select enabled, profile, lookback_days, run_interval_sec, cooldown_up_sec, cooldown_down_sec,
   amboss_enabled, amboss_token, inbound_passive_enabled, discovery_enabled, explorer_enabled,
-  super_source_enabled, super_source_base_fee_msat, min_ppm, max_ppm
+  super_source_enabled, super_source_base_fee_msat, revfloor_enabled, circuit_breaker_enabled, min_ppm, max_ppm
 from autofee_config where id=$1
 `, autofeeConfigID).Scan(
     &cfg.Enabled,
@@ -405,6 +461,8 @@ from autofee_config where id=$1
     &cfg.ExplorerEnabled,
     &cfg.SuperSourceEnabled,
     &cfg.SuperSourceBaseFeeMsat,
+    &cfg.RevfloorEnabled,
+    &cfg.CircuitBreakerEnabled,
     &cfg.MinPpm,
     &cfg.MaxPpm,
   )
@@ -478,6 +536,12 @@ func (s *AutofeeService) UpdateConfig(ctx context.Context, req AutofeeConfigUpda
   if req.SuperSourceBaseFeeMsat != nil {
     current.SuperSourceBaseFeeMsat = *req.SuperSourceBaseFeeMsat
   }
+  if req.RevfloorEnabled != nil {
+    current.RevfloorEnabled = *req.RevfloorEnabled
+  }
+  if req.CircuitBreakerEnabled != nil {
+    current.CircuitBreakerEnabled = *req.CircuitBreakerEnabled
+  }
   if req.MinPpm != nil {
     current.MinPpm = *req.MinPpm
   }
@@ -540,8 +604,10 @@ set enabled=$2,
   explorer_enabled=$12,
   super_source_enabled=$13,
   super_source_base_fee_msat=$14,
-  min_ppm=$15,
-  max_ppm=$16,
+  revfloor_enabled=$15,
+  circuit_breaker_enabled=$16,
+  min_ppm=$17,
+  max_ppm=$18,
   updated_at=now()
 where id=$1
 `, autofeeConfigID,
@@ -558,6 +624,8 @@ where id=$1
     current.ExplorerEnabled,
     current.SuperSourceEnabled,
     current.SuperSourceBaseFeeMsat,
+    current.RevfloorEnabled,
+    current.CircuitBreakerEnabled,
     current.MinPpm,
     current.MaxPpm,
   )
@@ -877,6 +945,7 @@ type autofeeChannelState struct {
   LastRebalCost int
   LastRebalCostTs time.Time
   LastTs time.Time
+  LastDir string
   LowStreak int
   BaselineFwd7d int
   ClassLabel string
@@ -1231,7 +1300,7 @@ func (e *autofeeEngine) loadState(ctx context.Context) (map[uint64]*autofeeChann
   items := map[uint64]*autofeeChannelState{}
   rows, err := e.svc.db.Query(ctx, `
 select channel_id, last_ppm, last_inbound_discount_ppm, last_seed_ppm, last_outrate_ppm, last_outrate_ts,
-  last_rebal_cost_ppm, last_rebal_cost_ts, last_ts, low_streak, baseline_fwd7d, class_label, class_conf, bias_ema,
+  last_rebal_cost_ppm, last_rebal_cost_ts, last_ts, last_dir, low_streak, baseline_fwd7d, class_label, class_conf, bias_ema,
   first_seen_ts, ss_active, ss_ok_since, ss_bad_since, explorer_state
 from autofee_state
 `)
@@ -1251,6 +1320,7 @@ from autofee_state
     var lastRebal pgtype.Int4
     var lastRebalTs pgtype.Timestamptz
     var lastTs pgtype.Timestamptz
+    var lastDir pgtype.Text
     var lowStreak int
     var baseline int
     var classLabel pgtype.Text
@@ -1261,7 +1331,7 @@ from autofee_state
     var ssOkSince pgtype.Timestamptz
     var ssBadSince pgtype.Timestamptz
     var explorerRaw []byte
-    if err := rows.Scan(&channelID, &lastPpm, &lastInb, &lastSeed, &lastOut, &lastOutTs, &lastRebal, &lastRebalTs, &lastTs,
+    if err := rows.Scan(&channelID, &lastPpm, &lastInb, &lastSeed, &lastOut, &lastOutTs, &lastRebal, &lastRebalTs, &lastTs, &lastDir,
       &lowStreak, &baseline, &classLabel, &classConf, &biasEma, &firstSeen, &ssActive, &ssOkSince, &ssBadSince, &explorerRaw); err != nil {
       return items, err
     }
@@ -1289,6 +1359,9 @@ from autofee_state
     }
     if lastTs.Valid {
       st.LastTs = lastTs.Time
+    }
+    if lastDir.Valid {
+      st.LastDir = lastDir.String
     }
     st.LowStreak = lowStreak
     st.BaselineFwd7d = baseline
@@ -1329,9 +1402,9 @@ func (e *autofeeEngine) persistState(ctx context.Context, st *autofeeChannelStat
   _, _ = e.svc.db.Exec(ctx, `
 insert into autofee_state (
   channel_id, last_ppm, last_inbound_discount_ppm, last_seed_ppm, last_outrate_ppm, last_outrate_ts,
-  last_rebal_cost_ppm, last_rebal_cost_ts, last_ts, low_streak, baseline_fwd7d, class_label, class_conf, bias_ema,
+  last_rebal_cost_ppm, last_rebal_cost_ts, last_ts, last_dir, low_streak, baseline_fwd7d, class_label, class_conf, bias_ema,
   first_seen_ts, ss_active, ss_ok_since, ss_bad_since, explorer_state
-) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
 `+
 `on conflict (channel_id) do update set
   last_ppm=excluded.last_ppm,
@@ -1342,6 +1415,7 @@ insert into autofee_state (
   last_rebal_cost_ppm=excluded.last_rebal_cost_ppm,
   last_rebal_cost_ts=excluded.last_rebal_cost_ts,
   last_ts=excluded.last_ts,
+  last_dir=excluded.last_dir,
   low_streak=excluded.low_streak,
   baseline_fwd7d=excluded.baseline_fwd7d,
   class_label=excluded.class_label,
@@ -1355,7 +1429,7 @@ insert into autofee_state (
 `, int64(st.ChannelID), nullableInt(int64(st.LastPpm)), nullableInt(int64(st.LastInboundDiscount)),
     nullableInt(int64(st.LastSeed)), nullableInt(int64(st.LastOutrate)), nullableTime(st.LastOutrateTs),
     nullableInt(int64(st.LastRebalCost)), nullableTime(st.LastRebalCostTs), nullableTime(st.LastTs),
-    st.LowStreak, st.BaselineFwd7d, nullableString(st.ClassLabel), nullableFloat(st.ClassConf),
+    nullableString(st.LastDir), st.LowStreak, st.BaselineFwd7d, nullableString(st.ClassLabel), nullableFloat(st.ClassConf),
     nullableFloat(st.BiasEma), nullableTime(st.FirstSeen), st.SuperSourceActive,
     nullableTime(st.SuperSourceOkSince), nullableTime(st.SuperSourceBadSince), rawExplorer,
   )
@@ -1730,6 +1804,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
 
   discoveryHit := false
+  discoveryHard := false
   explorerActive := false
   if e.cfg.ExplorerEnabled {
     explorerActive = e.evalExplorer(st, outRatio, fwdCount, ch.LocalBalanceSat, ch.CapacitySat, localPpm)
@@ -1740,6 +1815,31 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   if e.cfg.DiscoveryEnabled && fwdCount == 0 && outRatio > 0.40 {
     discoveryHit = true
     tags = append(tags, "discovery")
+  }
+
+  if discoveryHit {
+    daysSinceFirst := 999.0
+    if !st.FirstSeen.IsZero() {
+      daysSinceFirst = e.now.Sub(st.FirstSeen).Hours() / 24.0
+    }
+    discoveryGateOk := true
+    if e.profile.DiscRequireExplorer {
+      discoveryGateOk = false
+      if st.ExplorerState.Seen && st.ExplorerState.LastExitTs > 0 {
+        lastExit := time.Unix(st.ExplorerState.LastExitTs, 0)
+        if e.now.Sub(lastExit).Hours() >= float64(e.profile.DiscAfterExplorerDays*24) {
+          discoveryGateOk = true
+        }
+      }
+    }
+    if discoveryGateOk && st.BaselineFwd7d == 0 && daysSinceFirst >= float64(e.profile.DiscHarddropDaysNoBase) {
+      base := int(math.Round(seed)) + e.profile.DiscHarddropCushion
+      if target > base {
+        target = base + int(math.Round(0.5*float64(target-base)))
+      }
+      discoveryHard = true
+      tags = append(tags, "discovery-hard")
+    }
   }
 
   if outRatio < 0.10 && target < localPpm {
@@ -1765,14 +1865,44 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   if discoveryHit {
     capFrac = math.Max(capFrac, e.profile.DiscoveryStepCapDown)
   }
+  if discoveryHard {
+    capFrac = math.Max(capFrac, e.profile.DiscHarddropCapFrac)
+  }
   if explorerActive {
     capFrac = math.Max(capFrac, e.profile.DiscoveryStepCapDown)
   }
 
   rawStep := applyStepCap(localPpm, target, capFrac, 5)
+  if e.cfg.CircuitBreakerEnabled && st.LastDir == "up" && !st.LastTs.IsZero() {
+    daysSince := e.now.Sub(st.LastTs).Hours() / 24.0
+    if daysSince <= float64(e.profile.CircuitBreakerGraceDays) && st.BaselineFwd7d > 0 {
+      if fwdCount < int(float64(st.BaselineFwd7d)*e.profile.CircuitBreakerDropRatio) {
+        rawStep = int(math.Round(float64(rawStep) * (1.0 - e.profile.CircuitBreakerReduceStep)))
+        rawStep = clampInt(rawStep, e.cfg.MinPpm, e.cfg.MaxPpm)
+        tags = append(tags, "circuit-breaker")
+      }
+    }
+  }
 
   floor := int(math.Ceil(float64(baseCostPpm) * 1.10))
   floorSrc := "rebal"
+  if outPpm7d > 0 && !discoveryHit && !explorerActive {
+    outrateFloorActive := true
+    factor := outrateFloorFactor
+    if fwdCount < outrateFloorDisableBelowFwds {
+      outrateFloorActive = false
+    } else if fwdCount < outrateFloorLowFwds {
+      factor = e.profile.OutrateFloorFactorLow
+    }
+    if outrateFloorActive && fwdCount >= outrateFloorMinFwds {
+      outrateFloor := int(math.Ceil(float64(outPpm7d) * factor))
+      if outrateFloor > floor {
+        floor = outrateFloor
+        floorSrc = "outrate"
+        tags = append(tags, "outrate-floor")
+      }
+    }
+  }
   if outPpm7d > 0 && fwdCount >= 4 {
     peg := int(math.Ceil(float64(outPpm7d) * outratePegHeadroom))
     withinGrace := true
@@ -1794,7 +1924,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
 
-  if !superSourceActive && e.profile.RevfloorBaselineThresh > 0 && st.BaselineFwd7d >= e.profile.RevfloorBaselineThresh {
+  if e.cfg.RevfloorEnabled && !superSourceActive && e.profile.RevfloorBaselineThresh > 0 && st.BaselineFwd7d >= e.profile.RevfloorBaselineThresh {
     revFloor := int(math.Round(math.Max(float64(seed)*0.40, float64(e.profile.RevfloorMinAbs))))
     revFloor = clampInt(revFloor, e.cfg.MinPpm, e.cfg.MaxPpm)
     if revFloor > floor {
@@ -1828,7 +1958,11 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     apply = false
     tags = append(tags, "hold-small")
   }
-  if finalPpm != localPpm && !e.ignoreCooldown {
+  skipCooldownDown := explorerActive && finalPpm < localPpm && e.profile.ExplorerSkipCooldownDown
+  if skipCooldownDown {
+    tags = append(tags, "cooldown-skip")
+  }
+  if finalPpm != localPpm && !e.ignoreCooldown && !skipCooldownDown {
     fwdsSince := fwdCount - st.BaselineFwd7d
     cooldownHours := float64(e.cfg.CooldownDownSec) / 3600.0
     if finalPpm > localPpm {
@@ -1845,7 +1979,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
 
-  if finalPpm < localPpm && !e.ignoreCooldown && !st.LastTs.IsZero() &&
+  if finalPpm < localPpm && !e.ignoreCooldown && !skipCooldownDown && !st.LastTs.IsZero() &&
     marginPpm7d >= e.profile.ProfitDownMarginMin && fwdCount >= e.profile.ProfitDownFwdsMin {
     hoursSince := e.now.Sub(st.LastTs).Hours()
     profitCooldown := float64(e.cfg.CooldownDownSec)/3600.0 + float64(e.profile.ProfitDownExtraHours)
@@ -1881,6 +2015,11 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
   if apply && finalPpm != localPpm {
     st.LastTs = e.now
+    if finalPpm > localPpm {
+      st.LastDir = "up"
+    } else if finalPpm < localPpm {
+      st.LastDir = "down"
+    }
   }
 
   if explorerActive && finalPpm < localPpm {
@@ -2395,6 +2534,8 @@ func formatAutofeeTags(d *decision) string {
     switch {
     case t == "discovery":
       add("🧭discovery")
+    case t == "discovery-hard":
+      add("🧨harddrop")
     case t == "explorer":
       add("🧭explorer")
     case strings.HasPrefix(t, "surge"):
@@ -2403,6 +2544,10 @@ func formatAutofeeTags(d *decision) string {
       add("💎top-rev")
     case t == "neg-margin":
       add("⚠️neg-margin")
+    case t == "outrate-floor":
+      add("📊outrate-floor")
+    case t == "circuit-breaker":
+      add("🧯cb")
     case t == "revfloor":
       add("🧱revfloor")
     case t == "peg":
@@ -2415,6 +2560,8 @@ func formatAutofeeTags(d *decision) string {
       add("⏳cooldown")
     case t == "cooldown-profit":
       add("⏳profit-hold")
+    case t == "cooldown-skip":
+      add("🧭skip-cooldown")
     case t == "hold-small":
       add("🧊hold-small")
     case t == "same-ppm":
