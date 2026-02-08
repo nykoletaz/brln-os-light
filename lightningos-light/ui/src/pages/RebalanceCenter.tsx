@@ -139,6 +139,7 @@ export default function RebalanceCenter() {
   const [historyAttempts, setHistoryAttempts] = useState<RebalanceAttempt[]>([])
   const [serverConfig, setServerConfig] = useState<RebalanceConfig | null>(null)
   const [configDirty, setConfigDirty] = useState(false)
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'succeeded' | 'partial' | 'failed'>('all')
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('')
   const [saving, setSaving] = useState(false)
@@ -196,6 +197,13 @@ export default function RebalanceCenter() {
     return totals
   }
   const historyTotals = useMemo(() => buildAttemptTotals(historyAttempts), [historyAttempts])
+  const filteredHistory = useMemo(() => {
+    if (historyFilter === 'all') return historyJobs
+    if (historyFilter === 'failed') {
+      return historyJobs.filter((job) => job.status === 'failed' || job.status === 'cancelled')
+    }
+    return historyJobs.filter((job) => job.status === historyFilter)
+  }, [historyFilter, historyJobs])
 
   useEffect(() => {
     setConfigDirty(configSignature(config) !== configSignature(serverConfig))
@@ -227,7 +235,7 @@ export default function RebalanceCenter() {
           getRebalanceOverview(),
           getRebalanceChannels(),
           getRebalanceQueue(),
-          getRebalanceHistory(50)
+          getRebalanceHistory(200)
         ])
         const nextConfig = cfg as RebalanceConfig
         const normalizedConfig = {
@@ -939,10 +947,28 @@ export default function RebalanceCenter() {
         </div>
 
         <div className="section-card space-y-4">
-          <h3 className="text-lg font-semibold">{t('rebalanceCenter.history.title')}</h3>
-          {historyJobs.length === 0 && <p className="text-sm text-fog/60">{t('rebalanceCenter.history.empty')}</p>}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold">{t('rebalanceCenter.history.title')}</h3>
+              <p className="text-xs text-fog/50">{t('rebalanceCenter.history.last24h')}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {(['all', 'succeeded', 'partial', 'failed'] as const).map((filter) => (
+                <button
+                  key={filter}
+                  className={`rounded-full border px-3 py-1 ${
+                    historyFilter === filter ? 'border-mint text-mint' : 'border-white/10 text-fog/60'
+                  }`}
+                  onClick={() => setHistoryFilter(filter)}
+                >
+                  {t(`rebalanceCenter.history.filters.${filter}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+          {filteredHistory.length === 0 && <p className="text-sm text-fog/60">{t('rebalanceCenter.history.empty')}</p>}
           <div className="max-h-80 space-y-3 overflow-y-auto pr-1">
-            {historyJobs.map((job) => (
+            {filteredHistory.map((job) => (
               <div key={job.id} className="rounded-2xl border border-white/10 bg-ink/60 p-4">
                 <div className="flex items-center justify-between">
                   <div>

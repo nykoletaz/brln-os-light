@@ -1159,6 +1159,13 @@
     },
     "history": {
       "title": "Histórico recente",
+      "last24h": "Últimas 24h",
+      "filters": {
+        "all": "Todos",
+        "succeeded": "Sucesso",
+        "partial": "Parcial",
+        "failed": "Falhos"
+      },
       "empty": "Sem rebalances concluídos.",
       "targetLabel": "Para {{value}}",
       "target": "Alvo outbound: {{value}}",

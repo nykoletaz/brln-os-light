@@ -2227,6 +2227,7 @@ select id, created_at, completed_at, source, status, reason, target_channel_id,
   target_channel_point, target_outbound_pct, target_amount_sat
 from rebalance_jobs
 where status in ('succeeded','failed','cancelled','partial')
+  and created_at >= now() - interval '1 day'
 order by created_at desc
 limit $1`, limit)
   if err != nil {
@@ -2259,6 +2260,7 @@ limit $1`, limit)
 with recent as (
   select id from rebalance_jobs
   where status in ('succeeded','failed','cancelled','partial')
+    and created_at >= now() - interval '1 day'
   order by created_at desc
   limit $1
 )

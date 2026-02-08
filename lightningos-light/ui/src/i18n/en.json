@@ -1159,6 +1159,13 @@
     },
     "history": {
       "title": "Recent History",
+      "last24h": "Last 24h",
+      "filters": {
+        "all": "All",
+        "succeeded": "Success",
+        "partial": "Partial",
+        "failed": "Failed"
+      },
       "empty": "No completed rebalances yet.",
       "targetLabel": "In {{value}}",
       "target": "Target outbound: {{value}}",
