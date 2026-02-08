@@ -1326,7 +1326,7 @@ func (s *Server) handleLNChannels(w http.ResponseWriter, r *http.Request) {
       if err := rows.Err(); err != nil {
         s.logger.Printf("autofee channel class rows failed: %v", err)
       }
-      _ = rows.Close()
+      rows.Close()
       if len(labels) > 0 {
         for i := range channels {
           if label, ok := labels[channels[i].ChannelID]; ok {
