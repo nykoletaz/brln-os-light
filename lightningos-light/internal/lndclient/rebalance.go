@@ -121,6 +121,51 @@ func (c *Client) GetChannelPolicies(ctx context.Context, channelID uint64) (Chan
   }, nil
 }
 
+func (c *Client) GetMaxHtlcMsat(ctx context.Context, channelID uint64, fromPubkey string, toPubkey string) (uint64, error) {
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return 0, err
+  }
+  defer conn.Close()
+
+  client := lnrpc.NewLightningClient(conn)
+  edge, err := client.GetChanInfo(ctx, &lnrpc.ChanInfoRequest{ChanId: channelID})
+  if err != nil {
+    return 0, err
+  }
+  if edge == nil {
+    return 0, errors.New("channel policy unavailable")
+  }
+
+  fromPubkey = strings.TrimSpace(fromPubkey)
+  toPubkey = strings.TrimSpace(toPubkey)
+  if fromPubkey == "" || toPubkey == "" {
+    return 0, errors.New("route pubkeys required")
+  }
+
+  var policy *lnrpc.RoutingPolicy
+  switch {
+  case strings.EqualFold(edge.Node1Pub, fromPubkey) && strings.EqualFold(edge.Node2Pub, toPubkey):
+    policy = edge.Node1Policy
+  case strings.EqualFold(edge.Node2Pub, fromPubkey) && strings.EqualFold(edge.Node1Pub, toPubkey):
+    policy = edge.Node2Policy
+  default:
+    return 0, fmt.Errorf("route pubkeys not found on channel %d", channelID)
+  }
+  if policy == nil {
+    return 0, errors.New("channel policy unavailable")
+  }
+
+  maxMsat := policy.MaxHtlcMsat
+  capMsat := uint64(edge.Capacity) * 1000
+  if capMsat > 0 {
+    if maxMsat == 0 || maxMsat > capMsat {
+      maxMsat = capMsat
+    }
+  }
+  return maxMsat, nil
+}
+
 func (c *Client) QueryRoute(ctx context.Context, destPubkey string, amtSat int64, outgoingChanID uint64, lastHopPubkey string, feeLimitMsat int64) (*lnrpc.Route, error) {
   trimmedDest := strings.TrimSpace(destPubkey)
   if trimmedDest == "" {
