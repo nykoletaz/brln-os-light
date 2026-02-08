@@ -721,15 +721,36 @@ func (s *AutofeeService) SetChannelEnabled(ctx context.Context, channelID uint64
   if s.db == nil {
     return errors.New("db unavailable")
   }
-  if channelID == 0 && strings.TrimSpace(channelPoint) == "" {
+  trimmedPoint := strings.TrimSpace(channelPoint)
+  if trimmedPoint != "" && s.lnd != nil {
+    if resolved, ok := s.resolveChannelID(ctx, trimmedPoint); ok {
+      channelID = resolved
+    } else if channelID == 0 {
+      return errors.New("channel_id lookup failed")
+    }
+  }
+  if channelID == 0 && trimmedPoint == "" {
     return errors.New("channel_id or channel_point required")
   }
   _, err := s.db.Exec(ctx, `
 insert into autofee_channel_settings (channel_id, channel_point, enabled, updated_at)
 values ($1, $2, $3, now())
 on conflict (channel_id) do update set enabled=excluded.enabled, channel_point=excluded.channel_point, updated_at=excluded.updated_at
-`, int64(channelID), strings.TrimSpace(channelPoint), enabled)
+`, int64(channelID), trimmedPoint, enabled)
   return err
+}
+
+func (s *AutofeeService) resolveChannelID(ctx context.Context, channelPoint string) (uint64, bool) {
+  channels, err := s.lnd.ListChannels(ctx)
+  if err != nil {
+    return 0, false
+  }
+  for _, ch := range channels {
+    if ch.ChannelPoint == channelPoint {
+      return ch.ChannelID, true
+    }
+  }
+  return 0, false
 }
 
 func (s *AutofeeService) SetAllChannelsEnabled(ctx context.Context, enabled bool) error {
