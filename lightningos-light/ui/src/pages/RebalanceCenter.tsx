@@ -105,6 +105,7 @@ type RebalanceAttempt = {
   job_id: number
   attempt_index: number
   source_channel_id: number
+  source_peer_alias?: string
   amount_sat: number
   fee_limit_ppm: number
   fee_paid_sat: number
@@ -1048,6 +1049,16 @@ export default function RebalanceCenter() {
                       amount: formatSats(attempt.amount_sat),
                       fee: attempt.fee_limit_ppm
                     })}
+                    {attempt.source_peer_alias && (
+                      <div className="mt-1 text-xs text-fog/50">
+                        {t('rebalanceCenter.queue.source', { value: attempt.source_peer_alias })}
+                      </div>
+                    )}
+                    {attempt.fail_reason && (
+                      <div className="mt-1 text-xs text-amber-200">
+                        {t('rebalanceCenter.queue.reason', { value: attempt.fail_reason })}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1081,7 +1092,17 @@ export default function RebalanceCenter() {
               <div key={job.id} className="rounded-2xl border border-white/10 bg-ink/60 p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm text-fog">#{job.id} {job.source}</p>
+                    <p className="text-sm text-fog">
+                      #{job.id}{' '}
+                      {job.source === 'auto'
+                        ? t('rebalanceCenter.history.source.auto')
+                        : job.source === 'manual'
+                          ? t('rebalanceCenter.history.source.manual')
+                          : job.source}{' '}
+                      <span className="text-xs text-fog/50">
+                        · {formatTimestamp(job.completed_at || job.created_at)}
+                      </span>
+                    </p>
                     <p className="text-xs text-fog/70">{t('rebalanceCenter.history.targetLabel', { value: job.target_peer_alias || job.target_channel_point })}</p>
                     <p className="text-xs text-fog/50">{job.target_channel_point}</p>
                   </div>

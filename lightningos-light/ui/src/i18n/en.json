@@ -1165,11 +1165,17 @@
       "target": "Target outbound: {{value}}",
       "amountFee": "Amount: {{amount}} · Fees: {{fee}}",
       "remaining": "Remaining: {{value}}",
-      "attempt": "Attempt {{index}} · {{amount}} · fee cap {{fee}} ppm"
+      "attempt": "Attempt {{index}} · {{amount}} · fee cap {{fee}} ppm",
+      "source": "Source: {{value}}",
+      "reason": "Reason: {{value}}"
     },
     "history": {
       "title": "Recent History",
       "last24h": "Last 24h",
+      "source": {
+        "auto": "auto",
+        "manual": "manual"
+      },
       "filters": {
         "all": "All",
         "succeeded": "Success",

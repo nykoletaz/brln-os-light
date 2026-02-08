@@ -131,6 +131,7 @@ type RebalanceAttempt struct {
   JobID int64 `json:"job_id"`
   AttemptIndex int `json:"attempt_index"`
   SourceChannelID uint64 `json:"source_channel_id"`
+  SourcePeerAlias string `json:"source_peer_alias,omitempty"`
   AmountSat int64 `json:"amount_sat"`
   FeeLimitPpm int64 `json:"fee_limit_ppm"`
   FeePaidSat int64 `json:"fee_paid_sat"`
@@ -1171,6 +1172,10 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     if sendAmount > sourceRemaining {
       sendAmount = sourceRemaining
     }
+    probeCap := computeProbeCap(remaining, cfg.MinAmountSat, cfg.MaxAmountSat)
+    if probeCap > 0 && probeCap < sendAmount {
+      sendAmount = probeCap
+    }
     if cfg.AmountProbeAdaptive && adaptiveMaxAmount > 0 {
       capAmount := adaptiveMaxAmount * 2
       if capAmount > 0 && capAmount < sendAmount {
@@ -1188,6 +1193,9 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       }
       if warmTry > sourceRemaining {
         warmTry = sourceRemaining
+      }
+      if warmTry > sendAmount {
+        warmTry = sendAmount
       }
       if cfg.MinAmountSat > 0 && warmTry < cfg.MinAmountSat {
         warmTry = 0
@@ -1225,12 +1233,6 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     amountCandidates := buildAmountProbe(sendAmount, cfg.MinAmountSat, amountSteps)
     if len(amountCandidates) == 0 {
       continue
-    }
-    preferSmallFirst := cfg.MinAmountSat > 0 && sendAmount >= cfg.MinAmountSat*4
-    if preferSmallFirst && len(amountCandidates) > 1 {
-      for i, j := 0, len(amountCandidates)-1; i < j; i, j = i+1, j-1 {
-        amountCandidates[i], amountCandidates[j] = amountCandidates[j], amountCandidates[i]
-      }
     }
 
     sourceSucceeded := false
@@ -1646,6 +1648,37 @@ func computeDeficitAmount(ch lndclient.ChannelInfo, targetOutboundPct float64) i
   }
   amount := capacity * deficit / 100
   return int64(math.Round(amount))
+}
+
+func computeProbeCap(remaining int64, minAmount int64, maxAmount int64) int64 {
+  if remaining <= 0 {
+    return 0
+  }
+  if maxAmount > 0 {
+    if maxAmount < remaining {
+      return maxAmount
+    }
+    return remaining
+  }
+  if minAmount <= 0 {
+    return remaining
+  }
+  chunks := remaining / minAmount
+  if chunks <= 4 {
+    return remaining
+  }
+  start := int64(math.Round(float64(remaining) / math.Sqrt(float64(chunks))))
+  minStart := minAmount * 4
+  if start < minStart {
+    start = minStart
+  }
+  if start > remaining {
+    start = remaining
+  }
+  if start < minAmount {
+    start = minAmount
+  }
+  return start
 }
 
 func filterSources(channels []RebalanceChannel, targetID uint64) []RebalanceChannel {
@@ -2746,6 +2779,7 @@ order by started_at desc
       return jobs, attempts, err
     }
     attempt.SourceChannelID = uint64(sourceChannelID)
+    attempt.SourcePeerAlias = aliasMap[attempt.SourceChannelID]
     attempt.StartedAt = started.UTC().Format(time.RFC3339)
     if finished.Valid {
       attempt.FinishedAt = finished.Time.UTC().Format(time.RFC3339)
@@ -2885,6 +2919,7 @@ order by started_at desc`
       return jobs, attempts, err
     }
     attempt.SourceChannelID = uint64(sourceChannelID)
+    attempt.SourcePeerAlias = aliasMap[attempt.SourceChannelID]
     attempt.StartedAt = started.UTC().Format(time.RFC3339)
     if finished.Valid {
       attempt.FinishedAt = finished.Time.UTC().Format(time.RFC3339)

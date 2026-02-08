@@ -1165,11 +1165,17 @@
       "target": "Alvo outbound: {{value}}",
       "amountFee": "Valor: {{amount}} · Taxa: {{fee}}",
       "remaining": "Restante: {{value}}",
-      "attempt": "Tentativa {{index}} - {{amount}} - fee cap {{fee}} ppm"
+      "attempt": "Tentativa {{index}} - {{amount}} - fee cap {{fee}} ppm",
+      "source": "Fonte: {{value}}",
+      "reason": "Motivo: {{value}}"
     },
     "history": {
       "title": "Histórico recente",
       "last24h": "Últimas 24h",
+      "source": {
+        "auto": "auto",
+        "manual": "manual"
+      },
       "filters": {
         "all": "Todos",
         "succeeded": "Sucesso",
