@@ -17,6 +17,7 @@ type Channel = {
   base_fee_msat?: number
   fee_rate_ppm?: number
   inbound_fee_rate_ppm?: number
+  class_label?: string
 }
 
 type PendingChannel = {
@@ -545,6 +546,20 @@ export default function LightningOps() {
       add(`↘️inb-${inboundDiscount}`)
     }
     return output.join(' ')
+  }
+
+  const formatChannelClassLabel = (label?: string) => {
+    const normalized = (label || '').toLowerCase().trim()
+    switch (normalized) {
+      case 'sink':
+        return '🏷️ sink'
+      case 'source':
+        return '🏷️ source'
+      case 'router':
+        return '🏷️ router'
+      default:
+        return ''
+    }
   }
 
   const formatAutofeeChannelLine = (item: AutofeeResultItem) => {
@@ -1804,6 +1819,7 @@ export default function LightningOps() {
                 const statusBusy = chanStatusBusy === ch.channel_point
                 const showToggle = ch.active
                 const autofeeChecked = autofeeSettings[ch.channel_id] ?? true
+                const classLabel = formatChannelClassLabel(ch.class_label)
                 const cardClass = localDisabled && ch.active
                   ? 'rounded-2xl border border-ember/40 bg-ember/10 p-4'
                   : 'rounded-2xl border border-white/10 bg-ink/60 p-4'
@@ -1871,6 +1887,9 @@ export default function LightningOps() {
                         <span className="text-fog">
                           {typeof ch.inbound_fee_rate_ppm === 'number' ? `${ch.inbound_fee_rate_ppm} ppm` : '-'}
                         </span>
+                        {classLabel && (
+                          <span className="ml-2 text-fog/60">{classLabel}</span>
+                        )}
                       </div>
                     </div>
                     <div className="mt-2 text-xs text-fog/50">

@@ -1300,6 +1300,43 @@ func (s *Server) handleLNChannels(w http.ResponseWriter, r *http.Request) {
     pending = nil
   }
 
+  if s.db != nil {
+    dbCtx, dbCancel := context.WithTimeout(r.Context(), 2*time.Second)
+    defer dbCancel()
+    rows, err := s.db.Query(dbCtx, `
+      select channel_id, class_label
+      from autofee_state
+      where class_label is not null and class_label <> ''
+    `)
+    if err != nil {
+      s.logger.Printf("autofee channel class lookup failed: %v", err)
+    } else {
+      labels := make(map[uint64]string)
+      for rows.Next() {
+        var channelID uint64
+        var label string
+        if err := rows.Scan(&channelID, &label); err != nil {
+          s.logger.Printf("autofee channel class scan failed: %v", err)
+          continue
+        }
+        if label != "" {
+          labels[channelID] = label
+        }
+      }
+      if err := rows.Err(); err != nil {
+        s.logger.Printf("autofee channel class rows failed: %v", err)
+      }
+      _ = rows.Close()
+      if len(labels) > 0 {
+        for i := range channels {
+          if label, ok := labels[channels[i].ChannelID]; ok {
+            channels[i].ClassLabel = label
+          }
+        }
+      }
+    }
+  }
+
   active := 0
   inactive := 0
   for _, ch := range channels {
