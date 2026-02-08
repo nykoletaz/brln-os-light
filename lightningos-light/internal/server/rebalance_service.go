@@ -27,6 +27,11 @@ const (
 )
 
 const (
+  pairFailTTL = 6 * time.Hour
+  pairSuccessTTL = 24 * time.Hour
+)
+
+const (
   paybackModePayback  = 1 << 0
   paybackModeTime     = 1 << 1
   paybackModeCritical = 1 << 2
@@ -151,6 +156,15 @@ type channelLedger struct {
   LastRebalanceAt time.Time
   LastForwardAt time.Time
   LastUnlockAt time.Time
+}
+
+type pairStat struct {
+  SourceChannelID uint64
+  TargetChannelID uint64
+  LastSuccessAt time.Time
+  LastFailAt time.Time
+  SuccessAmountSat int64
+  SuccessFeePpm int64
 }
 
 type RebalanceService struct {
@@ -480,11 +494,31 @@ func (s *RebalanceService) runAutoScan() {
       scanStatus = "budget_exhausted"
       break
     }
-    estimatedCost := estimateMaxCost(target.Channel.TargetAmountSat, target.Channel.OutgoingFeePpm, cfg.EconRatio, target.Channel.PeerFeeRatePpm)
-    if estimatedCost > remaining {
+    maxFeePpm := calcMaxFeePpm(target.Channel.OutgoingFeePpm, target.Channel.PeerFeeRatePpm, cfg.EconRatio)
+    if maxFeePpm <= 0 {
       continue
     }
-    _, err := s.startJob(target.Channel.ChannelID, "auto", "")
+    targetAmount := target.Channel.TargetAmountSat
+    estimatedCost := estimateMaxCost(targetAmount, target.Channel.OutgoingFeePpm, cfg.EconRatio, target.Channel.PeerFeeRatePpm)
+    amountOverride := int64(0)
+    if estimatedCost > remaining {
+      fitAmount := (remaining * 1_000_000) / maxFeePpm
+      if fitAmount <= 0 {
+        continue
+      }
+      if fitAmount > targetAmount {
+        fitAmount = targetAmount
+      }
+      if cfg.MinAmountSat > 0 && fitAmount < cfg.MinAmountSat {
+        continue
+      }
+      amountOverride = fitAmount
+      estimatedCost = estimateMaxCost(fitAmount, target.Channel.OutgoingFeePpm, cfg.EconRatio, target.Channel.PeerFeeRatePpm)
+      if estimatedCost > remaining {
+        continue
+      }
+    }
+    _, err := s.startJob(target.Channel.ChannelID, "auto", "", amountOverride)
     if err == nil {
       remaining -= estimatedCost
       started++
@@ -502,7 +536,7 @@ type rebalanceTarget struct {
   Channel RebalanceChannel
 }
 
-func (s *RebalanceService) startJob(targetChannelID uint64, source string, reason string) (int64, error) {
+func (s *RebalanceService) startJob(targetChannelID uint64, source string, reason string, amountOverride int64) (int64, error) {
   ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
   defer cancel()
 
@@ -529,9 +563,13 @@ func (s *RebalanceService) startJob(targetChannelID uint64, source string, reaso
   if targetPct <= 0 {
     targetPct = rebalanceDefaultTargetOutboundPct
   }
-  amount := computeDeficitAmount(target, targetPct)
-  if amount <= 0 {
+  deficit := computeDeficitAmount(target, targetPct)
+  if deficit <= 0 {
     return 0, errors.New("target already within range")
+  }
+  amount := deficit
+  if amountOverride > 0 && amountOverride < amount {
+    amount = amountOverride
   }
 
   if s.isChannelBusy(targetChannelID) {
@@ -605,7 +643,10 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     if ch.ChannelID == targetChannelID {
       targetFound = true
       snapshot.TargetOutboundPct = targetPct
-      amount = computeDeficitAmount(ch, targetPct)
+      deficitAmount := computeDeficitAmount(ch, targetPct)
+      if amount <= 0 || amount > deficitAmount {
+        amount = deficitAmount
+      }
       if cfg.MaxAmountSat > 0 && amount > cfg.MaxAmountSat {
         amount = cfg.MaxAmountSat
       }
@@ -653,6 +694,8 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     return
   }
 
+  pairStats := s.loadPairStatsForTarget(ctx, targetChannelID)
+
   sort.Slice(sources, func(i, j int) bool {
     return sources[i].MaxSourceSat > sources[j].MaxSourceSat
   })
@@ -669,11 +712,10 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     return
   }
 
-  remaining := amount
-  anySuccess := false
-  attemptIndex := 0
-  adaptiveMaxAmount := int64(0)
-
+  warmSourceID := uint64(0)
+  warmAmount := int64(0)
+  warmFeePpm := int64(0)
+  warmAt := time.Time{}
   for _, source := range sources {
     if ctx.Err() != nil {
       if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -684,13 +726,23 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       return
     }
 
+    if jobSource == "auto" {
+      if stat, ok := pairStats[source.ChannelID]; ok {
+        if !stat.LastFailAt.IsZero() && time.Since(stat.LastFailAt) <= pairFailTTL && (stat.LastSuccessAt.IsZero() || stat.LastSuccessAt.Before(stat.LastFailAt)) {
+          continue
+        }
+      }
+    }
+
     maxFromSource := source.MaxSourceSat
     if maxFromSource <= 0 {
       continue
     }
+    sourceRemaining := maxFromSource
+
     sendAmount := remaining
-    if sendAmount > maxFromSource {
-      sendAmount = maxFromSource
+    if sendAmount > sourceRemaining {
+      sendAmount = sourceRemaining
     }
     if cfg.AmountProbeAdaptive && adaptiveMaxAmount > 0 {
       capAmount := adaptiveMaxAmount * 2
@@ -700,6 +752,69 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     }
     if cfg.MinAmountSat > 0 && sendAmount < cfg.MinAmountSat {
       continue
+    }
+
+    if source.ChannelID == warmSourceID && warmAmount > 0 && warmFeePpm > 0 {
+      warmTry := warmAmount
+      if warmTry > remaining {
+        warmTry = remaining
+      }
+      if warmTry > sourceRemaining {
+        warmTry = sourceRemaining
+      }
+      if cfg.MinAmountSat > 0 && warmTry < cfg.MinAmountSat {
+        warmTry = 0
+      }
+      if warmTry > 0 {
+        success, fatal := attemptPayment(source.ChannelID, warmTry, warmFeePpm, true)
+        if fatal {
+          return
+        }
+        if success {
+          anySuccess = true
+          if cfg.AmountProbeAdaptive {
+            adaptiveMaxAmount = warmTry
+          }
+          remaining -= warmTry
+          sourceRemaining -= warmTry
+          if remaining <= 0 {
+            s.finishJob(jobID, "succeeded", "")
+            s.broadcast(RebalanceEvent{Type: "job", JobID: jobID, Status: "succeeded"})
+            return
+          }
+          for remaining > 0 && sourceRemaining > 0 {
+            rapidAmount := warmTry
+            if rapidAmount > remaining {
+              rapidAmount = remaining
+            }
+            if rapidAmount > sourceRemaining {
+              rapidAmount = sourceRemaining
+            }
+            if cfg.MinAmountSat > 0 && rapidAmount < cfg.MinAmountSat {
+              break
+            }
+            rapidSuccess, fatal := attemptPayment(source.ChannelID, rapidAmount, warmFeePpm, true)
+            if fatal {
+              return
+            }
+            if !rapidSuccess {
+              break
+            }
+            anySuccess = true
+            if cfg.AmountProbeAdaptive {
+              adaptiveMaxAmount = rapidAmount
+            }
+            remaining -= rapidAmount
+            sourceRemaining -= rapidAmount
+            if remaining <= 0 {
+              s.finishJob(jobID, "succeeded", "")
+              s.broadcast(RebalanceEvent{Type: "job", JobID: jobID, Status: "succeeded"})
+              return
+            }
+          }
+          continue
+        }
+      }
     }
 
     feeSteps := cfg.FeeLadderSteps
@@ -715,11 +830,6 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       continue
     }
 
-    attemptTimeoutSec := cfg.AttemptTimeoutSec
-    if attemptTimeoutSec <= 0 {
-      attemptTimeoutSec = 60
-    }
-
     sourceSucceeded := false
     for step := 1; step <= feeSteps; step++ {
       feePpm := calcFeeStepPpm(maxFeePpm, feeSteps, step)
@@ -727,153 +837,65 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
         feePpm = 1
       }
 
-      for _, amountTry := range amountCandidates {
-        if ctx.Err() != nil {
-          if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-            s.finishJob(jobID, "failed", "timeout")
-          } else {
-            s.finishJob(jobID, "cancelled", "cancelled")
-          }
+      for idx, amountTry := range amountCandidates {
+        logRouteFailure := step == feeSteps && idx == len(amountCandidates)-1
+        success, fatal := attemptPayment(source.ChannelID, amountTry, feePpm, logRouteFailure)
+        if fatal {
           return
         }
-        if amountTry <= 0 {
+        if !success {
           continue
         }
-        if cfg.MinAmountSat > 0 && amountTry < cfg.MinAmountSat {
-          continue
+        anySuccess = true
+        sourceSucceeded = true
+        if cfg.AmountProbeAdaptive {
+          adaptiveMaxAmount = amountTry
+        }
+        remaining -= amountTry
+        sourceRemaining -= amountTry
+        if remaining <= 0 {
+          s.finishJob(jobID, "succeeded", "")
+          s.broadcast(RebalanceEvent{Type: "job", JobID: jobID, Status: "succeeded"})
+          return
         }
 
-        feeLimitMsat := ppmToFeeLimitMsat(amountTry, feePpm)
-        var probeFeeMsat int64
-        attemptCtx := ctx
-        cancelAttempt := func() {}
-        if attemptTimeoutSec > 0 {
-          attemptCtx, cancelAttempt = context.WithTimeout(ctx, time.Duration(attemptTimeoutSec)*time.Second)
-        }
-
-        route, err := s.lnd.QueryRoute(attemptCtx, selfPubkey, amountTry, source.ChannelID, targetSnapshot.RemotePubkey, feeLimitMsat)
-        if err != nil {
-          cancelAttempt()
-          if ctx.Err() != nil {
-            if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-              s.finishJob(jobID, "failed", "timeout")
-            } else {
-              s.finishJob(jobID, "cancelled", "cancelled")
-            }
+        for remaining > 0 && sourceRemaining > 0 {
+          rapidAmount := amountTry
+          if rapidAmount > remaining {
+            rapidAmount = remaining
+          }
+          if rapidAmount > sourceRemaining {
+            rapidAmount = sourceRemaining
+          }
+          if cfg.MinAmountSat > 0 && rapidAmount < cfg.MinAmountSat {
+            break
+          }
+          rapidSuccess, fatal := attemptPayment(source.ChannelID, rapidAmount, feePpm, true)
+          if fatal {
             return
           }
-          if errors.Is(err, context.DeadlineExceeded) || errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
-            attemptIndex++
-            _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feePpm, 0, "failed", "", "attempt timeout")
-            continue
+          if !rapidSuccess {
+            break
           }
-          if step == feeSteps && amountTry == amountCandidates[len(amountCandidates)-1] {
-            attemptIndex++
-            _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feePpm, 0, "failed", "", err.Error())
-          }
-          continue
-        }
-        if route != nil {
-          if route.TotalFeesMsat > 0 {
-            probeFeeMsat = route.TotalFeesMsat
-          } else if route.TotalFees > 0 {
-            probeFeeMsat = route.TotalFees * 1000
-          }
-        }
-
-        paymentReq, paymentHash, err := s.createRebalanceInvoice(attemptCtx, amountTry, jobID, source.ChannelID, targetChannelID)
-        if err != nil {
-          cancelAttempt()
-          if ctx.Err() != nil {
-            if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-              s.finishJob(jobID, "failed", "timeout")
-            } else {
-              s.finishJob(jobID, "cancelled", "cancelled")
-            }
-            return
-          }
-          if errors.Is(err, context.DeadlineExceeded) || errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
-            attemptIndex++
-            _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feePpm, 0, "failed", "", "attempt timeout")
-            continue
-          }
-          attemptIndex++
-          _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feePpm, 0, "failed", "", err.Error())
-          continue
-        }
-
-        payment, err := s.lnd.SendPaymentWithConstraints(attemptCtx, paymentReq, source.ChannelID, targetSnapshot.RemotePubkey, feeLimitMsat, int32(attemptTimeoutSec), 3)
-        if err != nil {
-          cancelAttempt()
-          if ctx.Err() != nil {
-            if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-              s.finishJob(jobID, "failed", "timeout")
-            } else {
-              s.finishJob(jobID, "cancelled", "cancelled")
-            }
-            return
-          }
-          if errors.Is(err, context.DeadlineExceeded) || errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
-            attemptIndex++
-            _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feePpm, 0, "failed", paymentHash, "attempt timeout")
-            continue
-          }
-          attemptIndex++
-          _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feePpm, 0, "failed", paymentHash, err.Error())
-          continue
-        }
-        cancelAttempt()
-
-          feePaidSat := payment.FeeSat
-          if feePaidSat == 0 && payment.FeeMsat != 0 {
-            feePaidSat = int64(math.Ceil(float64(payment.FeeMsat) / 1000.0))
-          }
-          if feePaidSat == 0 && len(payment.Htlcs) > 0 {
-            var feeMsatSum int64
-            var feeSatSum int64
-            for _, htlc := range payment.Htlcs {
-              if htlc == nil || htlc.Route == nil {
-                continue
-              }
-              if htlc.Route.TotalFeesMsat > 0 {
-                feeMsatSum += htlc.Route.TotalFeesMsat
-              } else if htlc.Route.TotalFees > 0 {
-                feeSatSum += htlc.Route.TotalFees
-              }
-            }
-            if feeMsatSum > 0 {
-              feePaidSat = int64(math.Ceil(float64(feeMsatSum) / 1000.0))
-            } else if feeSatSum > 0 {
-              feePaidSat = feeSatSum
-            }
-          }
-          if feePaidSat == 0 && probeFeeMsat > 0 {
-            feePaidSat = int64(math.Ceil(float64(probeFeeMsat) / 1000.0))
-          }
-          attemptIndex++
-          _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feePpm, feePaidSat, "succeeded", paymentHash, "")
-
-          _ = s.applyRebalanceLedger(ctx, targetChannelID, amountTry, feePaidSat)
-          _ = s.addBudgetSpend(ctx, feePaidSat, jobSource)
-
           anySuccess = true
-          sourceSucceeded = true
           if cfg.AmountProbeAdaptive {
-            adaptiveMaxAmount = amountTry
+            adaptiveMaxAmount = rapidAmount
           }
-          remaining -= amountTry
+          remaining -= rapidAmount
+          sourceRemaining -= rapidAmount
           if remaining <= 0 {
             s.finishJob(jobID, "succeeded", "")
             s.broadcast(RebalanceEvent{Type: "job", JobID: jobID, Status: "succeeded"})
             return
           }
-          break
         }
-        if sourceSucceeded {
-          break
-        }
+        break
+      }
+      if sourceSucceeded {
+        break
       }
     }
+  }
 
   if anySuccess {
     s.finishJob(jobID, "partial", fmt.Sprintf("remaining %d sats", remaining))
@@ -915,6 +937,81 @@ insert into rebalance_channel_ledger (
   last_rebalance_at = excluded.last_rebalance_at
 `, channelID, amountSat, costSat, 0, now, now, pgtype.Timestamptz{})
   return err
+}
+
+func (s *RebalanceService) recordPairSuccess(ctx context.Context, sourceID uint64, targetID uint64, amountSat int64, feePpm int64, feePaidSat int64) {
+  if s.db == nil || sourceID == 0 || targetID == 0 {
+    return
+  }
+  now := time.Now().UTC()
+  _, _ = s.db.Exec(ctx, `
+insert into rebalance_pair_stats (
+  source_channel_id, target_channel_id, last_success_at, success_amount_sat, success_fee_ppm, success_fee_paid_sat, success_count
+) values ($1,$2,$3,$4,$5,$6,1)
+ on conflict (source_channel_id, target_channel_id) do update set
+  last_success_at = excluded.last_success_at,
+  success_amount_sat = excluded.success_amount_sat,
+  success_fee_ppm = excluded.success_fee_ppm,
+  success_fee_paid_sat = excluded.success_fee_paid_sat,
+  success_count = rebalance_pair_stats.success_count + 1
+`, int64(sourceID), int64(targetID), now, amountSat, feePpm, feePaidSat)
+}
+
+func (s *RebalanceService) recordPairFailure(ctx context.Context, sourceID uint64, targetID uint64, reason string) {
+  if s.db == nil || sourceID == 0 || targetID == 0 {
+    return
+  }
+  now := time.Now().UTC()
+  _, _ = s.db.Exec(ctx, `
+insert into rebalance_pair_stats (
+  source_channel_id, target_channel_id, last_fail_at, last_fail_reason, fail_count
+) values ($1,$2,$3,$4,1)
+ on conflict (source_channel_id, target_channel_id) do update set
+  last_fail_at = excluded.last_fail_at,
+  last_fail_reason = excluded.last_fail_reason,
+  fail_count = rebalance_pair_stats.fail_count + 1
+`, int64(sourceID), int64(targetID), now, nullableString(reason))
+}
+
+func (s *RebalanceService) loadPairStatsForTarget(ctx context.Context, targetID uint64) map[uint64]pairStat {
+  stats := map[uint64]pairStat{}
+  if s.db == nil || targetID == 0 {
+    return stats
+  }
+  rows, err := s.db.Query(ctx, `
+select source_channel_id, target_channel_id, last_success_at, last_fail_at, success_amount_sat, success_fee_ppm
+from rebalance_pair_stats
+where target_channel_id=$1
+`, int64(targetID))
+  if err != nil {
+    return stats
+  }
+  defer rows.Close()
+  for rows.Next() {
+    var sourceID int64
+    var targetIDRow int64
+    var lastSuccess pgtype.Timestamptz
+    var lastFail pgtype.Timestamptz
+    var successAmount int64
+    var successFee int64
+    if err := rows.Scan(&sourceID, &targetIDRow, &lastSuccess, &lastFail, &successAmount, &successFee); err != nil {
+      return stats
+    }
+    stat := pairStat{
+      SourceChannelID: uint64(sourceID),
+      TargetChannelID: uint64(targetIDRow),
+      SuccessAmountSat: successAmount,
+      SuccessFeePpm: successFee,
+    }
+    if lastSuccess.Valid {
+      stat.LastSuccessAt = lastSuccess.Time
+    }
+    if lastFail.Valid {
+      stat.LastFailAt = lastFail.Time
+    }
+    stats[uint64(sourceID)] = stat
+  }
+  return stats
 }
 
 func (s *RebalanceService) acquireSem(ctx context.Context) bool {
@@ -1409,6 +1506,20 @@ create table if not exists rebalance_attempts (
   finished_at timestamptz
 );
 
+create table if not exists rebalance_pair_stats (
+  source_channel_id bigint not null,
+  target_channel_id bigint not null,
+  last_success_at timestamptz,
+  last_fail_at timestamptz,
+  last_fail_reason text,
+  success_amount_sat bigint not null default 0,
+  success_fee_ppm bigint not null default 0,
+  success_fee_paid_sat bigint not null default 0,
+  success_count integer not null default 0,
+  fail_count integer not null default 0,
+  primary key (source_channel_id, target_channel_id)
+);
+
 create table if not exists rebalance_budget_daily (
   day date primary key,
   budget_sat bigint not null,
@@ -1427,6 +1538,8 @@ create index if not exists rebalance_jobs_status_idx on rebalance_jobs (status);
 create index if not exists rebalance_jobs_created_idx on rebalance_jobs (created_at desc);
 create index if not exists rebalance_attempts_job_idx on rebalance_attempts (job_id);
 create index if not exists rebalance_attempts_status_idx on rebalance_attempts (status);
+create index if not exists rebalance_pair_stats_fail_idx on rebalance_pair_stats (last_fail_at desc);
+create index if not exists rebalance_pair_stats_success_idx on rebalance_pair_stats (last_success_at desc);
 create index if not exists notifications_channel_id_idx on notifications (channel_id);
 `)
   if err != nil {

@@ -262,7 +262,7 @@ func (s *Server) handleRebalanceRun(w http.ResponseWriter, r *http.Request) {
     }
     _ = s.rebalance.SetChannelTarget(ctx, resolvedID, resolvedPoint, *targetPct)
   }
-  jobID, err := s.rebalance.startJob(resolvedID, "manual", "")
+  jobID, err := s.rebalance.startJob(resolvedID, "manual", "", 0)
   if err != nil {
     writeError(w, http.StatusInternalServerError, err.Error())
     return
