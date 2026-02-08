@@ -20,6 +20,83 @@ LightningOS Light is a Full Lightning Node Daemon Installer, Lightning node mana
 - App Store: LNDg, Peerswap (psweb), Elements, Bitcoin Core
 - Bitcoin Local management (status + config) and logs viewer
 
+**Lightning Ops: Autofee**
+Autofee automatically adjusts **outbound fees** to maximize **profit first** and **movement second**. It uses your local routing and rebalance history (Postgres notifications) plus optional Amboss metrics to seed prices, then applies guardrails, cooldowns, and caps so updates are safe and explainable.
+
+UI parameters:
+- `Enable autofee`: global on/off.
+- `Profile`: Conservative / Moderate / Aggressive (sets internal thresholds).
+- `Lookback window (days)`: 5 to 21 days for stats.
+- `Run interval (hours)`: minimum 1 hour.
+- `Cooldown up / down (hours)`: minimum time between fee increases / decreases.
+- `Min fee (ppm)` and `Max fee (ppm)`: hard clamps.
+- `Amboss fee reference`: optional seed source; requires API token.
+- `Inbound passive rebalance`: uses inbound discount for sink channels.
+- `Discovery mode`: faster lowering for idle/high-outbound channels.
+- `Explorer mode`: temporary exploration cycles; may skip cooldown on down moves.
+- `Revenue floor`: keeps a minimum floor for high-performing channels.
+- `Circuit breaker`: reduces steps if demand drops after recent increases.
+- `Extreme drain`: accelerates fee increases when a channel is chronically drained.
+- `Super source` + base fee: raises base fee when a channel is classified as super source.
+
+Automatic calibration:
+- Each run computes a node classification and liquidity status to auto-scale thresholds.
+- Node size classes (based on total capacity and channel count):
+  - `small`: < 50M sats or < 20 channels
+  - `medium`: < 200M sats or < 60 channels
+  - `large`: < 1.5B sats or < 150 channels
+  - `extra large`: everything above
+- Liquidity classes (based on local ratio):
+  - `drained`: local ratio < 25%
+  - `balanced`: 25% to 75%
+  - `full`: local ratio > 75%
+- The calibration line in Autofee Results shows these classes plus calibrated `revfloor` thresholds.
+
+Autofee Results lines:
+- Header: run type and timestamp.
+- Summary: counts for up/down/flat and skip reasons.
+- Seed: Amboss and fallback usage.
+- Calibration: node size, liquidity, and calibrated thresholds.
+- Per-channel lines: decision, target, floors, margins, and tags.
+
+Tag glossary (Autofee Results):
+- `🧭discovery`: channel in discovery mode.
+- `🧨harddrop`: discovery harddrop triggered (no baseline + idle).
+- `🧭explorer`: explorer mode active.
+- `🧭skip-cooldown`: cooldown skipped on down move due to explorer.
+- `📈surge+X%`: surge bump applied.
+- `💎top-rev`: top revenue share bump applied.
+- `⚠️neg-margin`: negative margin protection bump.
+- `🧱revfloor`: revenue floor applied.
+- `📊outrate-floor`: outrate floor applied.
+- `📌peg`: peg to observed outrate.
+- `📌peg-grace`: peg applied inside grace window.
+- `📌peg-demand`: peg applied due to strong demand vs seed.
+- `🧯cb`: circuit breaker reduced the step.
+- `⚡extreme`: extreme drain step cap/min-step boost applied.
+- `⚡turbo`: extreme drain turbo boost applied.
+- `⏳cooldown`: cooldown blocked an update.
+- `⏳profit-hold`: cooldown held a profitable down move.
+- `🧊hold-small`: change below min delta/percent.
+- `🟰same-ppm`: target equals current ppm.
+- `🚫down-low`: no down-move while deeply drained.
+- `🔥super-source`: channel classified as super source.
+- `🔥super-source-like`: router-like super source.
+- `↘️inb-<n>`: inbound discount (passive rebalance).
+- `🌐seed-amboss`: Amboss seed used.
+- `seed:amboss-missing`: Amboss token missing.
+- `seed:amboss-empty`: Amboss returned no data.
+- `seed:amboss-error`: Amboss fetch error.
+- `📐seed-med`: Amboss median blended in.
+- `📉seed-vol-<n>%`: volatility penalty applied.
+- `🔁seed-ratio×<f>`: out/in ratio adjustment applied.
+- `📊seed-outrate`: seed from recent outrate.
+- `💾seed-mem`: seed from memory.
+- `⚙️seed-default`: default seed fallback.
+- `🛡️seed-guard`: seed jump cap applied.
+- `🧢seed-p95`: seed capped at Amboss p95.
+- `🧱seed-cap`: absolute seed cap applied.
+
 ## Repository layout
 - `cmd/lightningos-manager`: Go backend (API + static UI)
 - `ui`: React + Tailwind UI
