@@ -167,12 +167,26 @@ func (c *Client) GetMaxHtlcMsat(ctx context.Context, channelID uint64, fromPubke
 }
 
 func (c *Client) QueryRoute(ctx context.Context, destPubkey string, amtSat int64, outgoingChanID uint64, lastHopPubkey string, feeLimitMsat int64) (*lnrpc.Route, error) {
+  routes, err := c.QueryRoutes(ctx, destPubkey, amtSat, outgoingChanID, lastHopPubkey, feeLimitMsat, 1)
+  if err != nil {
+    return nil, err
+  }
+  if len(routes) == 0 {
+    return nil, errors.New("no route")
+  }
+  return routes[0], nil
+}
+
+func (c *Client) QueryRoutes(ctx context.Context, destPubkey string, amtSat int64, outgoingChanID uint64, lastHopPubkey string, feeLimitMsat int64, numRoutes int32) ([]*lnrpc.Route, error) {
   trimmedDest := strings.TrimSpace(destPubkey)
   if trimmedDest == "" {
     return nil, errors.New("dest pubkey required")
   }
   if amtSat <= 0 {
     return nil, errors.New("amount must be positive")
+  }
+  if numRoutes <= 0 {
+    numRoutes = 1
   }
 
   conn, err := c.dial(ctx, true)
@@ -187,6 +201,7 @@ func (c *Client) QueryRoute(ctx context.Context, destPubkey string, amtSat int64
     PubKey: trimmedDest,
     Amt: amtSat,
     OutgoingChanId: outgoingChanID,
+    NumRoutes: numRoutes,
   }
   if feeLimitMsat > 0 {
     req.FeeLimit = &lnrpc.FeeLimit{
@@ -208,7 +223,46 @@ func (c *Client) QueryRoute(ctx context.Context, destPubkey string, amtSat int64
   if resp == nil || len(resp.Routes) == 0 {
     return nil, errors.New("no route")
   }
-  return resp.Routes[0], nil
+  return resp.Routes, nil
+}
+
+func (c *Client) SendToRoute(ctx context.Context, paymentHash string, route *lnrpc.Route) (*routerrpc.HTLCAttempt, error) {
+  if route == nil {
+    return nil, errors.New("route required")
+  }
+  trimmed := strings.TrimSpace(paymentHash)
+  if trimmed == "" {
+    return nil, errors.New("payment hash required")
+  }
+  hashBytes, err := hex.DecodeString(trimmed)
+  if err != nil {
+    return nil, errors.New("invalid payment hash")
+  }
+
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return nil, err
+  }
+  defer conn.Close()
+
+  router := routerrpc.NewRouterClient(conn)
+  resp, err := router.SendToRouteV2(ctx, &routerrpc.SendToRouteRequest{
+    PaymentHash: hashBytes,
+    Route: route,
+  })
+  if err != nil {
+    return nil, err
+  }
+  if resp == nil {
+    return nil, errors.New("empty send response")
+  }
+  if resp.Status != routerrpc.HTLCAttempt_SUCCEEDED {
+    if resp.Failure != nil {
+      return resp, fmt.Errorf("route failed: %s", resp.Failure.Code.String())
+    }
+    return resp, errors.New("route failed")
+  }
+  return resp, nil
 }
 
 func (c *Client) SendPaymentWithConstraints(ctx context.Context, paymentRequest string, outgoingChanID uint64, lastHopPubkey string, feeLimitMsat int64, timeoutSec int32, maxParts uint32) (*lnrpc.Payment, error) {

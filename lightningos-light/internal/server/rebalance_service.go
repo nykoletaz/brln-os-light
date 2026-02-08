@@ -888,7 +888,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       attemptCtx, cancelAttempt = context.WithTimeout(ctx, time.Duration(attemptTimeoutSec)*time.Second)
     }
 
-    route, err := s.lnd.QueryRoute(attemptCtx, selfPubkey, amountTry, sourceID, targetSnapshot.RemotePubkey, feeLimitMsat)
+    routes, err := s.lnd.QueryRoutes(attemptCtx, selfPubkey, amountTry, sourceID, targetSnapshot.RemotePubkey, feeLimitMsat, 5)
     routeMaxSat := int64(0)
     if err != nil {
       cancelAttempt()
@@ -913,16 +913,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       }
       return false, false, 0
     }
-    routeMaxSat = s.maxAmountOnRouteSat(attemptCtx, route, selfPubkey)
-    if route != nil {
-      if route.TotalFeesMsat > 0 {
-        probeFeeMsat = route.TotalFeesMsat
-      } else if route.TotalFees > 0 {
-        probeFeeMsat = route.TotalFees * 1000
-      }
-    }
-
-    paymentReq, paymentHash, err := s.createRebalanceInvoice(attemptCtx, amountTry, jobID, sourceID, targetChannelID)
+    _, paymentHash, err := s.createRebalanceInvoice(attemptCtx, amountTry, jobID, sourceID, targetChannelID)
     if err != nil {
       cancelAttempt()
       if ctx.Err() != nil {
@@ -945,62 +936,73 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       return false, false, 0
     }
 
-    payment, err := s.lnd.SendPaymentWithConstraints(attemptCtx, paymentReq, sourceID, targetSnapshot.RemotePubkey, feeLimitMsat, int32(attemptTimeoutSec), 3)
-    if err != nil {
-      cancelAttempt()
-      if ctx.Err() != nil {
-        if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-          s.finishJob(jobID, "failed", "timeout")
-        } else {
-          s.finishJob(jobID, "cancelled", "cancelled")
+    var lastErr error
+    var lastRouteFeeMsat int64
+    for _, route := range routes {
+      if route == nil {
+        continue
+      }
+      routeFeeMsat := int64(0)
+      if route.TotalFeesMsat > 0 {
+        routeFeeMsat = route.TotalFeesMsat
+      } else if route.TotalFees > 0 {
+        routeFeeMsat = route.TotalFees * 1000
+      }
+      if feeLimitMsat > 0 && routeFeeMsat > feeLimitMsat {
+        lastErr = fmt.Errorf("route fee exceeds limit")
+        continue
+      }
+
+      routeMaxSat = s.maxAmountOnRouteSat(attemptCtx, route, selfPubkey)
+      if routeFeeMsat > 0 {
+        probeFeeMsat = routeFeeMsat
+      }
+      lastRouteFeeMsat = routeFeeMsat
+
+      _, err = s.lnd.SendToRoute(attemptCtx, paymentHash, route)
+      if err == nil {
+        cancelAttempt()
+        feePaidSat := msatToSatCeil(routeFeeMsat)
+        if feePaidSat == 0 && probeFeeMsat > 0 {
+          feePaidSat = msatToSatCeil(probeFeeMsat)
         }
-        return false, true, 0
-      }
-      if errors.Is(err, context.DeadlineExceeded) || errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
         attemptIndex++
-        _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", paymentHash, "attempt timeout")
-        s.recordPairFailure(ctx, sourceID, targetChannelID, "attempt timeout")
-        return false, false, 0
+        _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, feePaidSat, "succeeded", paymentHash, "")
+        s.recordPairSuccess(ctx, sourceID, targetChannelID, amountTry, feePpm, feePaidSat)
+        _ = s.applyRebalanceLedger(ctx, targetChannelID, amountTry, feePaidSat)
+        _ = s.addBudgetSpend(ctx, feePaidSat, jobSource)
+        return true, false, routeMaxSat
       }
+      lastErr = err
+    }
+
+    cancelAttempt()
+    if ctx.Err() != nil {
+      if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+        s.finishJob(jobID, "failed", "timeout")
+      } else {
+        s.finishJob(jobID, "cancelled", "cancelled")
+      }
+      return false, true, 0
+    }
+    if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
       attemptIndex++
-      _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", paymentHash, err.Error())
-      s.recordPairFailure(ctx, sourceID, targetChannelID, err.Error())
+      _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", paymentHash, "attempt timeout")
+      s.recordPairFailure(ctx, sourceID, targetChannelID, "attempt timeout")
       return false, false, 0
     }
-    cancelAttempt()
-
-    feePaidSat := payment.FeeSat
-    if feePaidSat == 0 && payment.FeeMsat != 0 {
-      feePaidSat = int64(math.Ceil(float64(payment.FeeMsat) / 1000.0))
+    failReason := ""
+    if lastErr != nil {
+      failReason = lastErr.Error()
+    } else if lastRouteFeeMsat > 0 {
+      failReason = "all routes failed"
     }
-    if feePaidSat == 0 && len(payment.Htlcs) > 0 {
-      var feeMsatSum int64
-      var feeSatSum int64
-      for _, htlc := range payment.Htlcs {
-        if htlc == nil || htlc.Route == nil {
-          continue
-        }
-        if htlc.Route.TotalFeesMsat > 0 {
-          feeMsatSum += htlc.Route.TotalFeesMsat
-        } else if htlc.Route.TotalFees > 0 {
-          feeSatSum += htlc.Route.TotalFees
-        }
-      }
-      if feeMsatSum > 0 {
-        feePaidSat = int64(math.Ceil(float64(feeMsatSum) / 1000.0))
-      } else if feeSatSum > 0 {
-        feePaidSat = feeSatSum
-      }
+    if logRouteFailure {
+      attemptIndex++
+      _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", paymentHash, failReason)
+      s.recordPairFailure(ctx, sourceID, targetChannelID, failReason)
     }
-    if feePaidSat == 0 && probeFeeMsat > 0 {
-      feePaidSat = int64(math.Ceil(float64(probeFeeMsat) / 1000.0))
-    }
-    attemptIndex++
-    _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, feePaidSat, "succeeded", paymentHash, "")
-    s.recordPairSuccess(ctx, sourceID, targetChannelID, amountTry, feePpm, feePaidSat)
-    _ = s.applyRebalanceLedger(ctx, targetChannelID, amountTry, feePaidSat)
-    _ = s.addBudgetSpend(ctx, feePaidSat, jobSource)
-    return true, false, routeMaxSat
+    return false, false, 0
   }
 
   applySuccess := func(amountSat int64, routeMax int64, routeCap *int64, sourceRemaining *int64) bool {
@@ -1666,7 +1668,7 @@ func calcFeeStepPpm(maxFeePpm int64, steps int, step int) int64 {
   if steps <= 1 {
     return maxFeePpm
   }
-  minFee := int64(math.Round(float64(maxFeePpm) * 0.7))
+  minFee := int64(math.Round(float64(maxFeePpm) * 0.8))
   if minFee < 1 {
     minFee = 1
   }
