@@ -717,6 +717,180 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
   warmFeePpm := int64(0)
   warmAt := time.Time{}
   for _, source := range sources {
+    stat, ok := pairStats[source.ChannelID]
+    if !ok {
+      continue
+    }
+    if stat.SuccessAmountSat <= 0 || stat.SuccessFeePpm <= 0 {
+      continue
+    }
+    if stat.LastSuccessAt.IsZero() || time.Since(stat.LastSuccessAt) > pairSuccessTTL {
+      continue
+    }
+    if !stat.LastFailAt.IsZero() && stat.LastFailAt.After(stat.LastSuccessAt) {
+      continue
+    }
+    if stat.SuccessFeePpm > maxFeePpm {
+      continue
+    }
+    if cfg.MinAmountSat > 0 && stat.SuccessAmountSat < cfg.MinAmountSat {
+      continue
+    }
+    if stat.LastSuccessAt.After(warmAt) {
+      warmAt = stat.LastSuccessAt
+      warmSourceID = source.ChannelID
+      warmAmount = stat.SuccessAmountSat
+      warmFeePpm = stat.SuccessFeePpm
+    }
+  }
+
+  remaining := amount
+  anySuccess := false
+  attemptIndex := 0
+  adaptiveMaxAmount := int64(0)
+  attemptTimeoutSec := cfg.AttemptTimeoutSec
+  if attemptTimeoutSec <= 0 {
+    attemptTimeoutSec = 60
+  }
+
+  attemptPayment := func(sourceID uint64, amountTry int64, feePpm int64, logRouteFailure bool) (bool, bool) {
+    if ctx.Err() != nil {
+      if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+        s.finishJob(jobID, "failed", "timeout")
+      } else {
+        s.finishJob(jobID, "cancelled", "cancelled")
+      }
+      return false, true
+    }
+    if amountTry <= 0 {
+      return false, false
+    }
+    if cfg.MinAmountSat > 0 && amountTry < cfg.MinAmountSat {
+      return false, false
+    }
+
+    feeLimitMsat := ppmToFeeLimitMsat(amountTry, feePpm)
+    var probeFeeMsat int64
+    attemptCtx := ctx
+    cancelAttempt := func() {}
+    if attemptTimeoutSec > 0 {
+      attemptCtx, cancelAttempt = context.WithTimeout(ctx, time.Duration(attemptTimeoutSec)*time.Second)
+    }
+
+    route, err := s.lnd.QueryRoute(attemptCtx, selfPubkey, amountTry, sourceID, targetSnapshot.RemotePubkey, feeLimitMsat)
+    if err != nil {
+      cancelAttempt()
+      if ctx.Err() != nil {
+        if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+          s.finishJob(jobID, "failed", "timeout")
+        } else {
+          s.finishJob(jobID, "cancelled", "cancelled")
+        }
+        return false, true
+      }
+      if errors.Is(err, context.DeadlineExceeded) || errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+        attemptIndex++
+        _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", "", "attempt timeout")
+        s.recordPairFailure(ctx, sourceID, targetChannelID, "attempt timeout")
+        return false, false
+      }
+      if logRouteFailure {
+        attemptIndex++
+        _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", "", err.Error())
+        s.recordPairFailure(ctx, sourceID, targetChannelID, err.Error())
+      }
+      return false, false
+    }
+    if route != nil {
+      if route.TotalFeesMsat > 0 {
+        probeFeeMsat = route.TotalFeesMsat
+      } else if route.TotalFees > 0 {
+        probeFeeMsat = route.TotalFees * 1000
+      }
+    }
+
+    paymentReq, paymentHash, err := s.createRebalanceInvoice(attemptCtx, amountTry, jobID, sourceID, targetChannelID)
+    if err != nil {
+      cancelAttempt()
+      if ctx.Err() != nil {
+        if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+          s.finishJob(jobID, "failed", "timeout")
+        } else {
+          s.finishJob(jobID, "cancelled", "cancelled")
+        }
+        return false, true
+      }
+      if errors.Is(err, context.DeadlineExceeded) || errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+        attemptIndex++
+        _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", "", "attempt timeout")
+        s.recordPairFailure(ctx, sourceID, targetChannelID, "attempt timeout")
+        return false, false
+      }
+      attemptIndex++
+      _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", "", err.Error())
+      s.recordPairFailure(ctx, sourceID, targetChannelID, err.Error())
+      return false, false
+    }
+
+    payment, err := s.lnd.SendPaymentWithConstraints(attemptCtx, paymentReq, sourceID, targetSnapshot.RemotePubkey, feeLimitMsat, int32(attemptTimeoutSec), 3)
+    if err != nil {
+      cancelAttempt()
+      if ctx.Err() != nil {
+        if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+          s.finishJob(jobID, "failed", "timeout")
+        } else {
+          s.finishJob(jobID, "cancelled", "cancelled")
+        }
+        return false, true
+      }
+      if errors.Is(err, context.DeadlineExceeded) || errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+        attemptIndex++
+        _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", paymentHash, "attempt timeout")
+        s.recordPairFailure(ctx, sourceID, targetChannelID, "attempt timeout")
+        return false, false
+      }
+      attemptIndex++
+      _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", paymentHash, err.Error())
+      s.recordPairFailure(ctx, sourceID, targetChannelID, err.Error())
+      return false, false
+    }
+    cancelAttempt()
+
+    feePaidSat := payment.FeeSat
+    if feePaidSat == 0 && payment.FeeMsat != 0 {
+      feePaidSat = int64(math.Ceil(float64(payment.FeeMsat) / 1000.0))
+    }
+    if feePaidSat == 0 && len(payment.Htlcs) > 0 {
+      var feeMsatSum int64
+      var feeSatSum int64
+      for _, htlc := range payment.Htlcs {
+        if htlc == nil || htlc.Route == nil {
+          continue
+        }
+        if htlc.Route.TotalFeesMsat > 0 {
+          feeMsatSum += htlc.Route.TotalFeesMsat
+        } else if htlc.Route.TotalFees > 0 {
+          feeSatSum += htlc.Route.TotalFees
+        }
+      }
+      if feeMsatSum > 0 {
+        feePaidSat = int64(math.Ceil(float64(feeMsatSum) / 1000.0))
+      } else if feeSatSum > 0 {
+        feePaidSat = feeSatSum
+      }
+    }
+    if feePaidSat == 0 && probeFeeMsat > 0 {
+      feePaidSat = int64(math.Ceil(float64(probeFeeMsat) / 1000.0))
+    }
+    attemptIndex++
+    _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, feePaidSat, "succeeded", paymentHash, "")
+    s.recordPairSuccess(ctx, sourceID, targetChannelID, amountTry, feePpm, feePaidSat)
+    _ = s.applyRebalanceLedger(ctx, targetChannelID, amountTry, feePaidSat)
+    _ = s.addBudgetSpend(ctx, feePaidSat, jobSource)
+    return true, false
+  }
+
+  for _, source := range sources {
     if ctx.Err() != nil {
       if errors.Is(ctx.Err(), context.DeadlineExceeded) {
         s.finishJob(jobID, "failed", "timeout")
