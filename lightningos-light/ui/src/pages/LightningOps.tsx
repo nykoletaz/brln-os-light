@@ -96,6 +96,7 @@ type AutofeeConfig = {
   super_source_base_fee_msat: number
   revfloor_enabled: boolean
   circuit_breaker_enabled: boolean
+  extreme_drain_enabled: boolean
   min_ppm: number
   max_ppm: number
 }
@@ -220,6 +221,7 @@ export default function LightningOps() {
   const [autofeeSuperSourceBaseFee, setAutofeeSuperSourceBaseFee] = useState('1000')
   const [autofeeRevfloor, setAutofeeRevfloor] = useState(true)
   const [autofeeCircuitBreaker, setAutofeeCircuitBreaker] = useState(true)
+  const [autofeeExtremeDrain, setAutofeeExtremeDrain] = useState(true)
   const [autofeeOpen, setAutofeeOpen] = useState(false)
   const [autofeeResultsOpen, setAutofeeResultsOpen] = useState(false)
   const [autofeeResults, setAutofeeResults] = useState<string[]>([])
@@ -409,6 +411,10 @@ export default function LightningOps() {
         add('📊outrate-floor')
       } else if (tag === 'circuit-breaker') {
         add('🧯cb')
+      } else if (tag === 'extreme-drain') {
+        add('⚡extreme')
+      } else if (tag === 'extreme-drain-turbo') {
+        add('⚡turbo')
       } else if (tag === 'revfloor') {
         add('🧱revfloor')
       } else if (tag === 'peg') {
@@ -740,6 +746,7 @@ export default function LightningOps() {
       setAutofeeSuperSourceBaseFee(String(cfg.super_source_base_fee_msat ?? 1000))
       setAutofeeRevfloor(cfg.revfloor_enabled !== false)
       setAutofeeCircuitBreaker(cfg.circuit_breaker_enabled !== false)
+      setAutofeeExtremeDrain(cfg.extreme_drain_enabled !== false)
       setAutofeeMessage('')
     } else {
       const message = (autofeeConfigResult.reason as any)?.message || t('lightningOps.autofeeConfigUnavailable')
@@ -1038,7 +1045,8 @@ export default function LightningOps() {
         super_source_enabled: autofeeSuperSource,
         super_source_base_fee_msat: superSourceBaseFee,
         revfloor_enabled: autofeeRevfloor,
-        circuit_breaker_enabled: autofeeCircuitBreaker
+        circuit_breaker_enabled: autofeeCircuitBreaker,
+        extreme_drain_enabled: autofeeExtremeDrain
       }
       if (autofeeAmbossToken.trim()) {
         payload.amboss_token = autofeeAmbossToken.trim()
@@ -1434,6 +1442,10 @@ export default function LightningOps() {
               <label className="flex items-center gap-2 text-sm text-fog/70">
                 <input type="checkbox" checked={autofeeCircuitBreaker} onChange={(e) => setAutofeeCircuitBreaker(e.target.checked)} />
                 {t('lightningOps.autofeeCircuitBreaker')}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-fog/70">
+                <input type="checkbox" checked={autofeeExtremeDrain} onChange={(e) => setAutofeeExtremeDrain(e.target.checked)} />
+                {t('lightningOps.autofeeExtremeDrain')}
               </label>
               <label className="flex items-center gap-2 text-sm text-fog/70">
                 <input type="checkbox" checked={autofeeSuperSource} onChange={(e) => setAutofeeSuperSource(e.target.checked)} />

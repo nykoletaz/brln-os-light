@@ -813,6 +813,7 @@
     "autofeeExplorer": "Explorer mode",
     "autofeeRevfloor": "Revenue floor",
     "autofeeCircuitBreaker": "Circuit breaker",
+    "autofeeExtremeDrain": "Extreme drain",
     "autofeeSuperSource": "Super source",
     "autofeeSuperSourceBaseFee": "Super source base fee (msats)",
     "autofeeDryRun": "Dry run",

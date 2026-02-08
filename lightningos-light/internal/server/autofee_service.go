@@ -47,6 +47,7 @@ type AutofeeConfig struct {
   SuperSourceBaseFeeMsat int `json:"super_source_base_fee_msat"`
   RevfloorEnabled bool `json:"revfloor_enabled"`
   CircuitBreakerEnabled bool `json:"circuit_breaker_enabled"`
+  ExtremeDrainEnabled bool `json:"extreme_drain_enabled"`
   MinPpm int `json:"min_ppm"`
   MaxPpm int `json:"max_ppm"`
 }
@@ -67,6 +68,7 @@ type AutofeeConfigUpdate struct {
   SuperSourceBaseFeeMsat *int `json:"super_source_base_fee_msat,omitempty"`
   RevfloorEnabled *bool `json:"revfloor_enabled,omitempty"`
   CircuitBreakerEnabled *bool `json:"circuit_breaker_enabled,omitempty"`
+  ExtremeDrainEnabled *bool `json:"extreme_drain_enabled,omitempty"`
   MinPpm *int `json:"min_ppm,omitempty"`
   MaxPpm *int `json:"max_ppm,omitempty"`
 }
@@ -152,6 +154,14 @@ type autofeeProfile struct {
   CircuitBreakerDropRatio float64
   CircuitBreakerReduceStep float64
   CircuitBreakerGraceDays int
+  ExtremeDrainStreak int
+  ExtremeDrainOutMax float64
+  ExtremeDrainStepCap float64
+  ExtremeDrainMinStepPpm int
+  ExtremeDrainTurboStreak int
+  ExtremeDrainTurboOutMax float64
+  ExtremeDrainTurboStepCap float64
+  ExtremeDrainTurboMinStepPpm int
 }
 
 type superSourceThresholds struct {
@@ -191,6 +201,14 @@ var autofeeProfiles = map[string]autofeeProfile{
     CircuitBreakerDropRatio: 0.75,
     CircuitBreakerReduceStep: 0.08,
     CircuitBreakerGraceDays: 10,
+    ExtremeDrainStreak: 32,
+    ExtremeDrainOutMax: 0.03,
+    ExtremeDrainStepCap: 0.10,
+    ExtremeDrainMinStepPpm: 10,
+    ExtremeDrainTurboStreak: 400,
+    ExtremeDrainTurboOutMax: 0.01,
+    ExtremeDrainTurboStepCap: 0.15,
+    ExtremeDrainTurboMinStepPpm: 15,
   },
   "moderate": {
     Name: "moderate",
@@ -219,6 +237,14 @@ var autofeeProfiles = map[string]autofeeProfile{
     CircuitBreakerDropRatio: 0.70,
     CircuitBreakerReduceStep: 0.10,
     CircuitBreakerGraceDays: 7,
+    ExtremeDrainStreak: 24,
+    ExtremeDrainOutMax: 0.04,
+    ExtremeDrainStepCap: 0.12,
+    ExtremeDrainMinStepPpm: 12,
+    ExtremeDrainTurboStreak: 300,
+    ExtremeDrainTurboOutMax: 0.01,
+    ExtremeDrainTurboStepCap: 0.20,
+    ExtremeDrainTurboMinStepPpm: 20,
   },
   "aggressive": {
     Name: "aggressive",
@@ -247,6 +273,14 @@ var autofeeProfiles = map[string]autofeeProfile{
     CircuitBreakerDropRatio: 0.60,
     CircuitBreakerReduceStep: 0.15,
     CircuitBreakerGraceDays: 5,
+    ExtremeDrainStreak: 16,
+    ExtremeDrainOutMax: 0.05,
+    ExtremeDrainStepCap: 0.15,
+    ExtremeDrainMinStepPpm: 15,
+    ExtremeDrainTurboStreak: 300,
+    ExtremeDrainTurboOutMax: 0.01,
+    ExtremeDrainTurboStepCap: 0.20,
+    ExtremeDrainTurboMinStepPpm: 20,
   },
 }
 
@@ -341,6 +375,7 @@ create table if not exists autofee_config (
   super_source_base_fee_msat integer not null default 1000,
   revfloor_enabled boolean not null default true,
   circuit_breaker_enabled boolean not null default true,
+  extreme_drain_enabled boolean not null default true,
   min_ppm integer not null default 10,
   max_ppm integer not null default 2000,
   created_at timestamptz not null default now(),
@@ -394,6 +429,7 @@ alter table autofee_config add column if not exists super_source_enabled boolean
 alter table autofee_config add column if not exists super_source_base_fee_msat integer not null default 1000;
 alter table autofee_config add column if not exists revfloor_enabled boolean not null default true;
 alter table autofee_config add column if not exists circuit_breaker_enabled boolean not null default true;
+alter table autofee_config add column if not exists extreme_drain_enabled boolean not null default true;
 alter table autofee_state add column if not exists ss_active boolean;
 alter table autofee_state add column if not exists ss_ok_since timestamptz;
 alter table autofee_state add column if not exists ss_bad_since timestamptz;
@@ -430,6 +466,7 @@ func (s *AutofeeService) defaultConfig() AutofeeConfig {
     SuperSourceBaseFeeMsat: superSourceBaseFeeMsatDefault,
     RevfloorEnabled: true,
     CircuitBreakerEnabled: true,
+    ExtremeDrainEnabled: true,
     MinPpm: 10,
     MaxPpm: 2000,
   }
@@ -445,7 +482,7 @@ func (s *AutofeeService) GetConfig(ctx context.Context) (AutofeeConfig, error) {
   err := s.db.QueryRow(ctx, `
 select enabled, profile, lookback_days, run_interval_sec, cooldown_up_sec, cooldown_down_sec,
   amboss_enabled, amboss_token, inbound_passive_enabled, discovery_enabled, explorer_enabled,
-  super_source_enabled, super_source_base_fee_msat, revfloor_enabled, circuit_breaker_enabled, min_ppm, max_ppm
+  super_source_enabled, super_source_base_fee_msat, revfloor_enabled, circuit_breaker_enabled, extreme_drain_enabled, min_ppm, max_ppm
 from autofee_config where id=$1
 `, autofeeConfigID).Scan(
     &cfg.Enabled,
@@ -463,6 +500,7 @@ from autofee_config where id=$1
     &cfg.SuperSourceBaseFeeMsat,
     &cfg.RevfloorEnabled,
     &cfg.CircuitBreakerEnabled,
+    &cfg.ExtremeDrainEnabled,
     &cfg.MinPpm,
     &cfg.MaxPpm,
   )
@@ -542,6 +580,9 @@ func (s *AutofeeService) UpdateConfig(ctx context.Context, req AutofeeConfigUpda
   if req.CircuitBreakerEnabled != nil {
     current.CircuitBreakerEnabled = *req.CircuitBreakerEnabled
   }
+  if req.ExtremeDrainEnabled != nil {
+    current.ExtremeDrainEnabled = *req.ExtremeDrainEnabled
+  }
   if req.MinPpm != nil {
     current.MinPpm = *req.MinPpm
   }
@@ -606,8 +647,9 @@ set enabled=$2,
   super_source_base_fee_msat=$14,
   revfloor_enabled=$15,
   circuit_breaker_enabled=$16,
-  min_ppm=$17,
-  max_ppm=$18,
+  extreme_drain_enabled=$17,
+  min_ppm=$18,
+  max_ppm=$19,
   updated_at=now()
 where id=$1
 `, autofeeConfigID,
@@ -626,6 +668,7 @@ where id=$1
     current.SuperSourceBaseFeeMsat,
     current.RevfloorEnabled,
     current.CircuitBreakerEnabled,
+    current.ExtremeDrainEnabled,
     current.MinPpm,
     current.MaxPpm,
   )
@@ -1854,6 +1897,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   target = clampInt(target, e.cfg.MinPpm, e.cfg.MaxPpm)
 
   capFrac := e.profile.StepCap
+  minStep := 5
   if outRatio < 0.03 {
     capFrac = math.Max(capFrac, 0.10)
   } else if outRatio < 0.05 {
@@ -1872,7 +1916,24 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     capFrac = math.Max(capFrac, e.profile.DiscoveryStepCapDown)
   }
 
-  rawStep := applyStepCap(localPpm, target, capFrac, 5)
+  if e.cfg.ExtremeDrainEnabled && target > localPpm && e.profile.ExtremeDrainStreak > 0 {
+    if st.LowStreak >= e.profile.ExtremeDrainStreak && outRatio <= e.profile.ExtremeDrainOutMax {
+      capFrac = math.Max(capFrac, e.profile.ExtremeDrainStepCap)
+      if e.profile.ExtremeDrainMinStepPpm > minStep {
+        minStep = e.profile.ExtremeDrainMinStepPpm
+      }
+      tags = append(tags, "extreme-drain")
+      if st.LowStreak >= e.profile.ExtremeDrainTurboStreak && outRatio <= e.profile.ExtremeDrainTurboOutMax {
+        capFrac = math.Max(capFrac, e.profile.ExtremeDrainTurboStepCap)
+        if e.profile.ExtremeDrainTurboMinStepPpm > minStep {
+          minStep = e.profile.ExtremeDrainTurboMinStepPpm
+        }
+        tags = append(tags, "extreme-drain-turbo")
+      }
+    }
+  }
+
+  rawStep := applyStepCap(localPpm, target, capFrac, minStep)
   if e.cfg.CircuitBreakerEnabled && st.LastDir == "up" && !st.LastTs.IsZero() {
     daysSince := e.now.Sub(st.LastTs).Hours() / 24.0
     if daysSince <= float64(e.profile.CircuitBreakerGraceDays) && st.BaselineFwd7d > 0 {
@@ -2548,6 +2609,10 @@ func formatAutofeeTags(d *decision) string {
       add("📊outrate-floor")
     case t == "circuit-breaker":
       add("🧯cb")
+    case t == "extreme-drain":
+      add("⚡extreme")
+    case t == "extreme-drain-turbo":
+      add("⚡turbo")
     case t == "revfloor":
       add("🧱revfloor")
     case t == "peg":
