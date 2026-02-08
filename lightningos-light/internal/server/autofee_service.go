@@ -86,6 +86,15 @@ type autofeeLogItem struct {
   Reason string `json:"reason,omitempty"`
   DryRun bool `json:"dry_run,omitempty"`
   Timestamp string `json:"timestamp,omitempty"`
+  NodeClass string `json:"node_class,omitempty"`
+  LiquidityClass string `json:"liquidity_class,omitempty"`
+  ChannelCount int `json:"channel_count,omitempty"`
+  TotalCapacitySat int64 `json:"total_capacity_sat,omitempty"`
+  AvgCapacitySat int64 `json:"avg_capacity_sat,omitempty"`
+  LocalCapacitySat int64 `json:"local_capacity_sat,omitempty"`
+  LocalRatio float64 `json:"local_ratio,omitempty"`
+  RevfloorBaseline int `json:"revfloor_baseline,omitempty"`
+  RevfloorMinAbs int `json:"revfloor_min_abs,omitempty"`
   Up int `json:"up,omitempty"`
   Down int `json:"down,omitempty"`
   Flat int `json:"flat,omitempty"`
@@ -144,6 +153,8 @@ type autofeeProfile struct {
   ProfitDownExtraHours int
   RevfloorBaselineThresh int
   RevfloorMinAbs int
+  RevfloorBaselineScale float64
+  RevfloorMinAbsScale float64
   DiscHarddropDaysNoBase int
   DiscHarddropCapFrac float64
   DiscHarddropCushion int
@@ -191,6 +202,8 @@ var autofeeProfiles = map[string]autofeeProfile{
     ProfitDownExtraHours: 4,
     RevfloorBaselineThresh: 80,
     RevfloorMinAbs: 160,
+    RevfloorBaselineScale: 1.2,
+    RevfloorMinAbsScale: 1.1,
     DiscHarddropDaysNoBase: 8,
     DiscHarddropCapFrac: 0.10,
     DiscHarddropCushion: 15,
@@ -227,6 +240,8 @@ var autofeeProfiles = map[string]autofeeProfile{
     ProfitDownExtraHours: 2,
     RevfloorBaselineThresh: 60,
     RevfloorMinAbs: 140,
+    RevfloorBaselineScale: 1.0,
+    RevfloorMinAbsScale: 1.0,
     DiscHarddropDaysNoBase: 6,
     DiscHarddropCapFrac: 0.20,
     DiscHarddropCushion: 10,
@@ -263,6 +278,8 @@ var autofeeProfiles = map[string]autofeeProfile{
     ProfitDownExtraHours: 1,
     RevfloorBaselineThresh: 40,
     RevfloorMinAbs: 120,
+    RevfloorBaselineScale: 0.8,
+    RevfloorMinAbsScale: 0.9,
     DiscHarddropDaysNoBase: 3,
     DiscHarddropCapFrac: 0.25,
     DiscHarddropCushion: 5,
@@ -905,7 +922,20 @@ type autofeeEngine struct {
   profile autofeeProfile
   superSource superSourceThresholds
   ignoreCooldown bool
+  calib autofeeCalibration
   now time.Time
+}
+
+type autofeeCalibration struct {
+  RevfloorBaseline int
+  RevfloorMinAbs int
+  NodeClass string
+  LiquidityClass string
+  ChannelCount int
+  TotalCapacitySat int64
+  AvgCapacitySat int64
+  LocalCapacitySat int64
+  LocalRatio float64
 }
 
 type autofeeRunSummary struct {
@@ -976,6 +1006,104 @@ func newAutofeeEngine(svc *AutofeeService, cfg AutofeeConfig) *autofeeEngine {
     superSource: ss,
     now: time.Now().UTC(),
   }
+}
+
+func (e *autofeeEngine) calibrateNode(channels []lndclient.ChannelInfo, state map[uint64]*autofeeChannelState, forwardStats map[uint64]forwardStat) {
+  baselineVals := []float64{}
+  seedVals := []float64{}
+  totalCap := int64(0)
+  totalLocal := int64(0)
+  chanCount := 0
+  for _, ch := range channels {
+    if !ch.Active {
+      continue
+    }
+    chanCount++
+    totalCap += ch.CapacitySat
+    totalLocal += ch.LocalBalanceSat
+    st := state[ch.ChannelID]
+    baseline := 0
+    if st != nil && st.BaselineFwd7d > 0 {
+      baseline = st.BaselineFwd7d
+    }
+    if fs, ok := forwardStats[ch.ChannelID]; ok && int(fs.Count) > baseline {
+      baseline = int(fs.Count)
+    }
+    if baseline > 0 {
+      baselineVals = append(baselineVals, float64(baseline))
+    }
+    if st != nil && st.LastSeed > 0 {
+      seedVals = append(seedVals, float64(st.LastSeed))
+    }
+  }
+
+  p70 := percentile(baselineVals, 0.70)
+  revfloorBaseline := int(math.Round(p70))
+  if revfloorBaseline < 5 {
+    revfloorBaseline = 5
+  }
+  if e.profile.RevfloorBaselineScale > 0 {
+    revfloorBaseline = int(math.Round(float64(revfloorBaseline) * e.profile.RevfloorBaselineScale))
+    if revfloorBaseline < 5 {
+      revfloorBaseline = 5
+    }
+  }
+
+  medianSeed := percentile(seedVals, 0.50)
+  revfloorMinAbs := 0
+  if medianSeed > 0 {
+    revfloorMinAbs = int(math.Round(medianSeed * 0.80))
+  } else {
+    revfloorMinAbs = e.profile.RevfloorMinAbs
+  }
+  if e.profile.RevfloorMinAbsScale > 0 {
+    revfloorMinAbs = int(math.Round(float64(revfloorMinAbs) * e.profile.RevfloorMinAbsScale))
+  }
+  if revfloorMinAbs < 60 {
+    revfloorMinAbs = 60
+  }
+
+  avgCap := int64(0)
+  if chanCount > 0 {
+    avgCap = int64(math.Round(float64(totalCap) / float64(chanCount)))
+  }
+  localRatio := 0.0
+  if totalCap > 0 {
+    localRatio = float64(totalLocal) / float64(totalCap)
+  }
+
+  nodeClass := "unknown"
+  if chanCount > 0 && totalCap > 0 {
+    switch {
+    case totalCap < 50_000_000 || chanCount < 20:
+      nodeClass = "small"
+    case totalCap < 200_000_000 || chanCount < 60:
+      nodeClass = "medium"
+    case totalCap < 1_500_000_000 || chanCount < 150:
+      nodeClass = "large"
+    default:
+      nodeClass = "xl"
+    }
+  }
+
+  liquidityClass := "balanced"
+  if totalCap > 0 {
+    if localRatio < 0.25 {
+      liquidityClass = "drained"
+    } else if localRatio > 0.75 {
+      liquidityClass = "full"
+    }
+  }
+
+  e.calib.RevfloorBaseline = revfloorBaseline
+  e.calib.RevfloorMinAbs = revfloorMinAbs
+  e.calib.NodeClass = nodeClass
+  e.calib.LiquidityClass = liquidityClass
+  e.calib.ChannelCount = chanCount
+  e.calib.TotalCapacitySat = totalCap
+  e.calib.LocalCapacitySat = totalLocal
+  e.calib.AvgCapacitySat = avgCap
+  e.calib.LocalRatio = localRatio
 }
 
 type autofeeChannelState struct {
@@ -1055,6 +1183,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   }
   rebalGlobal := rebalStats.Global
   rebalGlobalPpm := ppmMsat(rebalGlobal.FeeMsat, rebalGlobal.AmtMsat)
+  e.calibrateNode(channels, state, forwardStats)
 
   runID := fmt.Sprintf("%d", time.Now().UnixNano())
   header := fmt.Sprintf("⚡ Autofee %s | %s", strings.ToUpper(reason), e.now.UTC().Format(time.RFC3339))
@@ -1188,6 +1317,25 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       CooldownIgnored: e.ignoreCooldown,
     }},
   }
+  calibLine := fmt.Sprintf("⚙️ calib node=%s channels=%d cap=%d avg=%d local=%d (%.0f%%) revfloor_thr=%d revfloor_min=%d liq=%s",
+    e.calib.NodeClass, e.calib.ChannelCount, e.calib.TotalCapacitySat, e.calib.AvgCapacitySat,
+    e.calib.LocalCapacitySat, e.calib.LocalRatio*100, e.calib.RevfloorBaseline, e.calib.RevfloorMinAbs, e.calib.LiquidityClass,
+  )
+  entries = append(entries, autofeeLogEntry{
+    Line: calibLine,
+    Payload: &autofeeLogItem{
+      Kind: "calib",
+      NodeClass: e.calib.NodeClass,
+      LiquidityClass: e.calib.LiquidityClass,
+      ChannelCount: e.calib.ChannelCount,
+      TotalCapacitySat: e.calib.TotalCapacitySat,
+      AvgCapacitySat: e.calib.AvgCapacitySat,
+      LocalCapacitySat: e.calib.LocalCapacitySat,
+      LocalRatio: e.calib.LocalRatio,
+      RevfloorBaseline: e.calib.RevfloorBaseline,
+      RevfloorMinAbs: e.calib.RevfloorMinAbs,
+    },
+  })
 
   if len(changedLines) > 0 {
     entries = append(entries, autofeeLogEntry{Line: "✅", Payload: &autofeeLogItem{Kind: "section", Category: "changed"}})
@@ -1985,8 +2133,16 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
 
-  if e.cfg.RevfloorEnabled && !superSourceActive && e.profile.RevfloorBaselineThresh > 0 && st.BaselineFwd7d >= e.profile.RevfloorBaselineThresh {
-    revFloor := int(math.Round(math.Max(float64(seed)*0.40, float64(e.profile.RevfloorMinAbs))))
+  revfloorBaseline := e.profile.RevfloorBaselineThresh
+  if e.calib.RevfloorBaseline > 0 {
+    revfloorBaseline = e.calib.RevfloorBaseline
+  }
+  revfloorMinAbs := e.profile.RevfloorMinAbs
+  if e.calib.RevfloorMinAbs > 0 {
+    revfloorMinAbs = e.calib.RevfloorMinAbs
+  }
+  if e.cfg.RevfloorEnabled && !superSourceActive && revfloorBaseline > 0 && st.BaselineFwd7d >= revfloorBaseline {
+    revFloor := int(math.Round(math.Max(float64(seed)*0.40, float64(revfloorMinAbs))))
     revFloor = clampInt(revFloor, e.cfg.MinPpm, e.cfg.MaxPpm)
     if revFloor > floor {
       floor = revFloor

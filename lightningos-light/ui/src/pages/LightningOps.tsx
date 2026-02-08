@@ -137,6 +137,15 @@ type AutofeeResultItem = {
   mem?: number
   default?: number
   cooldown_ignored?: boolean
+  node_class?: string
+  liquidity_class?: string
+  channel_count?: number
+  total_capacity_sat?: number
+  avg_capacity_sat?: number
+  local_capacity_sat?: number
+  local_ratio?: number
+  revfloor_baseline?: number
+  revfloor_min_abs?: number
   alias?: string
   channel_id?: number
   channel_point?: string
@@ -323,6 +332,74 @@ export default function LightningOps() {
     if (normalized === 'scheduled') return t('lightningOps.autofeeResultsReasonScheduled')
     if (reason) return reason.toUpperCase()
     return t('lightningOps.autofeeResultsReasonUnknown')
+  }
+
+  const formatSatsCompact = (value?: number) => {
+    const sats = Number(value || 0)
+    if (!sats) return `0 ${t('lightningOps.autofeeResultsSats')}`
+    if (sats >= 100_000_000) {
+      return `${(sats / 100_000_000).toFixed(2)} BTC`
+    }
+    if (sats >= 1_000_000) {
+      return `${(sats / 1_000_000).toFixed(1)}M ${t('lightningOps.autofeeResultsSats')}`
+    }
+    if (sats >= 1_000) {
+      return `${(sats / 1_000).toFixed(1)}k ${t('lightningOps.autofeeResultsSats')}`
+    }
+    return `${sats} ${t('lightningOps.autofeeResultsSats')}`
+  }
+
+  const formatAutofeeNodeClass = (value?: string) => {
+    const normalized = (value || '').toLowerCase()
+    switch (normalized) {
+      case 'small':
+        return t('lightningOps.autofeeResultsNodeSmall')
+      case 'medium':
+        return t('lightningOps.autofeeResultsNodeMedium')
+      case 'large':
+        return t('lightningOps.autofeeResultsNodeLarge')
+      case 'xl':
+        return t('lightningOps.autofeeResultsNodeXL')
+      default:
+        return t('common.unknown')
+    }
+  }
+
+  const formatAutofeeLiquidityClass = (value?: string) => {
+    const normalized = (value || '').toLowerCase()
+    switch (normalized) {
+      case 'drained':
+        return t('lightningOps.autofeeResultsLiquidityDrained')
+      case 'full':
+        return t('lightningOps.autofeeResultsLiquidityFull')
+      case 'balanced':
+        return t('lightningOps.autofeeResultsLiquidityBalanced')
+      default:
+        return t('common.unknown')
+    }
+  }
+
+  const formatAutofeeCalib = (item: AutofeeResultItem) => {
+    const channels = item.channel_count ?? 0
+    const cap = formatSatsCompact(item.total_capacity_sat)
+    const avg = formatSatsCompact(item.avg_capacity_sat)
+    const local = formatSatsCompact(item.local_capacity_sat)
+    const ratio = typeof item.local_ratio === 'number' ? Math.round(item.local_ratio * 100) : 0
+    const nodeClass = formatAutofeeNodeClass(item.node_class)
+    const liqClass = formatAutofeeLiquidityClass(item.liquidity_class)
+    const revfloorThr = item.revfloor_baseline ?? 0
+    const revfloorMin = item.revfloor_min_abs ?? 0
+    return t('lightningOps.autofeeResultsCalib', {
+      node: nodeClass,
+      channels,
+      cap,
+      avg,
+      local,
+      ratio,
+      liq: liqClass,
+      revfloorThr,
+      revfloorMin
+    })
   }
 
   const formatAutofeeHeader = (item: AutofeeResultItem) => {
@@ -568,6 +645,9 @@ export default function LightningOps() {
             break
           case 'seed':
             line = formatAutofeeSeed(item)
+            break
+          case 'calib':
+            line = formatAutofeeCalib(item)
             break
           case 'section':
             line = formatAutofeeSectionLine(item.category)
