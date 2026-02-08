@@ -877,7 +877,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     }
   }
 
-  attemptPayment := func(sourceID uint64, amountTry int64, feePpm int64, logRouteFailure bool) (bool, bool, int64) {
+  attemptPayment := func(sourceID uint64, amountTry int64, feePpm int64, logRouteFailure bool) (bool, bool, int64, bool) {
     attemptedAny = true
     if ctx.Err() != nil {
       if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -885,13 +885,13 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       } else {
         s.finishJob(jobID, "cancelled", "cancelled")
       }
-      return false, true, 0
+      return false, true, 0, false
     }
     if amountTry <= 0 {
-      return false, false, 0
+      return false, false, 0, false
     }
     if cfg.MinAmountSat > 0 && amountTry < cfg.MinAmountSat {
-      return false, false, 0
+      return false, false, 0, false
     }
 
     feeLimitMsat := ppmToFeeLimitMsat(amountTry, feePpm)
@@ -912,20 +912,20 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
         } else {
           s.finishJob(jobID, "cancelled", "cancelled")
         }
-        return false, true, 0
+        return false, true, 0, false
       }
       if errors.Is(err, context.DeadlineExceeded) || errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
         attemptIndex++
         _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", "", "attempt timeout")
         s.recordPairFailure(ctx, sourceID, targetChannelID, "attempt timeout")
-        return false, false, 0
+        return false, false, 0, true
       }
       if logRouteFailure {
         attemptIndex++
         _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", "", err.Error())
         s.recordPairFailure(ctx, sourceID, targetChannelID, err.Error())
       }
-      return false, false, 0
+      return false, false, 0, false
     }
     _, paymentHash, err := s.createRebalanceInvoice(attemptCtx, amountTry, jobID, sourceID, targetChannelID)
     if err != nil {
@@ -936,18 +936,18 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
         } else {
           s.finishJob(jobID, "cancelled", "cancelled")
         }
-        return false, true, 0
+        return false, true, 0, false
       }
       if errors.Is(err, context.DeadlineExceeded) || errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
         attemptIndex++
         _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", "", "attempt timeout")
         s.recordPairFailure(ctx, sourceID, targetChannelID, "attempt timeout")
-        return false, false, 0
+        return false, false, 0, true
       }
       attemptIndex++
       _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", "", err.Error())
       s.recordPairFailure(ctx, sourceID, targetChannelID, err.Error())
-      return false, false, 0
+      return false, false, 0, false
     }
 
     var lastErr error
@@ -985,7 +985,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
         s.recordPairSuccess(ctx, sourceID, targetChannelID, amountTry, feePpm, feePaidSat)
         _ = s.applyRebalanceLedger(ctx, targetChannelID, amountTry, feePaidSat)
         _ = s.addBudgetSpend(ctx, feePaidSat, jobSource)
-        return true, false, routeMaxSat
+        return true, false, routeMaxSat, false
       }
       lastErr = err
     }
@@ -997,13 +997,13 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       } else {
         s.finishJob(jobID, "cancelled", "cancelled")
       }
-      return false, true, 0
+      return false, true, 0, false
     }
     if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
       attemptIndex++
       _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", paymentHash, "attempt timeout")
       s.recordPairFailure(ctx, sourceID, targetChannelID, "attempt timeout")
-      return false, false, 0
+      return false, false, 0, true
     }
     failReason := ""
     if lastErr != nil {
@@ -1016,7 +1016,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       _ = s.insertAttempt(ctx, jobID, attemptIndex, sourceID, amountTry, feePpm, 0, "failed", paymentHash, failReason)
       s.recordPairFailure(ctx, sourceID, targetChannelID, failReason)
     }
-    return false, false, 0
+    return false, false, 0, false
   }
 
   applySuccess := func(amountSat int64, routeMax int64, routeCap *int64, sourceRemaining *int64) bool {
@@ -1089,9 +1089,12 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
           phase = "steady"
           continue
         }
-        success, fatal, routeMax := attemptPayment(sourceID, next, feePpm, true)
+        success, fatal, routeMax, timedOut := attemptPayment(sourceID, next, feePpm, true)
         if fatal {
           return false, true
+        }
+        if timedOut {
+          return false, false
         }
         if success {
           if applySuccess(next, routeMax, &routeCap, sourceRemaining) {
@@ -1103,9 +1106,12 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
         phase = "steady"
 
       case "steady":
-        success, fatal, routeMax := attemptPayment(sourceID, current, feePpm, true)
+        success, fatal, routeMax, timedOut := attemptPayment(sourceID, current, feePpm, true)
         if fatal {
           return false, true
+        }
+        if timedOut {
+          return false, false
         }
         if success {
           if applySuccess(current, routeMax, &routeCap, sourceRemaining) {
@@ -1130,9 +1136,12 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
         if cfg.MinAmountSat > 0 && current < cfg.MinAmountSat {
           return false, false
         }
-        success, fatal, routeMax := attemptPayment(sourceID, current, feePpm, true)
+        success, fatal, routeMax, timedOut := attemptPayment(sourceID, current, feePpm, true)
         if fatal {
           return false, true
+        }
+        if timedOut {
+          return false, false
         }
         if success {
           if applySuccess(current, routeMax, &routeCap, sourceRemaining) {
@@ -1205,9 +1214,12 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
         warmTry = 0
       }
       if warmTry > 0 {
-        success, fatal, routeMax := attemptPayment(source.ChannelID, warmTry, warmFeePpm, true)
+        success, fatal, routeMax, timedOut := attemptPayment(source.ChannelID, warmTry, warmFeePpm, true)
         if fatal {
           return
+        }
+        if timedOut {
+          continue
         }
         if success {
           routeCap := int64(0)
@@ -1230,53 +1242,56 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     if feeSteps <= 0 {
       feeSteps = 1
     }
-    amountSteps := cfg.AmountProbeSteps
-    if amountSteps <= 0 {
-      amountSteps = feeSteps
+
+    probeAmount := cfg.MinAmountSat
+    if probeAmount <= 0 {
+      probeAmount = sendAmount
     }
-    amountCandidates := buildAmountProbe(sendAmount, cfg.MinAmountSat, amountSteps)
-    if len(amountCandidates) == 0 {
+    if probeAmount > sendAmount {
+      probeAmount = sendAmount
+    }
+    if probeAmount <= 0 {
       continue
     }
-    if len(amountCandidates) > 1 {
-      for i, j := 0, len(amountCandidates)-1; i < j; i, j = i+1, j-1 {
-        amountCandidates[i], amountCandidates[j] = amountCandidates[j], amountCandidates[i]
-      }
+    if cfg.MinAmountSat > 0 && probeAmount < cfg.MinAmountSat {
+      continue
     }
 
     sourceSucceeded := false
+    sourceTimedOut := false
     for step := 1; step <= feeSteps; step++ {
       feePpm := calcFeeStepPpm(maxFeePpm, feeSteps, step)
       if feePpm <= 0 {
         feePpm = 1
       }
 
-      for idx, amountTry := range amountCandidates {
-        logRouteFailure := step == feeSteps && idx == len(amountCandidates)-1
-        success, fatal, routeMax := attemptPayment(source.ChannelID, amountTry, feePpm, logRouteFailure)
-        if fatal {
-          return
-        }
-        if !success {
-          continue
-        }
-        sourceSucceeded = true
-        routeCap := int64(0)
-        if applySuccess(amountTry, routeMax, &routeCap, &sourceRemaining) {
-          return
-        }
-        finished, fatal := rapidRebalance(source.ChannelID, feePpm, amountTry, routeCap, &sourceRemaining)
-        if fatal {
-          return
-        }
-        if finished {
-          return
-        }
+      success, fatal, routeMax, timedOut := attemptPayment(source.ChannelID, probeAmount, feePpm, true)
+      if fatal {
+        return
+      }
+      if timedOut {
+        sourceTimedOut = true
         break
       }
-      if sourceSucceeded {
-        break
+      if !success {
+        continue
       }
+      sourceSucceeded = true
+      routeCap := int64(0)
+      if applySuccess(probeAmount, routeMax, &routeCap, &sourceRemaining) {
+        return
+      }
+      finished, fatal := rapidRebalance(source.ChannelID, feePpm, probeAmount, routeCap, &sourceRemaining)
+      if fatal {
+        return
+      }
+      if finished {
+        return
+      }
+      break
+    }
+    if sourceTimedOut {
+      continue
     }
   }
 

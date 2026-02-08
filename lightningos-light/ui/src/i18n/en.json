@@ -1166,6 +1166,7 @@
       "amountFee": "Amount: {{amount}} · Fees: {{fee}}",
       "remaining": "Remaining: {{value}}",
       "attempt": "Attempt {{index}} · {{amount}} · fee cap {{fee}} ppm",
+      "sourceInline": "· Source {{value}}",
       "source": "Source: {{value}}",
       "reason": "Reason: {{value}}",
       "routeFound": "Route: found",
