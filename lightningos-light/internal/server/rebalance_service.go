@@ -2210,6 +2210,7 @@ func (s *RebalanceService) History(ctx context.Context, limit int) ([]RebalanceJ
   if s.db == nil {
     return jobs, attempts, nil
   }
+  var err error
   aliasMap := map[uint64]string{}
   if s.lnd != nil {
     if channels, err := s.lnd.ListChannels(ctx); err == nil {
@@ -2220,8 +2221,8 @@ func (s *RebalanceService) History(ctx context.Context, limit int) ([]RebalanceJ
       }
     }
   }
-  if limit <= 0 {
-    limit = 50
+  if limit < 0 {
+    limit = 0
   }
   baseQuery := `
 select id, created_at, completed_at, source, status, reason, target_channel_id,
