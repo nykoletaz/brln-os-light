@@ -433,24 +433,36 @@ func (s *RebalanceService) runAutoScan() {
   candidates := []rebalanceTarget{}
   eligibleSources := 0
   totalAvailable := int64(0)
-    for _, ch := range channels {
-      setting := settings[ch.ChannelID]
-      targetPct := setting.TargetOutboundPct
-      if targetPct <= 0 {
-        targetPct = rebalanceDefaultTargetOutboundPct
-      }
+  for _, ch := range channels {
+    setting := settings[ch.ChannelID]
+    targetPct := setting.TargetOutboundPct
+    if targetPct <= 0 {
+      targetPct = rebalanceDefaultTargetOutboundPct
+    }
 
-      snapshot := s.buildChannelSnapshot(ctx, cfg, criticalActive, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], exclusions[ch.ChannelID])
-      if snapshot.EligibleAsSource {
-        eligibleSources++
-        totalAvailable += snapshot.MaxSourceSat
-      }
-      if setting.AutoEnabled && snapshot.EligibleAsTarget && (cfg.ROIMin <= 0 || !snapshot.ROIEstimateValid || snapshot.ROIEstimate >= cfg.ROIMin) {
+    snapshot := s.buildChannelSnapshot(ctx, cfg, criticalActive, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], exclusions[ch.ChannelID])
+    if snapshot.EligibleAsSource {
+      eligibleSources++
+      totalAvailable += snapshot.MaxSourceSat
+    }
+
+    if setting.AutoEnabled && snapshot.EligibleAsTarget {
+      targetAmount := snapshot.TargetAmountSat
+      estimatedCost := estimateMaxCost(targetAmount, snapshot.OutgoingFeePpm, cfg.EconRatio, snapshot.PeerFeeRatePpm)
+      expectedGain := estimateTargetGain(targetAmount, snapshot.Revenue7dSat, snapshot.LocalBalanceSat, snapshot.CapacitySat)
+      expectedROI, roiValid := estimateTargetROI(expectedGain, estimatedCost, targetAmount, snapshot.OutgoingFeePpm, snapshot.PeerFeeRatePpm)
+      if cfg.ROIMin <= 0 || !roiValid || expectedROI >= cfg.ROIMin {
         candidates = append(candidates, rebalanceTarget{
           Channel: snapshot,
+          ExpectedGainSat: expectedGain,
+          EstimatedCostSat: estimatedCost,
+          ExpectedROI: expectedROI,
+          ExpectedROIValid: roiValid,
+          Score: expectedGain - estimatedCost,
         })
       }
     }
+  }
 
   if eligibleSources == 0 ||
     (cfg.CriticalMinSources > 0 && eligibleSources < cfg.CriticalMinSources) ||
@@ -475,6 +487,15 @@ func (s *RebalanceService) runAutoScan() {
   s.mu.Unlock()
 
   sort.Slice(candidates, func(i, j int) bool {
+    if candidates[i].Score != candidates[j].Score {
+      return candidates[i].Score > candidates[j].Score
+    }
+    if candidates[i].ExpectedROI != candidates[j].ExpectedROI {
+      return candidates[i].ExpectedROI > candidates[j].ExpectedROI
+    }
+    if candidates[i].Channel.TargetAmountSat != candidates[j].Channel.TargetAmountSat {
+      return candidates[i].Channel.TargetAmountSat > candidates[j].Channel.TargetAmountSat
+    }
     return candidates[i].Channel.LocalPct < candidates[j].Channel.LocalPct
   })
 
@@ -534,6 +555,11 @@ func (s *RebalanceService) runAutoScan() {
 
 type rebalanceTarget struct {
   Channel RebalanceChannel
+  ExpectedGainSat int64
+  EstimatedCostSat int64
+  ExpectedROI float64
+  ExpectedROIValid bool
+  Score int64
 }
 
 func (s *RebalanceService) startJob(targetChannelID uint64, source string, reason string, amountOverride int64) (int64, error) {
@@ -1586,6 +1612,37 @@ func estimateMaxCost(amountSat int64, outgoingFeePpm int64, econRatio float64, p
     return 0
   }
   return (amountSat * maxFeePpm) / 1_000_000
+}
+
+func estimateTargetGain(amountSat int64, revenue7dSat int64, localBalanceSat int64, capacitySat int64) int64 {
+  if amountSat <= 0 || revenue7dSat <= 0 {
+    return 0
+  }
+  denom := localBalanceSat
+  if denom <= 0 {
+    denom = capacitySat
+  }
+  if denom <= 0 {
+    return 0
+  }
+  if amountSat > denom {
+    denom = amountSat
+  }
+  gain := float64(revenue7dSat) * (float64(amountSat) / float64(denom))
+  if gain <= 0 {
+    return 0
+  }
+  return int64(math.Round(gain))
+}
+
+func estimateTargetROI(expectedGainSat int64, estimatedCostSat int64, amountSat int64, outgoingFeePpm int64, peerFeeRatePpm int64) (float64, bool) {
+  if estimatedCostSat > 0 {
+    return float64(expectedGainSat) / float64(estimatedCostSat), true
+  }
+  if amountSat > 0 && outgoingFeePpm > peerFeeRatePpm {
+    return 0, false
+  }
+  return 0, true
 }
 
 func ppmToFeeLimitMsat(amountSat int64, feePpm int64) int64 {
