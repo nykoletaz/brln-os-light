@@ -224,7 +224,7 @@ Configuration parameters:
 - `Critical min sources`: minimum eligible source channels required to avoid critical mode.
 - `Critical min available sats`: minimum total source liquidity required to avoid critical mode.
 
-**Lightning Ops: Autofee**
+## Lightning Ops: Autofee
 Autofee automatically adjusts **outbound fees** to maximize **profit first** and **movement second**. It uses your local routing and rebalance history (Postgres notifications) plus optional Amboss metrics to seed prices, then applies guardrails, cooldowns, and caps so updates are safe and explainable.
 
 UI parameters:
