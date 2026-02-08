@@ -1064,6 +1064,7 @@
         "dailySpent": "Gasto: {{value}}",
       "dailySpentAuto": "Gasto auto: {{value}}",
       "dailySpentManual": "Gasto manual: {{value}}",
+      "lastQueued": "Enfileirados na última varredura: {{count}}",
       "topScore": "Score econômico (topo): {{value}}",
       "profitSkipped": "Pulados pelo guardrail de lucro: {{count}}",
       "autoMode": "Modo automático",

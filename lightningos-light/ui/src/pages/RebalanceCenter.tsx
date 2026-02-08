@@ -45,6 +45,7 @@ type RebalanceOverview = {
   last_scan_status?: string
   last_scan_top_score_sat?: number
   last_scan_profit_skipped?: number
+  last_scan_queued?: number
   eligible_sources?: number
   targets_needing?: number
   daily_budget_sat: number
@@ -507,6 +508,11 @@ export default function RebalanceCenter() {
               {overview.auto_enabled && overview.last_scan_status && (
                 <p className="text-xs text-fog/50">
                   {t(`rebalanceCenter.overview.scanStatus.${overview.last_scan_status}`)}
+                </p>
+              )}
+              {overview.auto_enabled && (overview.last_scan_queued ?? 0) > 0 && (
+                <p className="text-xs text-fog/50">
+                  {t('rebalanceCenter.overview.lastQueued', { count: overview.last_scan_queued })}
                 </p>
               )}
               {overview.auto_enabled && typeof overview.last_scan_top_score_sat === 'number' && overview.last_scan_top_score_sat > 0 && (

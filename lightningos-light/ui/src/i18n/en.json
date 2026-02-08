@@ -1064,6 +1064,7 @@
         "dailySpent": "Spent: {{value}}",
       "dailySpentAuto": "Auto spent: {{value}}",
       "dailySpentManual": "Manual spent: {{value}}",
+      "lastQueued": "Queued last scan: {{count}}",
       "topScore": "Top economic score: {{value}}",
       "profitSkipped": "Skipped by profit guardrail: {{count}}",
       "autoMode": "Auto mode",

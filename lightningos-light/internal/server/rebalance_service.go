@@ -32,6 +32,10 @@ const (
 )
 
 const (
+  queueLingerSeconds = 20
+)
+
+const (
   paybackModePayback  = 1 << 0
   paybackModeTime     = 1 << 1
   paybackModeCritical = 1 << 2
@@ -67,6 +71,7 @@ type RebalanceOverview struct {
   LastScanStatus string `json:"last_scan_status,omitempty"`
   LastScanTopScoreSat int64 `json:"last_scan_top_score_sat"`
   LastScanProfitSkipped int `json:"last_scan_profit_skipped"`
+  LastScanQueued int `json:"last_scan_queued"`
   DailyBudgetSat int64 `json:"daily_budget_sat"`
   DailySpentSat int64 `json:"daily_spent_sat"`
   DailySpentAutoSat int64 `json:"daily_spent_auto_sat"`
@@ -185,6 +190,7 @@ type RebalanceService struct {
   lastScanStatus string
   lastScanTopScoreSat int64
   lastScanProfitSkipped int
+  lastScanQueued int
   criticalMissCount int
   sem chan struct{}
   channelLocks map[uint64]bool
@@ -423,12 +429,14 @@ func (s *RebalanceService) runAutoScan() {
   scanStatus := "scanned"
   profitSkipped := 0
   topScore := int64(0)
+  queuedCount := 0
   defer func() {
     s.mu.Lock()
     s.lastScan = scanAt
     s.lastScanStatus = scanStatus
     s.lastScanTopScoreSat = topScore
     s.lastScanProfitSkipped = profitSkipped
+    s.lastScanQueued = queuedCount
     s.mu.Unlock()
   }()
 
@@ -537,7 +545,6 @@ func (s *RebalanceService) runAutoScan() {
     return
   }
 
-  started := 0
   for _, target := range candidates {
     if remaining <= 0 {
       scanStatus = "budget_exhausted"
@@ -570,18 +577,18 @@ func (s *RebalanceService) runAutoScan() {
     _, err := s.startJob(target.Channel.ChannelID, "auto", "", amountOverride)
     if err == nil {
       remaining -= estimatedCost
-      started++
+      queuedCount++
     }
   }
 
-  if started > 0 {
+  if queuedCount > 0 {
     scanStatus = "queued"
   } else if remaining > 0 {
     scanStatus = "budget_insufficient"
   }
 
   if s.logger != nil {
-    s.logger.Printf("rebalance scan: candidates=%d profit_skipped=%d roi_skipped=%d top_score=%d sats", len(candidates), profitSkipped, roiSkipped, topScore)
+    s.logger.Printf("rebalance scan: candidates=%d queued=%d profit_skipped=%d roi_skipped=%d top_score=%d sats", len(candidates), queuedCount, profitSkipped, roiSkipped, topScore)
   }
 }
 
@@ -671,6 +678,8 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     return
   }
   defer s.unlockChannel(targetChannelID)
+
+  s.markJobRunning(jobID)
 
   if cfg.MinAmountSat > 0 && amount < cfg.MinAmountSat {
     s.finishJob(jobID, "failed", "amount below minimum")
@@ -2456,10 +2465,24 @@ func (s *RebalanceService) insertJob(ctx context.Context, target *lndclient.Chan
   err := s.db.QueryRow(ctx, `
 insert into rebalance_jobs (
   source, status, reason, target_channel_id, target_channel_point, target_outbound_pct, target_amount_sat, config_snapshot
-) values ($1,'running',$2,$3,$4,$5,$6,$7)
+) values ($1,'queued',$2,$3,$4,$5,$6,$7)
  returning id
 `, source, nullableString(reason), int64(target.ChannelID), target.ChannelPoint, targetPct, amount, nil).Scan(&jobID)
   return jobID, err
+}
+
+func (s *RebalanceService) markJobRunning(jobID int64) {
+  if s.db == nil || jobID <= 0 {
+    return
+  }
+  ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+  defer cancel()
+  _, _ = s.db.Exec(ctx, `
+update rebalance_jobs
+set status='running',
+  reason=null,
+  completed_at=null
+where id=$1 and status='queued'`, jobID)
 }
 
 func (s *RebalanceService) insertAttempt(ctx context.Context, jobID int64, idx int, sourceChannelID uint64, amount int64, feePpm int64, feePaidSat int64, status string, paymentHash string, failReason string) error {
@@ -2526,6 +2549,7 @@ where report_date >= current_date - interval '6 days'
   lastScanStatus := s.lastScanStatus
   lastScanTopScore := s.lastScanTopScoreSat
   lastScanProfitSkipped := s.lastScanProfitSkipped
+  lastScanQueued := s.lastScanQueued
   s.mu.Unlock()
 
   overview := RebalanceOverview{
@@ -2540,6 +2564,7 @@ where report_date >= current_date - interval '6 days'
     LastScanStatus: lastScanStatus,
     LastScanTopScoreSat: lastScanTopScore,
     LastScanProfitSkipped: lastScanProfitSkipped,
+    LastScanQueued: lastScanQueued,
     EligibleSources: eligibleSources,
     TargetsNeeding: targetsNeeding,
   }
@@ -2643,8 +2668,9 @@ select id, created_at, completed_at, source, status, reason, target_channel_id,
   target_channel_point, target_outbound_pct, target_amount_sat
 from rebalance_jobs
 where status in ('running','queued')
+   or completed_at >= now() - ($1 || ' seconds')::interval
 order by created_at desc
-`)
+`, queueLingerSeconds)
   if err != nil {
     return jobs, attempts, err
   }
@@ -2675,9 +2701,14 @@ order by created_at desc
 select id, job_id, attempt_index, source_channel_id, amount_sat, fee_limit_ppm,
   fee_paid_sat, status, payment_hash, fail_reason, started_at, finished_at
 from rebalance_attempts
-where job_id in (select id from rebalance_jobs where status in ('running','queued'))
+where job_id in (
+  select id
+  from rebalance_jobs
+  where status in ('running','queued')
+     or completed_at >= now() - ($1 || ' seconds')::interval
+)
 order by started_at desc
-`)
+`, queueLingerSeconds)
   if err != nil {
     return jobs, attempts, err
   }
