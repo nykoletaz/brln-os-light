@@ -1102,6 +1102,8 @@
       "criticalMode": "Critical mode",
       "unlockDays": "Unlock days",
       "criticalRelease": "Critical release (%)",
+      "criticalMinSources": "Critical min sources",
+      "criticalMinAvailable": "Critical min available (sats)",
       "criticalCycles": "Critical cycles"
     },
     "settingsHints": {
@@ -1130,6 +1132,8 @@
       "criticalMode": "Allow partial release when sources are scarce.",
       "unlockDays": "Days before protected liquidity can be reused.",
       "criticalRelease": "Percent of protected liquidity released per critical cycle.",
+      "criticalMinSources": "Minimum eligible sources required to avoid critical mode.",
+      "criticalMinAvailable": "Minimum total source liquidity required to avoid critical mode.",
       "criticalCycles": "Number of consecutive critical scans before releasing."
     },
     "channels": {

@@ -933,6 +933,37 @@ export default function RebalanceCenter() {
               />
             </div>
             <div className="space-y-2">
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.criticalMinSources')}>
+                {t('rebalanceCenter.settings.criticalMinSources')}
+              </label>
+              <input
+                className="input-field"
+                type="number"
+                min={0}
+                step={1}
+                placeholder="2"
+                value={config.critical_min_sources}
+                onChange={(e) => setConfig({ ...config, critical_min_sources: Number(e.target.value) })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.criticalMinAvailable')}>
+                {t('rebalanceCenter.settings.criticalMinAvailable')}
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  className="input-field flex-1"
+                  type="number"
+                  min={0}
+                  step={1}
+                  placeholder="0"
+                  value={config.critical_min_available_sats}
+                  onChange={(e) => setConfig({ ...config, critical_min_available_sats: Number(e.target.value) })}
+                />
+                <span className="text-xs text-fog/60">sats</span>
+              </div>
+            </div>
+            <div className="space-y-2">
               <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.criticalCycles')}>
                 {t('rebalanceCenter.settings.criticalCycles')}
               </label>

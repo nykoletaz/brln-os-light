@@ -1102,6 +1102,8 @@
       "criticalMode": "Modo crítico",
       "unlockDays": "Dias para liberar",
       "criticalRelease": "Liberação crítica (%)",
+      "criticalMinSources": "Mínimo de fontes críticas",
+      "criticalMinAvailable": "Mínimo disponível (sats)",
       "criticalCycles": "Ciclos críticos"
     },
     "settingsHints": {
@@ -1130,6 +1132,8 @@
       "criticalMode": "Libera parcialmente quando faltam fontes.",
       "unlockDays": "Dias para liberar a liquidez protegida.",
       "criticalRelease": "Percentual liberado por ciclo crítico.",
+      "criticalMinSources": "Mínimo de fontes elegíveis para evitar modo crítico.",
+      "criticalMinAvailable": "Mínimo de liquidez total para evitar modo crítico.",
       "criticalCycles": "Número de ciclos críticos antes de liberar."
     },
     "channels": {
