@@ -1186,6 +1186,7 @@
     "history": {
       "title": "Recent History",
       "last24h": "Last 24h",
+      "details": "Details",
       "source": {
         "auto": "auto",
         "manual": "manual"

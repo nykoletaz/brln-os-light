@@ -148,6 +148,7 @@ export default function RebalanceCenter() {
   const [queueAttempts, setQueueAttempts] = useState<RebalanceAttempt[]>([])
   const [historyJobs, setHistoryJobs] = useState<RebalanceJob[]>([])
   const [historyAttempts, setHistoryAttempts] = useState<RebalanceAttempt[]>([])
+  const [historyExpanded, setHistoryExpanded] = useState<Record<number, boolean>>({})
   const [serverConfig, setServerConfig] = useState<RebalanceConfig | null>(null)
   const [configDirty, setConfigDirty] = useState(false)
   const [historyFilter, setHistoryFilter] = useState<'all' | 'succeeded' | 'partial' | 'failed'>('all')
@@ -288,6 +289,19 @@ export default function RebalanceCenter() {
     return totals
   }
   const historyTotals = useMemo(() => buildAttemptTotals(historyAttempts), [historyAttempts])
+  const historyAttemptsByJob = useMemo(() => {
+    const map = new Map<number, RebalanceAttempt[]>()
+    historyAttempts.forEach((attempt) => {
+      const list = map.get(attempt.job_id)
+      if (list) {
+        list.push(attempt)
+      } else {
+        map.set(attempt.job_id, [attempt])
+      }
+    })
+    map.forEach((list) => list.sort((a, b) => a.attempt_index - b.attempt_index))
+    return map
+  }, [historyAttempts])
   const filteredHistory = useMemo(() => {
     if (historyFilter === 'all') return historyJobs
     if (historyFilter === 'failed') {
@@ -1234,7 +1248,20 @@ export default function RebalanceCenter() {
                     <p className="text-xs text-fog/70">{t('rebalanceCenter.history.targetLabel', { value: job.target_peer_alias || job.target_channel_point })}</p>
                     <p className="text-xs text-fog/50">{job.target_channel_point}</p>
                   </div>
-                  <span className={`text-xs uppercase tracking-wide ${statusClass(job.status)}`}>{job.status}</span>
+                  <div className="flex flex-col items-end gap-2">
+                    <span className={`text-xs uppercase tracking-wide ${statusClass(job.status)}`}>{job.status}</span>
+                    <button
+                      className="text-xs text-fog/60 underline decoration-white/30 underline-offset-4 hover:text-fog"
+                      onClick={() =>
+                        setHistoryExpanded((prev) => ({
+                          ...prev,
+                          [job.id]: !prev[job.id]
+                        }))
+                      }
+                    >
+                      {historyExpanded[job.id] ? t('common.hide') : t('rebalanceCenter.history.details')}
+                    </button>
+                  </div>
                 </div>
                 <div className="mt-2 text-xs text-fog/50">
                   {t('rebalanceCenter.history.target', { value: formatPct(job.target_outbound_pct) })}
@@ -1254,6 +1281,55 @@ export default function RebalanceCenter() {
                 )}
                 {job.reason && job.status !== 'partial' && (
                   <div className="mt-1 text-xs text-amber-200">{job.reason}</div>
+                )}
+                {historyExpanded[job.id] && (
+                  <div className="mt-3 border-t border-white/10 pt-3">
+                    {(historyAttemptsByJob.get(job.id) || []).map((attempt) => (
+                      <div key={attempt.id} className="mt-2 text-xs text-fog/60">
+                        {t('rebalanceCenter.queue.attempt', {
+                          index: attempt.attempt_index,
+                          amount: formatSats(attempt.amount_sat),
+                          fee: attempt.fee_limit_ppm
+                        })}
+                        {attempt.source_peer_alias && (
+                          <span className="text-fog/50">
+                            {' '}
+                            {t('rebalanceCenter.queue.sourceInline', { value: attempt.source_peer_alias })}
+                          </span>
+                        )}
+                        {(() => {
+                          if (attempt.status === 'succeeded') {
+                            return (
+                              <div className="mt-1 text-xs text-emerald-200">
+                                {t('rebalanceCenter.queue.routeFound')}
+                              </div>
+                            )
+                          }
+                          const reason = attempt.fail_reason?.toLowerCase() || ''
+                          if (reason.includes('no route')) {
+                            return (
+                              <div className="mt-1 text-xs text-amber-200">
+                                {t('rebalanceCenter.queue.routeNotFound')}
+                              </div>
+                            )
+                          }
+                          if (reason.includes('route failed') || reason.includes('fee exceeds limit')) {
+                            return (
+                              <div className="mt-1 text-xs text-amber-200">
+                                {t('rebalanceCenter.queue.routeFailed')}
+                              </div>
+                            )
+                          }
+                          return null
+                        })()}
+                        {attempt.fail_reason && (
+                          <div className="mt-1 text-xs text-amber-200">
+                            {t('rebalanceCenter.queue.reason', { value: attempt.fail_reason })}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             ))}
