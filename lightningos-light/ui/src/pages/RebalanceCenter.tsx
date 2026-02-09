@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   getRebalanceChannels,
@@ -157,6 +157,8 @@ export default function RebalanceCenter() {
   const [autoOpen, setAutoOpen] = useState(false)
   const [editTargets, setEditTargets] = useState<Record<number, string>>({})
   const [channelSort, setChannelSort] = useState<'economic' | 'emptiest'>('economic')
+  const configRef = useRef<RebalanceConfig | null>(null)
+  const autoOpenRef = useRef(false)
 
   const formatSats = (value: number) => `${formatter.format(Math.round(value))} sats`
   const formatPct = (value: number) => `${pctFormatter.format(value)}%`
@@ -298,6 +300,12 @@ export default function RebalanceCenter() {
     setConfigDirty(configSignature(config) !== configSignature(serverConfig))
   }, [config, serverConfig])
   useEffect(() => {
+    configRef.current = config
+  }, [config])
+  useEffect(() => {
+    autoOpenRef.current = autoOpen
+  }, [autoOpen])
+  useEffect(() => {
     if (typeof window === 'undefined') return
     const stored = window.localStorage.getItem('rebalance_center_channel_sort')
     if (stored === 'economic' || stored === 'emptiest') {
@@ -346,9 +354,9 @@ export default function RebalanceCenter() {
           rebalance_timeout_sec: nextConfig.rebalance_timeout_sec || 600
         }
         setServerConfig(normalizedConfig)
-        const currentSig = configSignature(config)
+        const currentSig = configSignature(configRef.current)
         const nextSig = configSignature(normalizedConfig)
-        if (!autoOpen || currentSig === '' || currentSig === nextSig) {
+        if (!autoOpenRef.current || currentSig === '' || currentSig === nextSig) {
           setConfig(normalizedConfig)
         }
       setOverview(ovw as RebalanceOverview)
