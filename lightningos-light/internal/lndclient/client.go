@@ -63,6 +63,46 @@ func (c *Client) ResetMissionControl(ctx context.Context) error {
   return err
 }
 
+func (c *Client) LookupPayment(ctx context.Context, paymentHash string, lookback time.Duration) (*lnrpc.Payment, error) {
+  trimmed := strings.ToLower(strings.TrimSpace(paymentHash))
+  if trimmed == "" {
+    return nil, nil
+  }
+
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return nil, err
+  }
+  defer conn.Close()
+
+  client := lnrpc.NewLightningClient(conn)
+  req := &lnrpc.ListPaymentsRequest{
+    IncludeIncomplete: true,
+    Reversed: true,
+    MaxPayments: 200,
+  }
+  if lookback > 0 {
+    start := time.Now().Add(-lookback).Unix()
+    if start > 0 {
+      req.CreationDateStart = uint64(start)
+    }
+  }
+  resp, err := client.ListPayments(ctx, req)
+  if err != nil {
+    return nil, err
+  }
+  for _, pay := range resp.Payments {
+    if pay == nil {
+      continue
+    }
+    hash := strings.ToLower(strings.TrimSpace(pay.PaymentHash))
+    if hash != "" && hash == trimmed {
+      return pay, nil
+    }
+  }
+  return nil, nil
+}
+
 type macaroonCredential struct {
   macaroon string
 }

@@ -1072,6 +1072,35 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     }
   }
 
+  reconcileTimeoutPayment := func(paymentHash string, feeLimitPpm int64, source RebalanceChannel, fallbackAmount int64) (bool, int64) {
+    if s.lnd == nil || strings.TrimSpace(paymentHash) == "" {
+      return false, 0
+    }
+    lookupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    pay, err := s.lnd.LookupPayment(lookupCtx, paymentHash, 2*time.Hour)
+    cancel()
+    if err != nil || pay == nil || pay.Status != lnrpc.Payment_SUCCEEDED {
+      return false, 0
+    }
+    amountSent := pay.ValueSat
+    if amountSent <= 0 && pay.ValueMsat > 0 {
+      amountSent = pay.ValueMsat / 1000
+    }
+    if amountSent <= 0 {
+      amountSent = fallbackAmount
+    }
+    feePaidSat := pay.FeeSat
+    if feePaidSat <= 0 && pay.FeeMsat > 0 {
+      feePaidSat = msatToSatCeil(pay.FeeMsat)
+    }
+    attemptIndex++
+    _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountSent, feeLimitPpm, feePaidSat, "succeeded", paymentHash, "")
+    s.recordPairSuccess(ctx, source.ChannelID, targetChannelID, amountSent, feeLimitPpm, feePaidSat)
+    _ = s.applyRebalanceLedger(ctx, targetChannelID, amountSent, feePaidSat)
+    _ = s.addBudgetSpend(ctx, feePaidSat, jobSource)
+    return true, amountSent
+  }
+
   finishOnTimeout := func() {
     if anySuccess {
       reason := fmt.Sprintf("timeout with %d sats remaining", remaining)
@@ -1304,6 +1333,9 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       return false, true, 0, false, nil, 0
     }
     if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+      if ok, sent := reconcileTimeoutPayment(paymentHash, feeLimitPpm, source, amountTry); ok {
+        return true, false, 0, false, nil, sent
+      }
       attemptIndex++
       _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feeLimitPpm, 0, "failed", paymentHash, "attempt timeout")
       s.recordPairFailure(ctx, source.ChannelID, targetChannelID, "attempt timeout")
@@ -1471,6 +1503,9 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       return false, true, 0, false, nil, 0
     }
     if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+      if ok, sent := reconcileTimeoutPayment(paymentHash, feeLimitPpm, source, amountTry); ok {
+        return true, false, 0, false, nil, sent
+      }
       attemptIndex++
       _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feeLimitPpm, 0, "failed", paymentHash, "attempt timeout")
       s.recordPairFailure(ctx, source.ChannelID, targetChannelID, "attempt timeout")
