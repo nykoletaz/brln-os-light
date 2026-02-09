@@ -236,6 +236,10 @@ export const updateRebalanceConfig = (payload: {
   deadband_pct?: number
   source_min_local_pct?: number
   econ_ratio?: number
+  econ_ratio_max_ppm?: number
+  fee_limit_ppm?: number
+  lost_profit?: boolean
+  fail_tolerance_ppm?: number
   roi_min?: number
   daily_budget_pct?: number
   max_concurrent?: number

@@ -96,6 +96,7 @@ type DecodedInvoice struct {
 type CreatedInvoice struct {
   PaymentRequest string
   PaymentHash string
+  PaymentAddr []byte
 }
 
 func (m macaroonCredential) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
@@ -524,6 +525,7 @@ func (c *Client) CreateInvoice(ctx context.Context, amountSat int64, memo string
   return CreatedInvoice{
     PaymentRequest: resp.PaymentRequest,
     PaymentHash: strings.ToLower(hex.EncodeToString(resp.RHash)),
+    PaymentAddr: resp.PaymentAddr,
   }, nil
 }
 

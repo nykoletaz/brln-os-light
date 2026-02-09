@@ -21,6 +21,10 @@ type RebalanceConfig = {
   deadband_pct: number
   source_min_local_pct: number
   econ_ratio: number
+  econ_ratio_max_ppm: number
+  fee_limit_ppm: number
+  lost_profit: boolean
+  fail_tolerance_ppm: number
   roi_min: number
   daily_budget_pct: number
   max_concurrent: number
@@ -71,7 +75,9 @@ type RebalanceChannel = {
   local_pct: number
   remote_pct: number
   outgoing_fee_ppm: number
+  outgoing_base_msat: number
   peer_fee_rate_ppm: number
+  peer_base_msat: number
   spread_ppm: number
   target_outbound_pct: number
   target_amount_sat: number
@@ -169,6 +175,10 @@ export default function RebalanceCenter() {
       deadband_pct: cfg.deadband_pct,
       source_min_local_pct: cfg.source_min_local_pct,
       econ_ratio: cfg.econ_ratio,
+      econ_ratio_max_ppm: cfg.econ_ratio_max_ppm,
+      fee_limit_ppm: cfg.fee_limit_ppm,
+      lost_profit: cfg.lost_profit,
+      fail_tolerance_ppm: cfg.fail_tolerance_ppm,
       roi_min: cfg.roi_min,
       daily_budget_pct: cfg.daily_budget_pct,
       max_concurrent: cfg.max_concurrent,
@@ -187,15 +197,36 @@ export default function RebalanceCenter() {
       critical_cycles: cfg.critical_cycles
     })
   }
-  const calcMaxFeePpm = (outgoingFee: number, peerFee: number, econRatio: number) => {
-    const spread = outgoingFee - peerFee
-    if (spread <= 0) return 0
-    const scaled = Math.round(outgoingFee * econRatio)
-    if (scaled <= 0) return 0
-    return Math.min(scaled, spread)
+  const calcMaxFeePpm = (
+    amountSat: number,
+    outgoingFee: number,
+    outgoingBaseMsat: number,
+    econRatio: number,
+    econRatioMaxPpm: number,
+    feeLimitPpm: number
+  ) => {
+    if (amountSat <= 0) return 0
+    if (feeLimitPpm > 0) return feeLimitPpm
+    if (econRatio <= 0) return 0
+    const amountMsat = amountSat * 1000
+    const basePlus = outgoingBaseMsat + amountMsat * outgoingFee
+    let feeMsat = Math.floor((basePlus * econRatio) / 1_000_000)
+    if (feeMsat <= 0) return 0
+    let ppm = Math.round((feeMsat * 1_000_000) / amountMsat)
+    if (econRatioMaxPpm > 0 && ppm > econRatioMaxPpm) {
+      ppm = econRatioMaxPpm
+    }
+    return ppm
   }
-  const estimateMaxCost = (amountSat: number, outgoingFee: number, econRatio: number, peerFee: number) => {
-    const maxFee = calcMaxFeePpm(outgoingFee, peerFee, econRatio)
+  const estimateMaxCost = (
+    amountSat: number,
+    outgoingFee: number,
+    outgoingBaseMsat: number,
+    econRatio: number,
+    econRatioMaxPpm: number,
+    feeLimitPpm: number
+  ) => {
+    const maxFee = calcMaxFeePpm(amountSat, outgoingFee, outgoingBaseMsat, econRatio, econRatioMaxPpm, feeLimitPpm)
     if (maxFee <= 0 || amountSat <= 0) return 0
     return Math.floor((amountSat * maxFee) / 1_000_000)
   }
@@ -208,7 +239,14 @@ export default function RebalanceCenter() {
   }
   const computeChannelScore = (ch: RebalanceChannel, econRatio: number) => {
     const expectedGain = estimateTargetGain(ch.target_amount_sat, ch.revenue_7d_sat, ch.local_balance_sat, ch.capacity_sat)
-    const estimatedCost = estimateMaxCost(ch.target_amount_sat, ch.outgoing_fee_ppm, econRatio, ch.peer_fee_rate_ppm)
+    const estimatedCost = estimateMaxCost(
+      ch.target_amount_sat,
+      ch.outgoing_fee_ppm,
+      ch.outgoing_base_msat,
+      econRatio,
+      config?.econ_ratio_max_ppm ?? 0,
+      config?.fee_limit_ppm ?? 0
+    )
     return {
       score: expectedGain - estimatedCost,
       expectedRoi: estimatedCost > 0 ? expectedGain / estimatedCost : -1,
@@ -349,6 +387,10 @@ export default function RebalanceCenter() {
           deadband_pct: config.deadband_pct,
           source_min_local_pct: config.source_min_local_pct,
           econ_ratio: config.econ_ratio,
+          econ_ratio_max_ppm: config.econ_ratio_max_ppm,
+          fee_limit_ppm: config.fee_limit_ppm,
+          lost_profit: config.lost_profit,
+          fail_tolerance_ppm: config.fail_tolerance_ppm,
           roi_min: config.roi_min,
           daily_budget_pct: config.daily_budget_pct,
           max_concurrent: config.max_concurrent,
@@ -649,6 +691,40 @@ export default function RebalanceCenter() {
               />
             </div>
             <div className="space-y-2">
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.econRatioMaxPpm')}>
+                {t('rebalanceCenter.settings.econRatioMaxPpm')}
+              </label>
+              <input
+                className="input-field"
+                type="number"
+                min={0}
+                value={config.econ_ratio_max_ppm}
+                onChange={(e) => setConfig({ ...config, econ_ratio_max_ppm: Number(e.target.value) })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.feeLimitPpm')}>
+                {t('rebalanceCenter.settings.feeLimitPpm')}
+              </label>
+              <input
+                className="input-field"
+                type="number"
+                min={0}
+                value={config.fee_limit_ppm}
+                onChange={(e) => setConfig({ ...config, fee_limit_ppm: Number(e.target.value) })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.lostProfit')}>
+                <input
+                  type="checkbox"
+                  checked={config.lost_profit}
+                  onChange={(e) => setConfig({ ...config, lost_profit: e.target.checked })}
+                />
+                {t('rebalanceCenter.settings.lostProfit')}
+              </label>
+            </div>
+            <div className="space-y-2">
               <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.roiMin')}>
                 {t('rebalanceCenter.settings.roiMin')}
               </label>
@@ -719,6 +795,18 @@ export default function RebalanceCenter() {
                 min={1}
                 value={config.amount_probe_steps}
                 onChange={(e) => setConfig({ ...config, amount_probe_steps: Number(e.target.value) })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.failTolerancePpm')}>
+                {t('rebalanceCenter.settings.failTolerancePpm')}
+              </label>
+              <input
+                className="input-field"
+                type="number"
+                min={0}
+                value={config.fail_tolerance_ppm}
+                onChange={(e) => setConfig({ ...config, fail_tolerance_ppm: Number(e.target.value) })}
               />
             </div>
             <div className="space-y-2">

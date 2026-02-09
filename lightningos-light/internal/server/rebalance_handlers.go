@@ -17,6 +17,10 @@ type rebalanceConfigPayload struct {
   DeadbandPct *float64 `json:"deadband_pct,omitempty"`
   SourceMinLocalPct *float64 `json:"source_min_local_pct,omitempty"`
   EconRatio *float64 `json:"econ_ratio,omitempty"`
+  EconRatioMaxPpm *int64 `json:"econ_ratio_max_ppm,omitempty"`
+  FeeLimitPpm *int64 `json:"fee_limit_ppm,omitempty"`
+  LostProfit *bool `json:"lost_profit,omitempty"`
+  FailTolerancePpm *int64 `json:"fail_tolerance_ppm,omitempty"`
   ROIMin *float64 `json:"roi_min,omitempty"`
   DailyBudgetPct *float64 `json:"daily_budget_pct,omitempty"`
   MaxConcurrent *int `json:"max_concurrent,omitempty"`
@@ -109,6 +113,18 @@ func (s *Server) handleRebalanceConfigPost(w http.ResponseWriter, r *http.Reques
   }
   if payload.EconRatio != nil {
     cfg.EconRatio = *payload.EconRatio
+  }
+  if payload.EconRatioMaxPpm != nil {
+    cfg.EconRatioMaxPpm = *payload.EconRatioMaxPpm
+  }
+  if payload.FeeLimitPpm != nil {
+    cfg.FeeLimitPpm = *payload.FeeLimitPpm
+  }
+  if payload.LostProfit != nil {
+    cfg.LostProfit = *payload.LostProfit
+  }
+  if payload.FailTolerancePpm != nil {
+    cfg.FailTolerancePpm = *payload.FailTolerancePpm
   }
   if payload.ROIMin != nil {
     cfg.ROIMin = *payload.ROIMin

@@ -2,6 +2,7 @@ package lndclient
 
 import (
   "context"
+  "crypto/rand"
   "encoding/hex"
   "errors"
   "fmt"
@@ -11,6 +12,22 @@ import (
   "lightningos-light/lnrpc"
   "lightningos-light/lnrpc/routerrpc"
 )
+
+type RouteFailureError struct {
+  Code lnrpc.Failure_FailureCode
+  FailureSourceIndex uint32
+  Failure *lnrpc.Failure
+}
+
+func (e RouteFailureError) Error() string {
+  if e.Failure != nil {
+    return fmt.Sprintf("route failed: %s", e.Failure.Code.String())
+  }
+  if e.Code != lnrpc.Failure_FAILURE_UNKNOWN {
+    return fmt.Sprintf("route failed: %s", e.Code.String())
+  }
+  return "route failed"
+}
 
 type ChannelPolicySnapshot struct {
   FeeRatePpm int64
@@ -206,6 +223,7 @@ func (c *Client) QueryRoutes(ctx context.Context, destPubkey string, amtSat int6
       Amt: amtSat,
       OutgoingChanId: outgoingChanID,
       IgnoredEdges: ignoredEdges,
+      UseMissionControl: true,
     }
     if feeLimitMsat > 0 {
       req.FeeLimit = &lnrpc.FeeLimit{
@@ -273,11 +291,67 @@ func (c *Client) SendToRoute(ctx context.Context, paymentHash string, route *lnr
   }
   if resp.Status != lnrpc.HTLCAttempt_SUCCEEDED {
     if resp.Failure != nil {
-      return resp, fmt.Errorf("route failed: %s", resp.Failure.Code.String())
+      return resp, RouteFailureError{
+        Code: resp.Failure.Code,
+        FailureSourceIndex: resp.Failure.FailureSourceIndex,
+        Failure: resp.Failure,
+      }
     }
-    return resp, errors.New("route failed")
+    return resp, RouteFailureError{Code: lnrpc.Failure_FAILURE_UNKNOWN}
   }
   return resp, nil
+}
+
+func (c *Client) BuildRoute(ctx context.Context, amountSat int64, outgoingChanID uint64, hopPubkeys []string) (*lnrpc.Route, error) {
+  if amountSat <= 0 {
+    return nil, errors.New("amount must be positive")
+  }
+  if outgoingChanID == 0 {
+    return nil, errors.New("outgoing channel required")
+  }
+  if len(hopPubkeys) == 0 {
+    return nil, errors.New("hop pubkeys required")
+  }
+
+  hopBytes := make([][]byte, 0, len(hopPubkeys))
+  for _, pk := range hopPubkeys {
+    trimmed := strings.TrimSpace(pk)
+    if trimmed == "" {
+      return nil, errors.New("invalid hop pubkey")
+    }
+    b, err := hex.DecodeString(trimmed)
+    if err != nil {
+      return nil, errors.New("invalid hop pubkey")
+    }
+    hopBytes = append(hopBytes, b)
+  }
+
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return nil, err
+  }
+  defer conn.Close()
+
+  router := routerrpc.NewRouterClient(conn)
+  resp, err := router.BuildRoute(ctx, &routerrpc.BuildRouteRequest{
+    AmtMsat: amountSat * 1000,
+    OutgoingChanId: outgoingChanID,
+    HopPubkeys: hopBytes,
+    FinalCltvDelta: 144,
+  })
+  if err != nil {
+    return nil, err
+  }
+  if resp == nil || resp.Route == nil {
+    return nil, errors.New("empty route response")
+  }
+  return resp.Route, nil
+}
+
+func RandomPaymentHash() string {
+  buf := make([]byte, 32)
+  _, _ = rand.Read(buf)
+  return hex.EncodeToString(buf)
 }
 
 func routeToEdgeLocators(route *lnrpc.Route) []*lnrpc.EdgeLocator {
