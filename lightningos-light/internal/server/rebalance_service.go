@@ -933,6 +933,44 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
   if attemptTimeoutSec <= 0 {
     attemptTimeoutSec = 60
   }
+  autoNoPathBackoff := time.Duration(0)
+  autoNoPathBase := 1 * time.Second
+  autoNoPathMax := 10 * time.Second
+
+  sleepWithContext := func(d time.Duration) bool {
+    if d <= 0 {
+      return true
+    }
+    timer := time.NewTimer(d)
+    defer timer.Stop()
+    select {
+    case <-timer.C:
+      return true
+    case <-ctx.Done():
+      return false
+    }
+  }
+
+  noteAutoNoPath := func() {
+    if jobSource != "auto" {
+      return
+    }
+    if autoNoPathBackoff <= 0 {
+      autoNoPathBackoff = autoNoPathBase
+    } else {
+      autoNoPathBackoff *= 2
+      if autoNoPathBackoff > autoNoPathMax {
+        autoNoPathBackoff = autoNoPathMax
+      }
+    }
+    _ = sleepWithContext(autoNoPathBackoff)
+  }
+
+  resetAutoNoPath := func() {
+    if jobSource == "auto" {
+      autoNoPathBackoff = 0
+    }
+  }
 
   finishOnTimeout := func() {
     if anySuccess {
@@ -997,6 +1035,11 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
         s.recordPairFailure(ctx, source.ChannelID, targetChannelID, "attempt timeout")
         return false, false, 0, true, nil, 0
       }
+      if isNoPathError(err) {
+        noteAutoNoPath()
+      } else {
+        resetAutoNoPath()
+      }
       if logRouteFailure {
         attemptIndex++
         _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feeLimitPpm, 0, "failed", "", err.Error())
@@ -1054,6 +1097,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       _, err = s.lnd.SendToRoute(attemptCtx, paymentHash, route)
       if err == nil {
         cancelAttempt()
+        resetAutoNoPath()
         feePaidSat := msatToSatCeil(routeFeeMsat)
         if feePaidSat == 0 && probeFeeMsat > 0 {
           feePaidSat = msatToSatCeil(probeFeeMsat)
@@ -1082,6 +1126,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
             _, retryErr := s.lnd.SendToRoute(attemptCtx, paymentHash, updatedRoute)
             if retryErr == nil {
               cancelAttempt()
+              resetAutoNoPath()
               feePaidSat := msatToSatCeil(updatedRoute.TotalFeesMsat)
               if feePaidSat == 0 && probeFeeMsat > 0 {
                 feePaidSat = msatToSatCeil(probeFeeMsat)
@@ -1121,6 +1166,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
                   _, retrySendErr := s.lnd.SendToRoute(attemptCtx, retryHash, rebuilt)
                   if retrySendErr == nil {
                     cancelAttempt()
+                    resetAutoNoPath()
                     feePaidSat := msatToSatCeil(rebuilt.TotalFeesMsat)
                     if feePaidSat == 0 && rebuilt.TotalFeesMsat > 0 {
                       feePaidSat = msatToSatCeil(rebuilt.TotalFeesMsat)
@@ -1263,6 +1309,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     _, err = s.lnd.SendToRoute(attemptCtx, paymentHash, route)
     if err == nil {
       cancelAttempt()
+      resetAutoNoPath()
       feePaidSat := msatToSatCeil(routeFeeMsat)
       attemptIndex++
       _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feeLimitPpm, feePaidSat, "succeeded", paymentHash, "")
@@ -1288,6 +1335,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
             _, retryErr := s.lnd.SendToRoute(attemptCtx, paymentHash, updatedRoute)
             if retryErr == nil {
               cancelAttempt()
+              resetAutoNoPath()
               feePaidSat := msatToSatCeil(updatedRoute.TotalFeesMsat)
               attemptIndex++
               _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feeLimitPpm, feePaidSat, "succeeded", paymentHash, "")
@@ -1723,6 +1771,14 @@ func compareHops(hop1 *lnrpc.Hop, hop2 *lnrpc.Hop) bool {
   return hop1.ChanId == hop2.ChanId &&
     hop1.FeeMsat == hop2.FeeMsat &&
     hop1.Expiry == hop2.Expiry
+}
+
+func isNoPathError(err error) bool {
+  if err == nil {
+    return false
+  }
+  msg := strings.ToLower(err.Error())
+  return strings.Contains(msg, "unable to find a path")
 }
 
 func (s *RebalanceService) applyRebalanceLedger(ctx context.Context, channelID uint64, amountSat int64, costSat int64) error {
