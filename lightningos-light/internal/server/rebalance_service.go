@@ -1546,7 +1546,8 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     return false, false
   }
 
-  for _, source := range sources {
+  passDelay := 5 * time.Second
+  for {
     if ctx.Err() != nil {
       if errors.Is(ctx.Err(), context.DeadlineExceeded) {
         finishOnTimeout()
@@ -1556,143 +1557,171 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       return
     }
 
-    if jobSource == "auto" {
-      if stat, ok := pairStats[source.ChannelID]; ok {
-        if !stat.LastFailAt.IsZero() && time.Since(stat.LastFailAt) <= pairFailTTL && (stat.LastSuccessAt.IsZero() || stat.LastSuccessAt.Before(stat.LastFailAt)) {
-          skippedByCache++
-          continue
+    remainingBefore := remaining
+
+    for _, source := range sources {
+      if ctx.Err() != nil {
+        if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+          finishOnTimeout()
+        } else {
+          s.finishJob(jobID, "cancelled", "cancelled")
+        }
+        return
+      }
+
+      if jobSource == "auto" {
+        if stat, ok := pairStats[source.ChannelID]; ok {
+          if !stat.LastFailAt.IsZero() && time.Since(stat.LastFailAt) <= pairFailTTL && (stat.LastSuccessAt.IsZero() || stat.LastSuccessAt.Before(stat.LastFailAt)) {
+            skippedByCache++
+            continue
+          }
         }
       }
-    }
 
-    maxFromSource := source.MaxSourceSat
-    if maxFromSource <= 0 {
-      continue
-    }
-    sourceRemaining := maxFromSource
+      maxFromSource := source.MaxSourceSat
+      if maxFromSource <= 0 {
+        continue
+      }
+      sourceRemaining := maxFromSource
 
-    sendAmount := remaining
-    if sendAmount > sourceRemaining {
-      sendAmount = sourceRemaining
-    }
-    probeCap := computeProbeCap(remaining, cfg.MinAmountSat, cfg.MaxAmountSat)
-    if probeCap > 0 && probeCap < sendAmount {
-      sendAmount = probeCap
-    }
-    if cfg.AmountProbeAdaptive && adaptiveMaxAmount > 0 {
-      capAmount := adaptiveMaxAmount * 2
-      if capAmount > 0 && capAmount < sendAmount {
-        sendAmount = capAmount
+      sendAmount := remaining
+      if sendAmount > sourceRemaining {
+        sendAmount = sourceRemaining
       }
-    }
-    if cfg.MinAmountSat > 0 && sendAmount < cfg.MinAmountSat {
-      continue
-    }
+      probeCap := computeProbeCap(remaining, cfg.MinAmountSat, cfg.MaxAmountSat)
+      if probeCap > 0 && probeCap < sendAmount {
+        sendAmount = probeCap
+      }
+      if cfg.AmountProbeAdaptive && adaptiveMaxAmount > 0 {
+        capAmount := adaptiveMaxAmount * 2
+        if capAmount > 0 && capAmount < sendAmount {
+          sendAmount = capAmount
+        }
+      }
+      if cfg.MinAmountSat > 0 && sendAmount < cfg.MinAmountSat {
+        continue
+      }
 
-    if source.ChannelID == warmSourceID && warmAmount > 0 && warmFeePpm > 0 {
-      warmTry := warmAmount
-      if warmTry > remaining {
-        warmTry = remaining
+      if source.ChannelID == warmSourceID && warmAmount > 0 && warmFeePpm > 0 {
+        warmTry := warmAmount
+        if warmTry > remaining {
+          warmTry = remaining
+        }
+        if warmTry > sourceRemaining {
+          warmTry = sourceRemaining
+        }
+        if warmTry > sendAmount {
+          warmTry = sendAmount
+        }
+        if cfg.MinAmountSat > 0 && warmTry < cfg.MinAmountSat {
+          warmTry = 0
+        }
+        if warmTry > 0 {
+          warmFeeLimitMsat := ppmToFeeLimitMsat(warmTry, warmFeePpm)
+          success, fatal, routeMax, timedOut, usedRoute, amountSent := attemptPayment(source, warmTry, warmFeeLimitMsat, true)
+          if fatal {
+            return
+          }
+          if timedOut {
+            continue
+          }
+          if success {
+            routeCap := int64(0)
+            if applySuccess(amountSent, routeMax, &routeCap, &sourceRemaining) {
+              return
+            }
+            if usedRoute != nil {
+              finished, fatal := rapidRebalance(source, usedRoute, amountSent, routeCap, &sourceRemaining)
+              if fatal {
+                return
+              }
+              if finished {
+                return
+              }
+            }
+            continue
+          }
+        }
       }
-      if warmTry > sourceRemaining {
-        warmTry = sourceRemaining
+
+      feeSteps := cfg.FeeLadderSteps
+      if feeSteps <= 0 {
+        feeSteps = 1
       }
-      if warmTry > sendAmount {
-        warmTry = sendAmount
+
+      probeAmount := cfg.MinAmountSat
+      if probeAmount <= 0 {
+        probeAmount = sendAmount
       }
-      if cfg.MinAmountSat > 0 && warmTry < cfg.MinAmountSat {
-        warmTry = 0
+      if probeAmount > sendAmount {
+        probeAmount = sendAmount
       }
-      if warmTry > 0 {
-        warmFeeLimitMsat := ppmToFeeLimitMsat(warmTry, warmFeePpm)
-        success, fatal, routeMax, timedOut, usedRoute, amountSent := attemptPayment(source, warmTry, warmFeeLimitMsat, true)
+      if probeAmount <= 0 {
+        continue
+      }
+      if cfg.MinAmountSat > 0 && probeAmount < cfg.MinAmountSat {
+        continue
+      }
+
+      sourceTimedOut := false
+      sourcePolicy := lndclient.ChannelPolicySnapshot{
+        FeeRatePpm: source.OutgoingFeePpm,
+        BaseFeeMsat: source.OutgoingBaseMsat,
+      }
+      maxFeeMsat, feeErr := calcFeeLimitMsat(probeAmount*1000, targetPolicy, &sourcePolicy, cfg)
+      if feeErr != nil || maxFeeMsat <= 0 {
+        continue
+      }
+      for step := 1; step <= feeSteps; step++ {
+        feeLimitMsat := calcFeeStepMsat(maxFeeMsat, feeSteps, step)
+        if feeLimitMsat <= 0 {
+          feeLimitMsat = maxFeeMsat
+        }
+
+        success, fatal, routeMax, timedOut, usedRoute, amountSent := attemptPayment(source, probeAmount, feeLimitMsat, true)
         if fatal {
           return
         }
         if timedOut {
+          sourceTimedOut = true
+          break
+        }
+        if !success {
           continue
         }
-        if success {
-          routeCap := int64(0)
-          if applySuccess(amountSent, routeMax, &routeCap, &sourceRemaining) {
+        routeCap := int64(0)
+        if applySuccess(amountSent, routeMax, &routeCap, &sourceRemaining) {
+          return
+        }
+        if usedRoute != nil {
+          finished, fatal := rapidRebalance(source, usedRoute, amountSent, routeCap, &sourceRemaining)
+          if fatal {
             return
           }
-          if usedRoute != nil {
-            finished, fatal := rapidRebalance(source, usedRoute, amountSent, routeCap, &sourceRemaining)
-            if fatal {
-              return
-            }
-            if finished {
-              return
-            }
+          if finished {
+            return
           }
-          continue
         }
-      }
-    }
-
-    feeSteps := cfg.FeeLadderSteps
-    if feeSteps <= 0 {
-      feeSteps = 1
-    }
-
-    probeAmount := cfg.MinAmountSat
-    if probeAmount <= 0 {
-      probeAmount = sendAmount
-    }
-    if probeAmount > sendAmount {
-      probeAmount = sendAmount
-    }
-    if probeAmount <= 0 {
-      continue
-    }
-    if cfg.MinAmountSat > 0 && probeAmount < cfg.MinAmountSat {
-      continue
-    }
-
-    sourceTimedOut := false
-    sourcePolicy := lndclient.ChannelPolicySnapshot{
-      FeeRatePpm: source.OutgoingFeePpm,
-      BaseFeeMsat: source.OutgoingBaseMsat,
-    }
-    maxFeeMsat, feeErr := calcFeeLimitMsat(probeAmount*1000, targetPolicy, &sourcePolicy, cfg)
-    if feeErr != nil || maxFeeMsat <= 0 {
-      continue
-    }
-    for step := 1; step <= feeSteps; step++ {
-      feeLimitMsat := calcFeeStepMsat(maxFeeMsat, feeSteps, step)
-      if feeLimitMsat <= 0 {
-        feeLimitMsat = maxFeeMsat
-      }
-
-      success, fatal, routeMax, timedOut, usedRoute, amountSent := attemptPayment(source, probeAmount, feeLimitMsat, true)
-      if fatal {
-        return
-      }
-      if timedOut {
-        sourceTimedOut = true
         break
       }
-      if !success {
+      if sourceTimedOut {
         continue
       }
-      routeCap := int64(0)
-      if applySuccess(amountSent, routeMax, &routeCap, &sourceRemaining) {
-        return
-      }
-      if usedRoute != nil {
-        finished, fatal := rapidRebalance(source, usedRoute, amountSent, routeCap, &sourceRemaining)
-        if fatal {
-          return
-        }
-        if finished {
-          return
-        }
-      }
+    }
+
+    if remaining <= 0 {
+      return
+    }
+    if remaining == remainingBefore {
       break
     }
-    if sourceTimedOut {
-      continue
+    if !sleepWithContext(passDelay) {
+      if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+        finishOnTimeout()
+      } else {
+        s.finishJob(jobID, "cancelled", "cancelled")
+      }
+      return
     }
   }
 
