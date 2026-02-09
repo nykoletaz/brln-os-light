@@ -614,7 +614,7 @@ func (s *RebalanceService) runAutoScan() {
         continue
       }
     }
-    _, err := s.startJob(target.Channel.ChannelID, "auto", "", amountOverride)
+    _, err = s.startJob(target.Channel.ChannelID, "auto", "", amountOverride)
     if err == nil {
       remaining -= estimatedCost
       queuedCount++
