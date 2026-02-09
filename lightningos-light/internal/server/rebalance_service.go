@@ -3,6 +3,7 @@ package server
 
 import (
   "context"
+  "encoding/hex"
   "errors"
   "fmt"
   "log"
@@ -939,6 +940,11 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
   autoNoPathCount := 0
   autoNoPathThreshold := 6
   autoNoPathResetDone := false
+  ignoredEdgeSet := map[string]struct{}{}
+  ignoredEdges := make([]*lnrpc.EdgeLocator, 0)
+  ignoredPairSet := map[string]struct{}{}
+  ignoredPairs := make([]*lnrpc.NodePair, 0)
+  maxIgnoredEntries := 500
 
   sleepWithContext := func(d time.Duration) bool {
     if d <= 0 {
@@ -993,6 +999,79 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     }
   }
 
+  addIgnoredEdge := func(chanId uint64) {
+    if chanId == 0 || len(ignoredEdges) >= maxIgnoredEntries {
+      return
+    }
+    for _, dir := range []bool{false, true} {
+      key := fmt.Sprintf("%d:%t", chanId, dir)
+      if _, ok := ignoredEdgeSet[key]; ok {
+        continue
+      }
+      ignoredEdgeSet[key] = struct{}{}
+      ignoredEdges = append(ignoredEdges, &lnrpc.EdgeLocator{
+        ChannelId: chanId,
+        DirectionReverse: dir,
+      })
+      if len(ignoredEdges) >= maxIgnoredEntries {
+        return
+      }
+    }
+  }
+
+  addIgnoredPair := func(from, to string) {
+    if len(ignoredPairs) >= maxIgnoredEntries {
+      return
+    }
+    from = strings.TrimSpace(from)
+    to = strings.TrimSpace(to)
+    if from == "" || to == "" || strings.EqualFold(from, to) {
+      return
+    }
+    key := strings.ToLower(from) + ":" + strings.ToLower(to)
+    if _, ok := ignoredPairSet[key]; ok {
+      return
+    }
+    fromBytes, err := hex.DecodeString(from)
+    if err != nil {
+      return
+    }
+    toBytes, err := hex.DecodeString(to)
+    if err != nil {
+      return
+    }
+    ignoredPairSet[key] = struct{}{}
+    ignoredPairs = append(ignoredPairs, &lnrpc.NodePair{
+      From: fromBytes,
+      To: toBytes,
+    })
+  }
+
+  noteRouteFailure := func(route *lnrpc.Route, failureIndex uint32) {
+    if route == nil || len(route.Hops) == 0 {
+      return
+    }
+    idx := int(failureIndex) - 1
+    if idx < 0 || idx >= len(route.Hops) {
+      return
+    }
+    failedHop := route.Hops[idx]
+    if failedHop == nil {
+      return
+    }
+    addIgnoredEdge(failedHop.ChanId)
+    fromPub := strings.TrimSpace(selfPubkey)
+    if idx > 0 {
+      if prevHop := route.Hops[idx-1]; prevHop != nil && strings.TrimSpace(prevHop.PubKey) != "" {
+        fromPub = prevHop.PubKey
+      }
+    }
+    if fromPub != "" && strings.TrimSpace(failedHop.PubKey) != "" {
+      addIgnoredPair(fromPub, failedHop.PubKey)
+      addIgnoredPair(failedHop.PubKey, fromPub)
+    }
+  }
+
   finishOnTimeout := func() {
     if anySuccess {
       reason := fmt.Sprintf("timeout with %d sats remaining", remaining)
@@ -1038,7 +1117,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       attemptCtx, cancelAttempt = context.WithTimeout(ctx, time.Duration(attemptTimeoutSec)*time.Second)
     }
 
-    routes, err := s.lnd.QueryRoutes(attemptCtx, selfPubkey, amountTry, source.ChannelID, targetSnapshot.RemotePubkey, feeLimitMsat, 5)
+    routes, err := s.lnd.QueryRoutes(attemptCtx, selfPubkey, amountTry, source.ChannelID, targetSnapshot.RemotePubkey, feeLimitMsat, 5, ignoredEdges, ignoredPairs)
     routeMaxSat := int64(0)
     if err != nil {
       cancelAttempt()
@@ -1133,6 +1212,9 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
 
       var routeFailure lndclient.RouteFailureError
       if errors.As(err, &routeFailure) && routeFailure.Failure != nil {
+        if routeFailure.Code == lnrpc.Failure_TEMPORARY_CHANNEL_FAILURE {
+          noteRouteFailure(route, routeFailure.FailureSourceIndex)
+        }
         failureIdx := int(routeFailure.FailureSourceIndex) - 1
         if (routeFailure.Code == lnrpc.Failure_FEE_INSUFFICIENT || routeFailure.Code == lnrpc.Failure_INCORRECT_CLTV_EXPIRY) &&
           failureIdx >= 0 && failureIdx < len(route.Hops) {
@@ -1343,6 +1425,9 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     var lastErr error
     var routeFailure lndclient.RouteFailureError
     if errors.As(err, &routeFailure) && routeFailure.Failure != nil {
+      if routeFailure.Code == lnrpc.Failure_TEMPORARY_CHANNEL_FAILURE {
+        noteRouteFailure(route, routeFailure.FailureSourceIndex)
+      }
       failureIdx := int(routeFailure.FailureSourceIndex) - 1
       if (routeFailure.Code == lnrpc.Failure_FEE_INSUFFICIENT || routeFailure.Code == lnrpc.Failure_INCORRECT_CLTV_EXPIRY) &&
         failureIdx >= 0 && failureIdx < len(route.Hops) {
@@ -1447,6 +1532,8 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       minAmount = current
     }
     phase := "increase"
+    consecutiveFailures := 0
+    refreshAfterFailures := 2
 
     for remaining > 0 && *sourceRemaining > 0 {
       maxCap := remaining
@@ -1487,11 +1574,34 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
           return false, false
         }
         if success {
+          consecutiveFailures = 0
           if applySuccess(amountSent, routeMax, &routeCap, sourceRemaining) {
             return true, false
           }
           current = next
           continue
+        }
+        consecutiveFailures++
+        if consecutiveFailures >= refreshAfterFailures {
+          success, fatal, routeMax, timedOut, refreshedRoute, refreshedAmount := attemptPayment(source, next, 0, true)
+          if fatal {
+            return false, true
+          }
+          if timedOut {
+            return false, false
+          }
+          if success {
+            consecutiveFailures = 0
+            if refreshedRoute != nil {
+              baseRoute = refreshedRoute
+            }
+            if applySuccess(refreshedAmount, routeMax, &routeCap, sourceRemaining) {
+              return true, false
+            }
+            current = refreshedAmount
+            continue
+          }
+          consecutiveFailures = 0
         }
         phase = "steady"
 
@@ -1504,10 +1614,33 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
           return false, false
         }
         if success {
+          consecutiveFailures = 0
           if applySuccess(amountSent, routeMax, &routeCap, sourceRemaining) {
             return true, false
           }
           continue
+        }
+        consecutiveFailures++
+        if consecutiveFailures >= refreshAfterFailures {
+          success, fatal, routeMax, timedOut, refreshedRoute, refreshedAmount := attemptPayment(source, current, 0, true)
+          if fatal {
+            return false, true
+          }
+          if timedOut {
+            return false, false
+          }
+          if success {
+            consecutiveFailures = 0
+            if refreshedRoute != nil {
+              baseRoute = refreshedRoute
+            }
+            if applySuccess(refreshedAmount, routeMax, &routeCap, sourceRemaining) {
+              return true, false
+            }
+            current = refreshedAmount
+            continue
+          }
+          consecutiveFailures = 0
         }
         phase = "decrease"
 
@@ -1534,11 +1667,35 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
           return false, false
         }
         if success {
+          consecutiveFailures = 0
           if applySuccess(amountSent, routeMax, &routeCap, sourceRemaining) {
             return true, false
           }
           phase = "increase"
           continue
+        }
+        consecutiveFailures++
+        if consecutiveFailures >= refreshAfterFailures {
+          success, fatal, routeMax, timedOut, refreshedRoute, refreshedAmount := attemptPayment(source, current, 0, true)
+          if fatal {
+            return false, true
+          }
+          if timedOut {
+            return false, false
+          }
+          if success {
+            consecutiveFailures = 0
+            if refreshedRoute != nil {
+              baseRoute = refreshedRoute
+            }
+            if applySuccess(refreshedAmount, routeMax, &routeCap, sourceRemaining) {
+              return true, false
+            }
+            current = refreshedAmount
+            phase = "increase"
+            continue
+          }
+          consecutiveFailures = 0
         }
       }
     }

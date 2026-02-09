@@ -183,8 +183,8 @@ func (c *Client) GetMaxHtlcMsat(ctx context.Context, channelID uint64, fromPubke
   return maxMsat, nil
 }
 
-func (c *Client) QueryRoute(ctx context.Context, destPubkey string, amtSat int64, outgoingChanID uint64, lastHopPubkey string, feeLimitMsat int64) (*lnrpc.Route, error) {
-  routes, err := c.QueryRoutes(ctx, destPubkey, amtSat, outgoingChanID, lastHopPubkey, feeLimitMsat, 1)
+func (c *Client) QueryRoute(ctx context.Context, destPubkey string, amtSat int64, outgoingChanID uint64, lastHopPubkey string, feeLimitMsat int64, ignoredEdges []*lnrpc.EdgeLocator, ignoredPairs []*lnrpc.NodePair) (*lnrpc.Route, error) {
+  routes, err := c.QueryRoutes(ctx, destPubkey, amtSat, outgoingChanID, lastHopPubkey, feeLimitMsat, 1, ignoredEdges, ignoredPairs)
   if err != nil {
     return nil, err
   }
@@ -194,7 +194,7 @@ func (c *Client) QueryRoute(ctx context.Context, destPubkey string, amtSat int64
   return routes[0], nil
 }
 
-func (c *Client) QueryRoutes(ctx context.Context, destPubkey string, amtSat int64, outgoingChanID uint64, lastHopPubkey string, feeLimitMsat int64, numRoutes int32) ([]*lnrpc.Route, error) {
+func (c *Client) QueryRoutes(ctx context.Context, destPubkey string, amtSat int64, outgoingChanID uint64, lastHopPubkey string, feeLimitMsat int64, numRoutes int32, ignoredEdges []*lnrpc.EdgeLocator, ignoredPairs []*lnrpc.NodePair) ([]*lnrpc.Route, error) {
   trimmedDest := strings.TrimSpace(destPubkey)
   if trimmedDest == "" {
     return nil, errors.New("dest pubkey required")
@@ -215,14 +215,23 @@ func (c *Client) QueryRoutes(ctx context.Context, destPubkey string, amtSat int6
   client := lnrpc.NewLightningClient(conn)
 
   routes := make([]*lnrpc.Route, 0, numRoutes)
-  ignoredEdges := make([]*lnrpc.EdgeLocator, 0)
+  baseIgnoredEdges := make([]*lnrpc.EdgeLocator, 0, len(ignoredEdges))
+  if len(ignoredEdges) > 0 {
+    baseIgnoredEdges = append(baseIgnoredEdges, ignoredEdges...)
+  }
+  ignoredByRoute := make([]*lnrpc.EdgeLocator, 0)
 
   for i := int32(0); i < numRoutes; i++ {
+    requestIgnoredEdges := baseIgnoredEdges
+    if len(ignoredByRoute) > 0 {
+      requestIgnoredEdges = append(requestIgnoredEdges, ignoredByRoute...)
+    }
     req := &lnrpc.QueryRoutesRequest{
       PubKey: trimmedDest,
       Amt: amtSat,
       OutgoingChanId: outgoingChanID,
-      IgnoredEdges: ignoredEdges,
+      IgnoredEdges: requestIgnoredEdges,
+      IgnoredPairs: ignoredPairs,
       UseMissionControl: true,
     }
     if feeLimitMsat > 0 {
@@ -250,7 +259,7 @@ func (c *Client) QueryRoutes(ctx context.Context, destPubkey string, amtSat int6
     }
     route := resp.Routes[0]
     routes = append(routes, route)
-    ignoredEdges = append(ignoredEdges, routeToEdgeLocators(route)...)
+    ignoredByRoute = append(ignoredByRoute, routeToEdgeLocators(route)...)
   }
 
   if len(routes) == 0 {
