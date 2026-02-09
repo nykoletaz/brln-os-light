@@ -178,7 +178,7 @@ API endpoints:
 - `GET /api/reports/live` (today 00:00 local → now, cached ~60s)
 
 ## Rebalance Center
-Rebalance Center is an inbound (local/outbound) liquidity optimizer for LND. It can run manual rebalances per channel or fully automated scans that enqueue rebalances based on fee spread, ROI, and budget constraints. A rebalance only proceeds when **outgoing fee > peer fee** so you never pay more than the peer charge without a positive spread. Costs are tracked from notifications (fee msat) and aggregated into live cost + daily auto/manual spending.
+Rebalance Center is an inbound (local/outbound) liquidity optimizer for LND. It can run manual rebalances per channel or fully automated scans that enqueue rebalances based on ROI and budget constraints. A rebalance only proceeds when **outgoing fee > peer fee** so you never pay more than the peer charge without a positive spread. Costs are tracked from notifications (fee msat) and aggregated into live cost + daily auto/manual spending.
 
 Key behavior:
 - Manual rebalances ignore the daily budget and can be started per channel.
@@ -208,13 +208,17 @@ Configuration parameters:
 - `Daily budget (% of revenue)`: percent of the last 24h routing revenue allocated to auto rebalances.
 - `Deadband (%)`: minimum outbound deficit before a channel becomes a target.
 - `Minimum local for source (%)`: minimum local liquidity required for a channel to be a source.
-- `Economic ratio`: fraction of outgoing fee used as the maximum fee cap (bounded by fee spread).
+- `Economic ratio`: fraction of the target channel outbound fee (base+ppm) used as the maximum fee cap.
+- `Econ ratio max (ppm)`: optional cap for the fee limit when using economic ratio (0 = no cap).
+- `Fee limit (ppm)`: overrides economic ratio with a fixed max fee ppm (0 = disabled).
+- `Subtract source fees`: reduces the fee budget by estimated source fees (more conservative).
 - `ROI minimum`: minimum estimated ROI (7d revenue / estimated cost) to enqueue auto jobs.
 - `Max concurrent`: maximum number of rebalances running at the same time.
-- `Minimum (sats)`: smallest rebalance amount allowed per attempt.
+- `Minimum (sats)`: smallest rebalance amount for standard attempts (probing may go below to capture a valid route).
 - `Maximum (sats)`: upper bound for rebalance size (0 = unlimited).
 - `Fee ladder steps`: number of fee caps to try from low to high before giving up.
-- `Amount probe steps`: number of amount probes from large to small per fee step.
+- `Amount probe steps`: number of amount probes from large to small when a last-hop temporary failure occurs.
+- `Fail tolerance (ppm)`: probing stops when the delta between amounts is below this threshold.
 - `Adaptive amount probing`: caps the next attempt based on the last successful amount.
 - `Attempt timeout (sec)`: maximum time per attempt before moving to the next fee/amount.
 - `Rebalance timeout (sec)`: maximum runtime per rebalance job (auto or manual).
