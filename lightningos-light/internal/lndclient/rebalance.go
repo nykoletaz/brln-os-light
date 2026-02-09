@@ -23,7 +23,7 @@ func (e RouteFailureError) Error() string {
   if e.Failure != nil {
     return fmt.Sprintf("route failed: %s", e.Failure.Code.String())
   }
-  if e.Code != lnrpc.Failure_FAILURE_UNKNOWN {
+  if e.Code != lnrpc.Failure_UNKNOWN_FAILURE {
     return fmt.Sprintf("route failed: %s", e.Code.String())
   }
   return "route failed"
@@ -297,7 +297,7 @@ func (c *Client) SendToRoute(ctx context.Context, paymentHash string, route *lnr
         Failure: resp.Failure,
       }
     }
-    return resp, RouteFailureError{Code: lnrpc.Failure_FAILURE_UNKNOWN}
+    return resp, RouteFailureError{Code: lnrpc.Failure_UNKNOWN_FAILURE}
   }
   return resp, nil
 }
