@@ -936,6 +936,9 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
   autoNoPathBackoff := time.Duration(0)
   autoNoPathBase := 1 * time.Second
   autoNoPathMax := 10 * time.Second
+  autoNoPathCount := 0
+  autoNoPathThreshold := 6
+  autoNoPathResetDone := false
 
   sleepWithContext := func(d time.Duration) bool {
     if d <= 0 {
@@ -955,6 +958,23 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
     if jobSource != "auto" {
       return
     }
+    autoNoPathCount++
+    if !autoNoPathResetDone && autoNoPathCount >= autoNoPathThreshold {
+      if s.lnd != nil {
+        resetCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+        err := s.lnd.ResetMissionControl(resetCtx)
+        cancel()
+        if err == nil {
+          autoNoPathResetDone = true
+          autoNoPathCount = 0
+          if s.logger != nil {
+            s.logger.Printf("rebalance auto: mission control reset after %d no-path attempts", autoNoPathThreshold)
+          }
+        } else if s.logger != nil {
+          s.logger.Printf("rebalance auto: mission control reset failed: %v", err)
+        }
+      }
+    }
     if autoNoPathBackoff <= 0 {
       autoNoPathBackoff = autoNoPathBase
     } else {
@@ -969,6 +989,7 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
   resetAutoNoPath := func() {
     if jobSource == "auto" {
       autoNoPathBackoff = 0
+      autoNoPathCount = 0
     }
   }
 
@@ -1778,7 +1799,7 @@ func isNoPathError(err error) bool {
     return false
   }
   msg := strings.ToLower(err.Error())
-  return strings.Contains(msg, "unable to find a path")
+  return strings.Contains(msg, "unable to find a path") || strings.Contains(msg, "no route")
 }
 
 func (s *RebalanceService) applyRebalanceLedger(ctx context.Context, channelID uint64, amountSat int64, costSat int64) error {

@@ -51,6 +51,18 @@ const (
   defaultConnectPeerTimeoutSec = uint64(8)
 )
 
+func (c *Client) ResetMissionControl(ctx context.Context) error {
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return err
+  }
+  defer conn.Close()
+
+  client := routerrpc.NewRouterClient(conn)
+  _, err = client.ResetMissionControl(ctx, &routerrpc.ResetMissionControlRequest{})
+  return err
+}
+
 type macaroonCredential struct {
   macaroon string
 }
