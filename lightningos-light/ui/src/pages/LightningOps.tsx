@@ -239,6 +239,9 @@ export default function LightningOps() {
   const [autofeeResults, setAutofeeResults] = useState<string[]>([])
   const [autofeeResultItems, setAutofeeResultItems] = useState<AutofeeResultItem[]>([])
   const [autofeeResultsStatus, setAutofeeResultsStatus] = useState('')
+  const [autofeeResultsRuns, setAutofeeResultsRuns] = useState('4')
+  const [autofeeResultsFrom, setAutofeeResultsFrom] = useState('')
+  const [autofeeResultsTo, setAutofeeResultsTo] = useState('')
 
   const [chanStatusBusy, setChanStatusBusy] = useState<string | null>(null)
   const [chanStatusMessage, setChanStatusMessage] = useState('')
@@ -643,6 +646,18 @@ export default function LightningOps() {
     return `🧭 ${alias} ${t('lightningOps.autofeeResultsExplorerOn')}`
   }
 
+  const buildAutofeeResultsQuery = () => {
+    const runsValue = Math.max(1, Number(autofeeResultsRuns || 4))
+    const payload: { runs: number; from?: string; to?: string } = { runs: runsValue }
+    if (autofeeResultsFrom) {
+      payload.from = autofeeResultsFrom
+    }
+    if (autofeeResultsTo) {
+      payload.to = autofeeResultsTo
+    }
+    return payload
+  }
+
   const localizedAutofeeResults = useMemo(() => {
     if (!autofeeResultItems.length) {
       return formattedAutofeeResults
@@ -779,7 +794,7 @@ export default function LightningOps() {
       getAutofeeConfig(),
       getAutofeeStatus(),
       getAutofeeChannels(),
-      getAutofeeResults(50)
+      getAutofeeResults(buildAutofeeResultsQuery())
     ])
     if (channelsResult.status === 'fulfilled') {
       const res = channelsResult.value
@@ -1172,7 +1187,7 @@ export default function LightningOps() {
       setAutofeeMessage(dryRun ? t('lightningOps.autofeeDryRunDone') : t('lightningOps.autofeeRunDone'))
       const status = await getAutofeeStatus()
       setAutofeeStatus(status as AutofeeStatus)
-      const results = await getAutofeeResults(50)
+      const results = await getAutofeeResults(buildAutofeeResultsQuery())
       const payload = results as any
       setAutofeeResults(Array.isArray(payload?.lines) ? payload.lines : [])
       setAutofeeResultItems(Array.isArray(payload?.items) ? payload.items : [])
@@ -1187,7 +1202,7 @@ export default function LightningOps() {
   const handleAutofeeResultsRefresh = async () => {
     setAutofeeResultsStatus(t('lightningOps.autofeeResultsLoading'))
     try {
-      const results = await getAutofeeResults(50)
+      const results = await getAutofeeResults(buildAutofeeResultsQuery())
       const payload = results as any
       setAutofeeResults(Array.isArray(payload?.lines) ? payload.lines : [])
       setAutofeeResultItems(Array.isArray(payload?.items) ? payload.items : [])
@@ -1619,6 +1634,37 @@ export default function LightningOps() {
 
         {autofeeResultsOpen && (
           <>
+            <div className="grid gap-3 lg:grid-cols-3">
+              <label className="text-sm text-fog/70">
+                {t('lightningOps.autofeeResultsRuns')}
+                <input
+                  className="input-field mt-2"
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={autofeeResultsRuns}
+                  onChange={(e) => setAutofeeResultsRuns(e.target.value)}
+                />
+              </label>
+              <label className="text-sm text-fog/70">
+                {t('lightningOps.autofeeResultsFrom')}
+                <input
+                  className="input-field mt-2"
+                  type="datetime-local"
+                  value={autofeeResultsFrom}
+                  onChange={(e) => setAutofeeResultsFrom(e.target.value)}
+                />
+              </label>
+              <label className="text-sm text-fog/70">
+                {t('lightningOps.autofeeResultsTo')}
+                <input
+                  className="input-field mt-2"
+                  type="datetime-local"
+                  value={autofeeResultsTo}
+                  onChange={(e) => setAutofeeResultsTo(e.target.value)}
+                />
+              </label>
+            </div>
             {autofeeResultsStatus && <p className="text-sm text-brass">{autofeeResultsStatus}</p>}
             <div className="bg-ink/70 border border-white/10 rounded-2xl p-4 text-xs font-mono whitespace-pre-wrap max-h-[420px] overflow-y-auto">
               {localizedAutofeeResults.length ? localizedAutofeeResults.join('\n') : t('lightningOps.autofeeResultsEmpty')}

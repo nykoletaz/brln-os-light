@@ -127,6 +127,7 @@ export const updateAutofeeConfig = (payload: {
   run_interval_sec?: number
   cooldown_up_sec?: number
   cooldown_down_sec?: number
+  rebal_cost_mode?: string
   amboss_enabled?: boolean
   amboss_token?: string
   inbound_passive_enabled?: boolean
@@ -147,7 +148,17 @@ export const updateAutofeeChannels = (payload: {
 export const runAutofee = (payload: { dry_run: boolean }) =>
   request('/api/lnops/autofee/run', { method: 'POST', body: JSON.stringify(payload) })
 export const getAutofeeStatus = () => request('/api/lnops/autofee/status')
-export const getAutofeeResults = (lines = 50) => request(`/api/lnops/autofee/results?lines=${lines}`)
+export const getAutofeeResults = (params: number | {
+  lines?: number
+  runs?: number
+  from?: string
+  to?: string
+} = 50) => {
+  if (typeof params === 'number') {
+    return request(`/api/lnops/autofee/results?lines=${params}`)
+  }
+  return request(`/api/lnops/autofee/results${buildQuery(params)}`)
+}
 export const getLnChannelFees = (channelPoint: string) =>
   request(`/api/lnops/channel/fees?channel_point=${encodeURIComponent(channelPoint)}`)
 export const updateLnChannelStatus = (payload: { channel_point: string; enabled: boolean }) =>
