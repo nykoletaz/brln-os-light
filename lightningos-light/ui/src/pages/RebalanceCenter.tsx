@@ -35,6 +35,7 @@ type RebalanceConfig = {
   amount_probe_adaptive: boolean
   attempt_timeout_sec: number
   rebalance_timeout_sec: number
+  mc_half_life_sec: number
   payback_mode_flags: number
   unlock_days: number
   critical_release_pct: number
@@ -192,6 +193,7 @@ export default function RebalanceCenter() {
       amount_probe_adaptive: cfg.amount_probe_adaptive,
       attempt_timeout_sec: cfg.attempt_timeout_sec,
       rebalance_timeout_sec: cfg.rebalance_timeout_sec,
+      mc_half_life_sec: cfg.mc_half_life_sec,
       payback_mode_flags: cfg.payback_mode_flags,
       unlock_days: cfg.unlock_days,
       critical_release_pct: cfg.critical_release_pct,
@@ -365,7 +367,8 @@ export default function RebalanceCenter() {
           amount_probe_steps: nextConfig.amount_probe_steps || 4,
           amount_probe_adaptive: nextConfig.amount_probe_adaptive ?? true,
           attempt_timeout_sec: nextConfig.attempt_timeout_sec || 20,
-          rebalance_timeout_sec: nextConfig.rebalance_timeout_sec || 600
+          rebalance_timeout_sec: nextConfig.rebalance_timeout_sec || 600,
+          mc_half_life_sec: nextConfig.mc_half_life_sec || 0
         }
         setServerConfig(normalizedConfig)
         const currentSig = configSignature(configRef.current)
@@ -423,6 +426,7 @@ export default function RebalanceCenter() {
           amount_probe_adaptive: config.amount_probe_adaptive,
           attempt_timeout_sec: config.attempt_timeout_sec,
           rebalance_timeout_sec: config.rebalance_timeout_sec,
+          mc_half_life_sec: config.mc_half_life_sec,
           payback_mode_flags: config.payback_mode_flags,
           unlock_days: config.unlock_days,
           critical_release_pct: config.critical_release_pct,
@@ -853,6 +857,18 @@ export default function RebalanceCenter() {
                 min={60}
                 value={config.rebalance_timeout_sec}
                 onChange={(e) => setConfig({ ...config, rebalance_timeout_sec: Number(e.target.value) })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.mcHalfLife')}>
+                {t('rebalanceCenter.settings.mcHalfLife')}
+              </label>
+              <input
+                className="input-field"
+                type="number"
+                min={0}
+                value={config.mc_half_life_sec}
+                onChange={(e) => setConfig({ ...config, mc_half_life_sec: Number(e.target.value) })}
               />
             </div>
             <div className="space-y-2">

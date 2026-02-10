@@ -62,6 +62,7 @@ type RebalanceConfig struct {
   AmountProbeAdaptive bool `json:"amount_probe_adaptive"`
   AttemptTimeoutSec int `json:"attempt_timeout_sec"`
   RebalanceTimeoutSec int `json:"rebalance_timeout_sec"`
+  MissionControlHalfLifeSec int64 `json:"mc_half_life_sec"`
   PaybackModeFlags int `json:"payback_mode_flags"`
   UnlockDays int `json:"unlock_days"`
   CriticalReleasePct float64 `json:"critical_release_pct"`
@@ -195,6 +196,7 @@ type RebalanceService struct {
   subs map[chan RebalanceEvent]struct{}
   cfg RebalanceConfig
   cfgLoaded bool
+  mcHalfLifeApplied int64
   lastScan time.Time
   lastScanStatus string
   lastScanDetail string
@@ -239,6 +241,7 @@ func defaultRebalanceConfig() RebalanceConfig {
     AmountProbeAdaptive: true,
     AttemptTimeoutSec: 20,
     RebalanceTimeoutSec: 600,
+    MissionControlHalfLifeSec: 0,
     PaybackModeFlags: paybackModePayback | paybackModeTime | paybackModeCritical,
     UnlockDays: 14,
     CriticalReleasePct: 20,
@@ -271,6 +274,12 @@ func (s *RebalanceService) Start() {
 
   if _, err := s.loadConfig(context.Background()); err != nil && s.logger != nil {
     s.logger.Printf("rebalance config load failed: %v", err)
+  }
+  if s.lnd != nil {
+    mcCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    cfg, _ := s.loadConfig(mcCtx)
+    s.applyMissionControlHalfLife(mcCtx, cfg)
+    cancel()
   }
 
   s.resetSemaphore()
@@ -356,9 +365,38 @@ func (s *RebalanceService) UpdateConfig(ctx context.Context, updated RebalanceCo
   s.cfg = updated
   s.cfgLoaded = true
   s.mu.Unlock()
+  if s.lnd != nil {
+    mcCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    s.applyMissionControlHalfLife(mcCtx, updated)
+    cancel()
+  }
   s.resetSemaphore()
   s.triggerScan()
   return updated, nil
+}
+
+func (s *RebalanceService) applyMissionControlHalfLife(ctx context.Context, cfg RebalanceConfig) {
+  if s.lnd == nil {
+    return
+  }
+  if cfg.MissionControlHalfLifeSec < 0 {
+    cfg.MissionControlHalfLifeSec = 0
+  }
+  s.mu.Lock()
+  lastApplied := s.mcHalfLifeApplied
+  s.mu.Unlock()
+  if lastApplied == cfg.MissionControlHalfLifeSec {
+    return
+  }
+  if err := s.lnd.UpdateMissionControlHalfLife(ctx, cfg.MissionControlHalfLifeSec); err != nil {
+    if s.logger != nil {
+      s.logger.Printf("rebalance mission control update failed: %v", err)
+    }
+    return
+  }
+  s.mu.Lock()
+  s.mcHalfLifeApplied = cfg.MissionControlHalfLifeSec
+  s.mu.Unlock()
 }
 
 func (s *RebalanceService) resetSemaphore() {
@@ -1176,54 +1214,97 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       }
       return false, false, 0, false, nil, 0
     }
-    _, paymentHash, paymentAddr, err := s.createRebalanceInvoice(attemptCtx, amountTry, jobID, source.ChannelID, targetChannelID)
-    if err != nil {
-      cancelAttempt()
-      if ctx.Err() != nil {
-        if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-          finishOnTimeout()
-        } else {
-          s.finishJob(jobID, "cancelled", "cancelled")
-        }
-        return false, true, 0, false, nil, 0
-      }
-      if errors.Is(err, context.DeadlineExceeded) || errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
-        attemptIndex++
-        _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feeLimitPpm, 0, "failed", "", "attempt timeout")
-        s.recordPairFailure(ctx, source.ChannelID, targetChannelID, "attempt timeout")
-        return false, false, 0, true, nil, 0
-      }
-      attemptIndex++
-      _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feeLimitPpm, 0, "failed", "", err.Error())
-      s.recordPairFailure(ctx, source.ChannelID, targetChannelID, err.Error())
-      return false, false, 0, false, nil, 0
-    }
-
     var lastErr error
     var lastRouteFeeMsat int64
+    var lastPaymentHash string
+    var lastFeeLimitPpm int64
+    var lastAmountTry int64
     for _, route := range routes {
       if route == nil {
         continue
       }
-      applyMppRecord(route, paymentAddr, amountTry)
-      routeFeeMsat := int64(0)
-      if route.TotalFeesMsat > 0 {
-        routeFeeMsat = route.TotalFeesMsat
-      } else if route.TotalFees > 0 {
-        routeFeeMsat = route.TotalFees * 1000
+      routeAmount := amountTry
+      routeFeeLimitMsat := feeLimitMsat
+      routeFeeLimitPpm := feeLimitPpm
+      activeRoute := route
+      if cfg.AmountProbeSteps > 0 {
+        maxAmount, probeErr := s.probeRoute(attemptCtx, route, amountTry, cfg.MinAmountSat, cfg.AmountProbeSteps, targetPolicy, sourcePolicy, cfg)
+        if probeErr != nil {
+          lastErr = probeErr
+          continue
+        }
+        if maxAmount <= 0 {
+          lastErr = errors.New("probe returned no amount")
+          continue
+        }
+        if maxAmount > routeAmount {
+          maxAmount = routeAmount
+        }
+        if maxAmount != routeAmount {
+          routeAmount = maxAmount
+          maxFeeMsat, err := calcFeeLimitMsat(routeAmount*1000, targetPolicy, &sourcePolicy, cfg)
+          if err != nil || maxFeeMsat <= 0 {
+            if err == nil {
+              err = errors.New("invalid fee limit")
+            }
+            lastErr = err
+            continue
+          }
+          routeFeeLimitMsat = maxFeeMsat
+          routeFeeLimitPpm = feeMsatToPpm(routeFeeLimitMsat, routeAmount)
+          rebuilt, rebuildErr := s.rebuildRouteForAmount(attemptCtx, route, routeAmount)
+          if rebuildErr != nil {
+            lastErr = rebuildErr
+            continue
+          }
+          activeRoute = rebuilt
+        }
       }
-      if feeLimitMsat > 0 && routeFeeMsat > feeLimitMsat {
+      _, paymentHash, paymentAddr, err := s.createRebalanceInvoice(attemptCtx, routeAmount, jobID, source.ChannelID, targetChannelID)
+      if err != nil {
+        cancelAttempt()
+        if ctx.Err() != nil {
+          if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+            finishOnTimeout()
+          } else {
+            s.finishJob(jobID, "cancelled", "cancelled")
+          }
+          return false, true, 0, false, nil, 0
+        }
+        if errors.Is(err, context.DeadlineExceeded) || errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
+          attemptIndex++
+          _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, routeAmount, routeFeeLimitPpm, 0, "failed", "", "attempt timeout")
+          s.recordPairFailure(ctx, source.ChannelID, targetChannelID, "attempt timeout")
+          return false, false, 0, true, nil, 0
+        }
+        attemptIndex++
+        _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, routeAmount, routeFeeLimitPpm, 0, "failed", "", err.Error())
+        s.recordPairFailure(ctx, source.ChannelID, targetChannelID, err.Error())
+        return false, false, 0, false, nil, 0
+      }
+      lastPaymentHash = paymentHash
+      lastFeeLimitPpm = routeFeeLimitPpm
+      lastAmountTry = routeAmount
+
+      applyMppRecord(activeRoute, paymentAddr, routeAmount)
+      routeFeeMsat := int64(0)
+      if activeRoute.TotalFeesMsat > 0 {
+        routeFeeMsat = activeRoute.TotalFeesMsat
+      } else if activeRoute.TotalFees > 0 {
+        routeFeeMsat = activeRoute.TotalFees * 1000
+      }
+      if routeFeeLimitMsat > 0 && routeFeeMsat > routeFeeLimitMsat {
         lastErr = fmt.Errorf("route fee exceeds limit")
         continue
       }
 
-      routeMaxSat = s.maxAmountOnRouteSat(attemptCtx, route, selfPubkey)
+      routeMaxSat = s.maxAmountOnRouteSat(attemptCtx, activeRoute, selfPubkey)
       if routeFeeMsat > 0 {
         probeFeeMsat = routeFeeMsat
       }
       lastRouteFeeMsat = routeFeeMsat
 
-      _, err = s.lnd.SendToRoute(attemptCtx, paymentHash, route)
+      _, err = s.lnd.SendToRoute(attemptCtx, paymentHash, activeRoute)
       if err == nil {
         cancelAttempt()
         resetAutoNoPath()
@@ -1232,28 +1313,28 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
           feePaidSat = msatToSatCeil(probeFeeMsat)
         }
         attemptIndex++
-        _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feeLimitPpm, feePaidSat, "succeeded", paymentHash, "")
-        s.recordPairSuccess(ctx, source.ChannelID, targetChannelID, amountTry, feeLimitPpm, feePaidSat)
-        _ = s.applyRebalanceLedger(ctx, targetChannelID, amountTry, feePaidSat)
+        _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, routeAmount, routeFeeLimitPpm, feePaidSat, "succeeded", paymentHash, "")
+        s.recordPairSuccess(ctx, source.ChannelID, targetChannelID, routeAmount, routeFeeLimitPpm, feePaidSat)
+        _ = s.applyRebalanceLedger(ctx, targetChannelID, routeAmount, feePaidSat)
         _ = s.addBudgetSpend(ctx, feePaidSat, jobSource)
-        return true, false, routeMaxSat, false, route, amountTry
+        return true, false, routeMaxSat, false, activeRoute, routeAmount
       }
 
       var routeFailure lndclient.RouteFailureError
       if errors.As(err, &routeFailure) && routeFailure.Failure != nil {
         if routeFailure.Code == lnrpc.Failure_TEMPORARY_CHANNEL_FAILURE {
-          noteRouteFailure(route, routeFailure.FailureSourceIndex)
+          noteRouteFailure(activeRoute, routeFailure.FailureSourceIndex)
         }
         failureIdx := int(routeFailure.FailureSourceIndex) - 1
         if (routeFailure.Code == lnrpc.Failure_FEE_INSUFFICIENT || routeFailure.Code == lnrpc.Failure_INCORRECT_CLTV_EXPIRY) &&
-          failureIdx >= 0 && failureIdx < len(route.Hops) {
-          updatedRoute, rebuildErr := s.rebuildRouteForAmount(attemptCtx, route, amountTry)
-          if rebuildErr == nil && !compareHops(route.Hops[failureIdx], updatedRoute.Hops[failureIdx]) {
-            if feeLimitMsat > 0 && updatedRoute.TotalFeesMsat > feeLimitMsat {
+          failureIdx >= 0 && failureIdx < len(activeRoute.Hops) {
+          updatedRoute, rebuildErr := s.rebuildRouteForAmount(attemptCtx, activeRoute, routeAmount)
+          if rebuildErr == nil && !compareHops(activeRoute.Hops[failureIdx], updatedRoute.Hops[failureIdx]) {
+            if routeFeeLimitMsat > 0 && updatedRoute.TotalFeesMsat > routeFeeLimitMsat {
               lastErr = fmt.Errorf("route fee exceeds limit")
               continue
             }
-            applyMppRecord(updatedRoute, paymentAddr, amountTry)
+            applyMppRecord(updatedRoute, paymentAddr, routeAmount)
             updatedRouteMax := s.maxAmountOnRouteSat(attemptCtx, updatedRoute, selfPubkey)
             _, retryErr := s.lnd.SendToRoute(attemptCtx, paymentHash, updatedRoute)
             if retryErr == nil {
@@ -1264,11 +1345,11 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
                 feePaidSat = msatToSatCeil(probeFeeMsat)
               }
               attemptIndex++
-              _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feeLimitPpm, feePaidSat, "succeeded", paymentHash, "")
-              s.recordPairSuccess(ctx, source.ChannelID, targetChannelID, amountTry, feeLimitPpm, feePaidSat)
-              _ = s.applyRebalanceLedger(ctx, targetChannelID, amountTry, feePaidSat)
+              _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, routeAmount, routeFeeLimitPpm, feePaidSat, "succeeded", paymentHash, "")
+              s.recordPairSuccess(ctx, source.ChannelID, targetChannelID, routeAmount, routeFeeLimitPpm, feePaidSat)
+              _ = s.applyRebalanceLedger(ctx, targetChannelID, routeAmount, feePaidSat)
               _ = s.addBudgetSpend(ctx, feePaidSat, jobSource)
-              return true, false, updatedRouteMax, false, updatedRoute, amountTry
+              return true, false, updatedRouteMax, false, updatedRoute, routeAmount
             }
             lastErr = retryErr
             continue
@@ -1277,15 +1358,15 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
 
         if routeFailure.Code == lnrpc.Failure_TEMPORARY_CHANNEL_FAILURE &&
           cfg.AmountProbeSteps > 0 &&
-          int(routeFailure.FailureSourceIndex) == len(route.Hops)-2 {
-          maxAmount, probeErr := s.probeRoute(attemptCtx, route, amountTry, cfg.MinAmountSat, cfg.AmountProbeSteps, targetPolicy, sourcePolicy, cfg)
+          int(routeFailure.FailureSourceIndex) == len(activeRoute.Hops)-2 {
+          maxAmount, probeErr := s.probeRoute(attemptCtx, activeRoute, routeAmount, cfg.MinAmountSat, cfg.AmountProbeSteps, targetPolicy, sourcePolicy, cfg)
           if probeErr == nil && maxAmount > 0 {
             retryFeeMsat, retryErr := calcFeeLimitMsat(maxAmount*1000, targetPolicy, &sourcePolicy, cfg)
             if retryErr == nil && retryFeeMsat > 0 {
               retryFeePpm := feeMsatToPpm(retryFeeMsat, maxAmount)
               _, retryHash, retryAddr, retryInvErr := s.createRebalanceInvoice(attemptCtx, maxAmount, jobID, source.ChannelID, targetChannelID)
               if retryInvErr == nil {
-                rebuilt, rebuildErr := s.rebuildRouteForAmount(attemptCtx, route, maxAmount)
+                rebuilt, rebuildErr := s.rebuildRouteForAmount(attemptCtx, activeRoute, maxAmount)
                 if rebuildErr == nil {
                   if retryFeeMsat > 0 && rebuilt.TotalFeesMsat > retryFeeMsat {
                     attemptIndex++
@@ -1333,11 +1414,20 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       return false, true, 0, false, nil, 0
     }
     if errors.Is(attemptCtx.Err(), context.DeadlineExceeded) {
-      if ok, sent := reconcileTimeoutPayment(paymentHash, feeLimitPpm, source, amountTry); ok {
+      timeoutHash := lastPaymentHash
+      timeoutFeePpm := lastFeeLimitPpm
+      timeoutAmount := lastAmountTry
+      if timeoutFeePpm <= 0 {
+        timeoutFeePpm = feeLimitPpm
+      }
+      if timeoutAmount <= 0 {
+        timeoutAmount = amountTry
+      }
+      if ok, sent := reconcileTimeoutPayment(timeoutHash, timeoutFeePpm, source, timeoutAmount); ok {
         return true, false, 0, false, nil, sent
       }
       attemptIndex++
-      _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feeLimitPpm, 0, "failed", paymentHash, "attempt timeout")
+      _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, timeoutAmount, timeoutFeePpm, 0, "failed", timeoutHash, "attempt timeout")
       s.recordPairFailure(ctx, source.ChannelID, targetChannelID, "attempt timeout")
       return false, false, 0, true, nil, 0
     }
@@ -1348,8 +1438,16 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
       failReason = "all routes failed"
     }
     if logRouteFailure {
+      failAmount := amountTry
+      failFeePpm := feeLimitPpm
+      if lastAmountTry > 0 {
+        failAmount = lastAmountTry
+      }
+      if lastFeeLimitPpm > 0 {
+        failFeePpm = lastFeeLimitPpm
+      }
       attemptIndex++
-      _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, amountTry, feeLimitPpm, 0, "failed", paymentHash, failReason)
+      _ = s.insertAttempt(ctx, jobID, attemptIndex, source.ChannelID, failAmount, failFeePpm, 0, "failed", lastPaymentHash, failReason)
       s.recordPairFailure(ctx, source.ChannelID, targetChannelID, failReason)
     }
     return false, false, 0, false, nil, 0
@@ -2777,6 +2875,7 @@ end $$;
     amount_probe_adaptive boolean not null default true,
     attempt_timeout_sec integer not null default 20,
     rebalance_timeout_sec integer not null default 600,
+    mc_half_life_sec bigint not null default 0,
     payback_mode_flags integer not null default 7,
     unlock_days integer not null default 14,
     critical_release_pct double precision not null default 20,
@@ -2804,6 +2903,8 @@ end $$;
     add column if not exists attempt_timeout_sec integer not null default 20;
   alter table rebalance_config
     add column if not exists rebalance_timeout_sec integer not null default 600;
+  alter table rebalance_config
+    add column if not exists mc_half_life_sec bigint not null default 0;
 
 create table if not exists rebalance_channel_settings (
   channel_id bigint primary key,
@@ -2917,7 +3018,7 @@ func (s *RebalanceService) loadConfig(ctx context.Context) (RebalanceConfig, err
 
   row := s.db.QueryRow(ctx, `
   select auto_enabled, scan_interval_sec, deadband_pct, source_min_local_pct, econ_ratio, econ_ratio_max_ppm, fee_limit_ppm, lost_profit, fail_tolerance_ppm, roi_min, daily_budget_pct,
-    max_concurrent, min_amount_sat, max_amount_sat, fee_ladder_steps, amount_probe_steps, amount_probe_adaptive, attempt_timeout_sec, rebalance_timeout_sec, payback_mode_flags,
+    max_concurrent, min_amount_sat, max_amount_sat, fee_ladder_steps, amount_probe_steps, amount_probe_adaptive, attempt_timeout_sec, rebalance_timeout_sec, mc_half_life_sec, payback_mode_flags,
     unlock_days, critical_release_pct, critical_min_sources, critical_min_available_sats, critical_cycles
   from rebalance_config where id=$1`, rebalanceConfigID)
 
@@ -2942,6 +3043,7 @@ func (s *RebalanceService) loadConfig(ctx context.Context) (RebalanceConfig, err
     &cfg.AmountProbeAdaptive,
     &cfg.AttemptTimeoutSec,
     &cfg.RebalanceTimeoutSec,
+    &cfg.MissionControlHalfLifeSec,
     &cfg.PaybackModeFlags,
     &cfg.UnlockDays,
     &cfg.CriticalReleasePct,
@@ -2967,9 +3069,9 @@ func (s *RebalanceService) upsertConfig(ctx context.Context, cfg RebalanceConfig
   _, err := s.db.Exec(ctx, `
   insert into rebalance_config (
     id, auto_enabled, scan_interval_sec, deadband_pct, source_min_local_pct, econ_ratio, econ_ratio_max_ppm, fee_limit_ppm, lost_profit, fail_tolerance_ppm, roi_min, daily_budget_pct,
-    max_concurrent, min_amount_sat, max_amount_sat, fee_ladder_steps, amount_probe_steps, amount_probe_adaptive, attempt_timeout_sec, rebalance_timeout_sec, payback_mode_flags,
+    max_concurrent, min_amount_sat, max_amount_sat, fee_ladder_steps, amount_probe_steps, amount_probe_adaptive, attempt_timeout_sec, rebalance_timeout_sec, mc_half_life_sec, payback_mode_flags,
     unlock_days, critical_release_pct, critical_min_sources, critical_min_available_sats, critical_cycles, updated_at
-  ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,now())
+  ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,now())
    on conflict (id) do update set
     auto_enabled = excluded.auto_enabled,
     scan_interval_sec = excluded.scan_interval_sec,
@@ -2990,15 +3092,16 @@ func (s *RebalanceService) upsertConfig(ctx context.Context, cfg RebalanceConfig
     amount_probe_adaptive = excluded.amount_probe_adaptive,
     attempt_timeout_sec = excluded.attempt_timeout_sec,
     rebalance_timeout_sec = excluded.rebalance_timeout_sec,
+    mc_half_life_sec = excluded.mc_half_life_sec,
     payback_mode_flags = excluded.payback_mode_flags,
     unlock_days = excluded.unlock_days,
     critical_release_pct = excluded.critical_release_pct,
     critical_min_sources = excluded.critical_min_sources,
     critical_min_available_sats = excluded.critical_min_available_sats,
-  critical_cycles = excluded.critical_cycles,
-  updated_at = now()
+    critical_cycles = excluded.critical_cycles,
+    updated_at = now()
   `, rebalanceConfigID, cfg.AutoEnabled, cfg.ScanIntervalSec, cfg.DeadbandPct, cfg.SourceMinLocalPct, cfg.EconRatio, cfg.EconRatioMaxPpm, cfg.FeeLimitPpm, cfg.LostProfit, cfg.FailTolerancePpm, cfg.ROIMin, cfg.DailyBudgetPct, cfg.MaxConcurrent,
-    cfg.MinAmountSat, cfg.MaxAmountSat, cfg.FeeLadderSteps, cfg.AmountProbeSteps, cfg.AmountProbeAdaptive, cfg.AttemptTimeoutSec, cfg.RebalanceTimeoutSec, cfg.PaybackModeFlags, cfg.UnlockDays, cfg.CriticalReleasePct, cfg.CriticalMinSources, cfg.CriticalMinAvailableSats, cfg.CriticalCycles,
+    cfg.MinAmountSat, cfg.MaxAmountSat, cfg.FeeLadderSteps, cfg.AmountProbeSteps, cfg.AmountProbeAdaptive, cfg.AttemptTimeoutSec, cfg.RebalanceTimeoutSec, cfg.MissionControlHalfLifeSec, cfg.PaybackModeFlags, cfg.UnlockDays, cfg.CriticalReleasePct, cfg.CriticalMinSources, cfg.CriticalMinAvailableSats, cfg.CriticalCycles,
   )
   return err
 }

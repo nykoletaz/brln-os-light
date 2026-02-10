@@ -63,6 +63,37 @@ func (c *Client) ResetMissionControl(ctx context.Context) error {
   return err
 }
 
+func (c *Client) UpdateMissionControlHalfLife(ctx context.Context, halfLifeSec int64) error {
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return err
+  }
+  defer conn.Close()
+
+  if halfLifeSec < 0 {
+    halfLifeSec = 0
+  }
+  client := routerrpc.NewRouterClient(conn)
+  resp, err := client.GetMissionControlConfig(ctx, &routerrpc.GetMissionControlConfigRequest{})
+  if err != nil {
+    return err
+  }
+  cfg := resp.GetConfig()
+  if cfg == nil {
+    cfg = &routerrpc.MissionControlConfig{}
+  }
+  next := uint64(halfLifeSec)
+  cfg.HalfLifeSeconds = next
+  if cfg.Apriori != nil {
+    cfg.Apriori.HalfLifeSeconds = next
+  }
+  if cfg.Bimodal != nil {
+    cfg.Bimodal.DecayTime = next
+  }
+  _, err = client.SetMissionControlConfig(ctx, &routerrpc.SetMissionControlConfigRequest{Config: cfg})
+  return err
+}
+
 func (c *Client) LookupPayment(ctx context.Context, paymentHash string, lookback time.Duration) (*lnrpc.Payment, error) {
   trimmed := strings.ToLower(strings.TrimSpace(paymentHash))
   if trimmed == "" {
