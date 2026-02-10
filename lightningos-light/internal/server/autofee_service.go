@@ -569,6 +569,7 @@ func (s *AutofeeService) UpdateConfig(ctx context.Context, req AutofeeConfigUpda
   if err != nil {
     return current, err
   }
+  previousRebalMode := current.RebalCostMode
 
   if req.Enabled != nil {
     current.Enabled = *req.Enabled
@@ -715,6 +716,16 @@ where id=$1
   )
   if err != nil {
     return current, err
+  }
+  if previousRebalMode != current.RebalCostMode {
+    _, resetErr := s.db.Exec(ctx, `
+update autofee_state
+set last_rebal_cost_ppm = null,
+  last_rebal_cost_ts = null
+`)
+    if resetErr != nil {
+      return current, resetErr
+    }
   }
   current.AmbossTokenSet = strings.TrimSpace(ambossToken) != ""
   return current, nil
@@ -2013,6 +2024,12 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
       st.LastRebalCostTs = e.now
     } else if st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour {
       baseCostPpm = st.LastRebalCost
+    } else if outPpm7d > 0 && fwdCount >= 4 {
+      baseCostPpm = outPpm7d
+    } else if st.LastOutrate > 0 && !st.LastOutrateTs.IsZero() && e.now.Sub(st.LastOutrateTs) <= 21*24*time.Hour {
+      baseCostPpm = st.LastOutrate
+    } else if seed > 0 {
+      baseCostPpm = int(seed)
     }
   default:
     baseCostPpm = rebalGlobalPpm
@@ -2040,7 +2057,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
       }
       blended := int(math.Round(weight*float64(perCost) + (1.0-weight)*float64(rebalGlobalPpm)))
       baseCostPpm = blended
-      st.LastRebalCost = blended
+      st.LastRebalCost = perCost
       st.LastRebalCostTs = e.now
     } else if st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour {
       baseCostPpm = st.LastRebalCost
