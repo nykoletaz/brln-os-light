@@ -84,11 +84,11 @@ func (c *Client) UpdateMissionControlHalfLife(ctx context.Context, halfLifeSec i
   }
   next := uint64(halfLifeSec)
   cfg.HalfLifeSeconds = next
-  if cfg.Apriori != nil {
-    cfg.Apriori.HalfLifeSeconds = next
+  if apriori := cfg.GetApriori(); apriori != nil {
+    apriori.HalfLifeSeconds = next
   }
-  if cfg.Bimodal != nil {
-    cfg.Bimodal.DecayTime = next
+  if bimodal := cfg.GetBimodal(); bimodal != nil {
+    bimodal.DecayTime = next
   }
   _, err = client.SetMissionControlConfig(ctx, &routerrpc.SetMissionControlConfigRequest{Config: cfg})
   return err
