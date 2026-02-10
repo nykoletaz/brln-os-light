@@ -382,6 +382,15 @@ func NewAutofeeService(db *pgxpool.Pool, lnd *lndclient.Client, notifier *Notifi
     logger: logger,
   }
 }
+
+func (s *AutofeeService) lastRunFromLogs(ctx context.Context) (time.Time, bool) {
+  var ts pgtype.Timestamptz
+  err := s.db.QueryRow(ctx, `select max(occurred_at) from autofee_logs where seq = 0`).Scan(&ts)
+  if err != nil || !ts.Valid {
+    return time.Time{}, false
+  }
+  return ts.Time, true
+}
 func (s *AutofeeService) EnsureSchema(ctx context.Context) error {
   if s.db == nil {
     return errors.New("db not configured")
@@ -893,8 +902,35 @@ func (s *AutofeeService) loop() {
     if interval > 24*time.Hour {
       interval = 24 * time.Hour
     }
+    now := time.Now()
+    base := now
+    s.mu.Lock()
+    lastRun := s.lastRunAt
+    s.mu.Unlock()
+    if !lastRun.IsZero() {
+      base = lastRun
+    } else if s.db != nil {
+      ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+      if ts, ok := s.lastRunFromLogs(ctx); ok {
+        base = ts
+        s.mu.Lock()
+        s.lastRunAt = ts
+        s.mu.Unlock()
+      }
+      cancel()
+    }
+
+    next := base.Add(interval)
+    if !base.IsZero() && base.Before(now) {
+      elapsed := now.Sub(base)
+      steps := int64(elapsed/interval) + 1
+      next = base.Add(time.Duration(steps) * interval)
+    }
     jitter := time.Duration(rand.Int63n(int64(interval/10)+1)) - time.Duration(int64(interval/20))
-    next := time.Now().Add(interval + jitter)
+    next = next.Add(jitter)
+    if next.Before(now.Add(time.Minute)) {
+      next = now.Add(time.Minute)
+    }
     s.mu.Lock()
     s.nextRunAt = next
     s.mu.Unlock()
