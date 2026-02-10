@@ -37,6 +37,10 @@ const (
 )
 
 const (
+  manualRestartCooldownSec = 60
+)
+
+const (
   paybackModePayback  = 1 << 0
   paybackModeTime     = 1 << 1
   paybackModeCritical = 1 << 2
@@ -184,6 +188,11 @@ type pairStat struct {
   SuccessFeePpm int64
 }
 
+type manualRestartInfo struct {
+  TargetChannelID uint64
+  CooldownSec int
+}
+
 type RebalanceService struct {
   db *pgxpool.Pool
   lnd *lndclient.Client
@@ -207,6 +216,7 @@ type RebalanceService struct {
   sem chan struct{}
   channelLocks map[uint64]bool
   jobCancel map[int64]context.CancelFunc
+  manualRestart map[int64]manualRestartInfo
 }
 
 func NewRebalanceService(db *pgxpool.Pool, lnd *lndclient.Client, logger *log.Logger) *RebalanceService {
@@ -217,6 +227,7 @@ func NewRebalanceService(db *pgxpool.Pool, lnd *lndclient.Client, logger *log.Lo
     subs: map[chan RebalanceEvent]struct{}{},
     channelLocks: map[uint64]bool{},
     jobCancel: map[int64]context.CancelFunc{},
+    manualRestart: map[int64]manualRestartInfo{},
   }
 }
 
@@ -653,7 +664,7 @@ func (s *RebalanceService) runAutoScan() {
         continue
       }
     }
-    _, err = s.startJob(target.Channel.ChannelID, "auto", "", amountOverride)
+    _, err = s.startJob(target.Channel.ChannelID, "auto", "", amountOverride, false)
     if err == nil {
       remaining -= estimatedCost
       queuedCount++
@@ -697,7 +708,7 @@ type rebalanceTarget struct {
   Score int64
 }
 
-func (s *RebalanceService) startJob(targetChannelID uint64, source string, reason string, amountOverride int64) (int64, error) {
+func (s *RebalanceService) startJob(targetChannelID uint64, source string, reason string, amountOverride int64, manualAutoRestart bool) (int64, error) {
   ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
   defer cancel()
 
@@ -740,6 +751,18 @@ func (s *RebalanceService) startJob(targetChannelID uint64, source string, reaso
   jobID, err := s.insertJob(ctx, &target, source, reason, targetPct, amount)
   if err != nil {
     return 0, err
+  }
+
+  if manualAutoRestart && source == "manual" {
+    s.mu.Lock()
+    if s.manualRestart == nil {
+      s.manualRestart = map[int64]manualRestartInfo{}
+    }
+    s.manualRestart[jobID] = manualRestartInfo{
+      TargetChannelID: targetChannelID,
+      CooldownSec: manualRestartCooldownSec,
+    }
+    s.mu.Unlock()
   }
 
   go s.runJob(jobID, targetChannelID, amount, targetPct, source)
@@ -2290,6 +2313,98 @@ update rebalance_jobs
 set status=$2, reason=$3, completed_at=$4
 where id=$1`, jobID, status, nullableString(reason), completedAt)
   s.broadcast(RebalanceEvent{Type: "job", JobID: jobID, Status: status, Message: reason})
+
+  info, ok := s.takeManualRestart(jobID)
+  if ok && s.shouldManualRestart(status, reason) {
+    go s.scheduleManualRestart(info)
+  }
+}
+
+func (s *RebalanceService) takeManualRestart(jobID int64) (manualRestartInfo, bool) {
+  s.mu.Lock()
+  defer s.mu.Unlock()
+  if s.manualRestart == nil {
+    return manualRestartInfo{}, false
+  }
+  info, ok := s.manualRestart[jobID]
+  if ok {
+    delete(s.manualRestart, jobID)
+  }
+  return info, ok
+}
+
+func (s *RebalanceService) shouldManualRestart(status string, reason string) bool {
+  if status == "partial" {
+    return true
+  }
+  if status == "failed" && strings.Contains(strings.ToLower(reason), "timeout") {
+    return true
+  }
+  return false
+}
+
+func (s *RebalanceService) scheduleManualRestart(info manualRestartInfo) {
+  cooldown := info.CooldownSec
+  if cooldown <= 0 {
+    cooldown = manualRestartCooldownSec
+  }
+  timer := time.NewTimer(time.Duration(cooldown) * time.Second)
+  select {
+  case <-timer.C:
+  case <-s.stop:
+    if !timer.Stop() {
+      <-timer.C
+    }
+    return
+  }
+
+  if s.lnd == nil {
+    return
+  }
+
+  ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+  defer cancel()
+
+  cfg, _ := s.loadConfig(ctx)
+  settings, _ := s.loadChannelSettings(ctx)
+  exclusions, _ := s.loadExclusions(ctx)
+  ledger, _ := s.loadLedger(ctx)
+  revenueByChannel, _ := s.fetchChannelRevenue7d(ctx)
+
+  channels, err := s.lnd.ListChannels(ctx)
+  if err != nil {
+    return
+  }
+  var target lndclient.ChannelInfo
+  found := false
+  for _, ch := range channels {
+    if ch.ChannelID == info.TargetChannelID {
+      target = ch
+      found = true
+      break
+    }
+  }
+  if !found {
+    return
+  }
+
+  setting := settings[target.ChannelID]
+  snapshot := s.buildChannelSnapshot(ctx, cfg, false, target, setting, ledger[target.ChannelID], revenueByChannel[target.ChannelID], exclusions[target.ChannelID])
+  deficit := computeDeficitAmount(target, snapshot.TargetOutboundPct)
+  if deficit <= 0 {
+    return
+  }
+  if cfg.MinAmountSat > 0 && deficit < cfg.MinAmountSat {
+    return
+  }
+  if !snapshot.EligibleAsTarget {
+    return
+  }
+
+  _, err = s.startJob(target.ChannelID, "manual", "auto-restart", 0, true)
+  if err != nil && err.Error() == "channel busy" {
+    go s.scheduleManualRestart(info)
+  }
 }
 
 func (s *RebalanceService) StopJob(jobID int64) {

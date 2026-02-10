@@ -158,6 +158,7 @@ export default function RebalanceCenter() {
   const [saving, setSaving] = useState(false)
   const [autoOpen, setAutoOpen] = useState(false)
   const [editTargets, setEditTargets] = useState<Record<number, string>>({})
+  const [manualRestart, setManualRestart] = useState<Record<number, boolean>>({})
   const [channelSort, setChannelSort] = useState<'economic' | 'emptiest'>('economic')
   const configRef = useRef<RebalanceConfig | null>(null)
   const autoOpenRef = useRef(false)
@@ -526,11 +527,13 @@ export default function RebalanceCenter() {
   const handleRunRebalance = async (channel: RebalanceChannel) => {
     const nextValue = editTargets[channel.channel_id]
     const parsed = nextValue ? Number(nextValue) : channel.target_outbound_pct
+    const autoRestart = manualRestart[channel.channel_id] === true
     try {
       await runRebalance({
         channel_id: channel.channel_id,
         channel_point: channel.channel_point,
-        target_outbound_pct: parsed
+        target_outbound_pct: parsed,
+        auto_restart: autoRestart
       })
       loadAll()
     } catch (err) {
@@ -1146,6 +1149,19 @@ export default function RebalanceCenter() {
                       >
                         {t('rebalanceCenter.channels.rebalanceIn')}
                       </button>
+                      <div
+                        className="flex flex-col items-center gap-1 text-[10px] text-fog/60"
+                        title={t('rebalanceCenter.channelsHints.rebalanceRestart')}
+                      >
+                        <span className="text-sm">⟳</span>
+                        <input
+                          type="checkbox"
+                          checked={manualRestart[ch.channel_id] === true}
+                          onChange={(e) =>
+                            setManualRestart((prev) => ({ ...prev, [ch.channel_id]: e.target.checked }))
+                          }
+                        />
+                      </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       <label className="flex items-center gap-2" title={t('rebalanceCenter.channelsHints.auto')}>

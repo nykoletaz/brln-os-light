@@ -44,6 +44,7 @@ type rebalanceRunPayload struct {
   ChannelID uint64 `json:"channel_id"`
   ChannelPoint string `json:"channel_point"`
   TargetOutboundPct *float64 `json:"target_outbound_pct,omitempty"`
+  AutoRestart *bool `json:"auto_restart,omitempty"`
 }
 
 type rebalanceChannelTargetPayload struct {
@@ -282,7 +283,8 @@ func (s *Server) handleRebalanceRun(w http.ResponseWriter, r *http.Request) {
     }
     _ = s.rebalance.SetChannelTarget(ctx, resolvedID, resolvedPoint, *targetPct)
   }
-  jobID, err := s.rebalance.startJob(resolvedID, "manual", "", 0)
+  autoRestart := payload.AutoRestart != nil && *payload.AutoRestart
+  jobID, err := s.rebalance.startJob(resolvedID, "manual", "", 0, autoRestart)
   if err != nil {
     writeError(w, http.StatusInternalServerError, err.Error())
     return

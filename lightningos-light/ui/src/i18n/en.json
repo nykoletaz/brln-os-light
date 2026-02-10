@@ -1178,6 +1178,7 @@
       "targetOutbound": "Desired outbound liquidity percentage after the rebalance.",
       "saveTarget": "Save the target outbound percentage for this channel.",
       "rebalanceIn": "Start a rebalance to increase local (outbound) liquidity.",
+      "rebalanceRestart": "Auto-restart manual rebalances after cooldown until the target is reached.",
       "auto": "Allow auto mode to rebalance in this channel.",
       "excludeSource": "Never use this channel as a source for rebalances."
     },

@@ -274,7 +274,12 @@ export const getRebalanceChannels = () => request('/api/rebalance/channels')
 export const getRebalanceQueue = () => request('/api/rebalance/queue')
 export const getRebalanceHistory = (limit = 0) =>
   limit > 0 ? request(`/api/rebalance/history?limit=${limit}`) : request('/api/rebalance/history')
-export const runRebalance = (payload: { channel_id: number; channel_point?: string; target_outbound_pct?: number }) =>
+export const runRebalance = (payload: {
+  channel_id: number
+  channel_point?: string
+  target_outbound_pct?: number
+  auto_restart?: boolean
+}) =>
   request('/api/rebalance/run', { method: 'POST', body: JSON.stringify(payload) })
 export const stopRebalance = (payload: { job_id: number }) =>
   request('/api/rebalance/stop', { method: 'POST', body: JSON.stringify(payload) })

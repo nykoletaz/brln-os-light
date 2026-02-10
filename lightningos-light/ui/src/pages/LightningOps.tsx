@@ -1925,7 +1925,7 @@ export default function LightningOps() {
                         </label>
                       </div>
                     </div>
-                    <div className="mt-3 grid gap-3 lg:grid-cols-5 text-xs text-fog/70">
+                    <div className="mt-3 grid gap-3 lg:grid-cols-6 text-xs text-fog/70">
                       <div>{t('lightningOps.localLabel', { value: ch.local_balance_sat })}</div>
                       <div>{t('lightningOps.remoteLabel', { value: ch.remote_balance_sat })}</div>
                       <div>
@@ -1945,8 +1945,10 @@ export default function LightningOps() {
                         <span className="text-fog">
                           {typeof ch.inbound_fee_rate_ppm === 'number' ? `${ch.inbound_fee_rate_ppm} ppm` : '-'}
                         </span>
+                      </div>
+                      <div className="text-right">
                         {classLabel && (
-                          <span className="ml-2 text-fog/60">{classLabel}</span>
+                          <span className="text-fog/60">{classLabel}</span>
                         )}
                       </div>
                     </div>
