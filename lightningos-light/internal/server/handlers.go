@@ -86,7 +86,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
   defer btcCancel()
   bitcoinSource := readBitcoinSource()
   bitcoin := bitcoinStatus{}
-  var err error
+  err = nil
   if bitcoinSource == "local" {
     bitcoin, err = s.bitcoinLocalStatusActive(btcCtx)
     if err != nil {
