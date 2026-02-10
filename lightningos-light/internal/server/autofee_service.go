@@ -30,6 +30,17 @@ const (
 )
 
 const superSourceBaseFeeMsatDefault = 1000
+const rebalCostModeDefault = "blend"
+
+func normalizeRebalCostMode(value string) string {
+  mode := strings.ToLower(strings.TrimSpace(value))
+  switch mode {
+  case "blend", "channel", "global":
+    return mode
+  default:
+    return rebalCostModeDefault
+  }
+}
 
 type AutofeeConfig struct {
   Enabled bool `json:"enabled"`
@@ -38,6 +49,7 @@ type AutofeeConfig struct {
   RunIntervalSec int `json:"run_interval_sec"`
   CooldownUpSec int `json:"cooldown_up_sec"`
   CooldownDownSec int `json:"cooldown_down_sec"`
+  RebalCostMode string `json:"rebal_cost_mode"`
   AmbossEnabled bool `json:"amboss_enabled"`
   AmbossTokenSet bool `json:"amboss_token_set"`
   InboundPassiveEnabled bool `json:"inbound_passive_enabled"`
@@ -59,6 +71,7 @@ type AutofeeConfigUpdate struct {
   RunIntervalSec *int `json:"run_interval_sec,omitempty"`
   CooldownUpSec *int `json:"cooldown_up_sec,omitempty"`
   CooldownDownSec *int `json:"cooldown_down_sec,omitempty"`
+  RebalCostMode *string `json:"rebal_cost_mode,omitempty"`
   AmbossEnabled *bool `json:"amboss_enabled,omitempty"`
   AmbossToken *string `json:"amboss_token,omitempty"`
   InboundPassiveEnabled *bool `json:"inbound_passive_enabled,omitempty"`
@@ -383,6 +396,7 @@ create table if not exists autofee_config (
   run_interval_sec integer not null default 14400,
   cooldown_up_sec integer not null default 10800,
   cooldown_down_sec integer not null default 14400,
+  rebal_cost_mode text not null default 'blend',
   amboss_enabled boolean not null default false,
   amboss_token text,
   inbound_passive_enabled boolean not null default false,
@@ -447,6 +461,7 @@ alter table autofee_config add column if not exists super_source_base_fee_msat i
 alter table autofee_config add column if not exists revfloor_enabled boolean not null default true;
 alter table autofee_config add column if not exists circuit_breaker_enabled boolean not null default true;
 alter table autofee_config add column if not exists extreme_drain_enabled boolean not null default true;
+alter table autofee_config add column if not exists rebal_cost_mode text not null default 'blend';
 alter table autofee_state add column if not exists ss_active boolean;
 alter table autofee_state add column if not exists ss_ok_since timestamptz;
 alter table autofee_state add column if not exists ss_bad_since timestamptz;
@@ -474,6 +489,7 @@ func (s *AutofeeService) defaultConfig() AutofeeConfig {
     RunIntervalSec: p.RunIntervalSec,
     CooldownUpSec: p.CooldownUpSec,
     CooldownDownSec: p.CooldownDownSec,
+    RebalCostMode: rebalCostModeDefault,
     AmbossEnabled: false,
     AmbossTokenSet: false,
     InboundPassiveEnabled: false,
@@ -498,7 +514,7 @@ func (s *AutofeeService) GetConfig(ctx context.Context) (AutofeeConfig, error) {
   var ambossToken pgtype.Text
   err := s.db.QueryRow(ctx, `
 select enabled, profile, lookback_days, run_interval_sec, cooldown_up_sec, cooldown_down_sec,
-  amboss_enabled, amboss_token, inbound_passive_enabled, discovery_enabled, explorer_enabled,
+  rebal_cost_mode, amboss_enabled, amboss_token, inbound_passive_enabled, discovery_enabled, explorer_enabled,
   super_source_enabled, super_source_base_fee_msat, revfloor_enabled, circuit_breaker_enabled, extreme_drain_enabled, min_ppm, max_ppm
 from autofee_config where id=$1
 `, autofeeConfigID).Scan(
@@ -508,6 +524,7 @@ from autofee_config where id=$1
     &cfg.RunIntervalSec,
     &cfg.CooldownUpSec,
     &cfg.CooldownDownSec,
+    &cfg.RebalCostMode,
     &cfg.AmbossEnabled,
     &ambossToken,
     &cfg.InboundPassiveEnabled,
@@ -531,6 +548,7 @@ from autofee_config where id=$1
   if cfg.Profile == "" {
     cfg.Profile = "moderate"
   }
+  cfg.RebalCostMode = normalizeRebalCostMode(cfg.RebalCostMode)
   if cfg.LookbackDays < autofeeMinLookbackDays {
     cfg.LookbackDays = autofeeMinLookbackDays
   }
@@ -572,6 +590,9 @@ func (s *AutofeeService) UpdateConfig(ctx context.Context, req AutofeeConfigUpda
   }
   if req.CooldownDownSec != nil {
     current.CooldownDownSec = *req.CooldownDownSec
+  }
+  if req.RebalCostMode != nil {
+    current.RebalCostMode = normalizeRebalCostMode(*req.RebalCostMode)
   }
   if req.AmbossEnabled != nil {
     current.AmbossEnabled = *req.AmbossEnabled
@@ -622,6 +643,7 @@ func (s *AutofeeService) UpdateConfig(ctx context.Context, req AutofeeConfigUpda
   if current.SuperSourceBaseFeeMsat < 0 {
     current.SuperSourceBaseFeeMsat = 0
   }
+  current.RebalCostMode = normalizeRebalCostMode(current.RebalCostMode)
 
   if current.RunIntervalSec < 3600 {
     current.RunIntervalSec = 3600
@@ -655,18 +677,19 @@ set enabled=$2,
   run_interval_sec=$5,
   cooldown_up_sec=$6,
   cooldown_down_sec=$7,
-  amboss_enabled=$8,
-  amboss_token=$9,
-  inbound_passive_enabled=$10,
-  discovery_enabled=$11,
-  explorer_enabled=$12,
-  super_source_enabled=$13,
-  super_source_base_fee_msat=$14,
-  revfloor_enabled=$15,
-  circuit_breaker_enabled=$16,
-  extreme_drain_enabled=$17,
-  min_ppm=$18,
-  max_ppm=$19,
+  rebal_cost_mode=$8,
+  amboss_enabled=$9,
+  amboss_token=$10,
+  inbound_passive_enabled=$11,
+  discovery_enabled=$12,
+  explorer_enabled=$13,
+  super_source_enabled=$14,
+  super_source_base_fee_msat=$15,
+  revfloor_enabled=$16,
+  circuit_breaker_enabled=$17,
+  extreme_drain_enabled=$18,
+  min_ppm=$19,
+  max_ppm=$20,
   updated_at=now()
 where id=$1
 `, autofeeConfigID,
@@ -676,6 +699,7 @@ where id=$1
     current.RunIntervalSec,
     current.CooldownUpSec,
     current.CooldownDownSec,
+    current.RebalCostMode,
     current.AmbossEnabled,
     ambossToken,
     current.InboundPassiveEnabled,
@@ -1972,10 +1996,26 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     tags = append(tags, "top-rev")
   }
 
-  baseCostPpm := rebalGlobalPpm
   rebal := rebalStats.ByChannel[ch.ChannelID]
+  baseCostPpm := 0
+  perCost := 0
   if rebal.AmtMsat > 0 {
-    perCost := ppmMsat(rebal.FeeMsat, rebal.AmtMsat)
+    perCost = ppmMsat(rebal.FeeMsat, rebal.AmtMsat)
+  }
+
+  switch normalizeRebalCostMode(e.cfg.RebalCostMode) {
+  case "global":
+    baseCostPpm = rebalGlobalPpm
+  case "channel":
+    if perCost > 0 {
+      baseCostPpm = perCost
+      st.LastRebalCost = perCost
+      st.LastRebalCostTs = e.now
+    } else if st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour {
+      baseCostPpm = st.LastRebalCost
+    }
+  default:
+    baseCostPpm = rebalGlobalPpm
     if perCost > 0 {
       capSat := ch.CapacitySat
       if capSat <= 0 {
@@ -2002,9 +2042,9 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
       baseCostPpm = blended
       st.LastRebalCost = blended
       st.LastRebalCostTs = e.now
+    } else if st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour {
+      baseCostPpm = st.LastRebalCost
     }
-  } else if st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour {
-    baseCostPpm = st.LastRebalCost
   }
   if baseCostPpm < e.cfg.MinPpm {
     baseCostPpm = e.cfg.MinPpm

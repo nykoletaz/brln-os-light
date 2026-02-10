@@ -81,16 +81,17 @@ type BitcoinLocalStatus = {
   block_cadence?: BitcoinLocalCadenceBucket[]
 }
 
-type AutofeeConfig = {
-  enabled: boolean
-  profile: string
-  lookback_days: number
-  run_interval_sec: number
-  cooldown_up_sec: number
-  cooldown_down_sec: number
-  amboss_enabled: boolean
-  amboss_token_set: boolean
-  inbound_passive_enabled: boolean
+  type AutofeeConfig = {
+    enabled: boolean
+    profile: string
+    lookback_days: number
+    run_interval_sec: number
+    cooldown_up_sec: number
+    cooldown_down_sec: number
+    rebal_cost_mode?: string
+    amboss_enabled: boolean
+    amboss_token_set: boolean
+    inbound_passive_enabled: boolean
   discovery_enabled: boolean
   explorer_enabled: boolean
   super_source_enabled: boolean
@@ -220,6 +221,7 @@ export default function LightningOps() {
   const [autofeeIntervalHours, setAutofeeIntervalHours] = useState('4')
   const [autofeeCooldownUp, setAutofeeCooldownUp] = useState('3')
   const [autofeeCooldownDown, setAutofeeCooldownDown] = useState('4')
+  const [autofeeRebalMode, setAutofeeRebalMode] = useState('blend')
   const [autofeeMinPpm, setAutofeeMinPpm] = useState('10')
   const [autofeeMaxPpm, setAutofeeMaxPpm] = useState('2000')
   const [autofeeAmbossEnabled, setAutofeeAmbossEnabled] = useState(false)
@@ -831,6 +833,7 @@ export default function LightningOps() {
       setAutofeeIntervalHours(String(Math.max(1, Math.round((cfg.run_interval_sec || 14400) / 3600))))
       setAutofeeCooldownUp(String(Math.max(1, Math.round((cfg.cooldown_up_sec || 10800) / 3600))))
       setAutofeeCooldownDown(String(Math.max(2, Math.round((cfg.cooldown_down_sec || 14400) / 3600))))
+      setAutofeeRebalMode(cfg.rebal_cost_mode || 'blend')
       setAutofeeMinPpm(String(cfg.min_ppm ?? 10))
       setAutofeeMaxPpm(String(cfg.max_ppm ?? 2000))
       setAutofeeAmbossEnabled(Boolean(cfg.amboss_enabled))
@@ -1131,6 +1134,7 @@ export default function LightningOps() {
         run_interval_sec: intervalSec,
         cooldown_up_sec: cooldownUpSec,
         cooldown_down_sec: cooldownDownSec,
+        rebal_cost_mode: autofeeRebalMode,
         min_ppm: minPpmRaw,
         max_ppm: maxPpmRaw,
         amboss_enabled: autofeeAmbossEnabled,
@@ -1506,6 +1510,14 @@ export default function LightningOps() {
               <label className="text-sm text-fog/70">
                 {t('lightningOps.autofeeCooldownDown')}
                 <input className="input-field mt-2" type="number" min={2} max={24} value={autofeeCooldownDown} onChange={(e) => setAutofeeCooldownDown(e.target.value)} />
+              </label>
+              <label className="text-sm text-fog/70">
+                {t('lightningOps.autofeeRebalCostMode')}
+                <select className="input-field mt-2" value={autofeeRebalMode} onChange={(e) => setAutofeeRebalMode(e.target.value)}>
+                  <option value="blend">{t('lightningOps.autofeeRebalCostModeBlend')}</option>
+                  <option value="channel">{t('lightningOps.autofeeRebalCostModeChannel')}</option>
+                  <option value="global">{t('lightningOps.autofeeRebalCostModeGlobal')}</option>
+                </select>
               </label>
               <label className="text-sm text-fog/70">
                 {t('lightningOps.autofeeMinPpm')}
