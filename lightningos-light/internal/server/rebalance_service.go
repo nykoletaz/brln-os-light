@@ -2337,7 +2337,7 @@ func (s *RebalanceService) shouldManualRestart(status string, reason string) boo
   if status == "partial" {
     return true
   }
-  if status == "failed" && strings.Contains(strings.ToLower(reason), "timeout") {
+  if status == "failed" {
     return true
   }
   return false
