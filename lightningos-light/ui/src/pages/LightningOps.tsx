@@ -1121,8 +1121,8 @@ export default function LightningOps() {
       const intervalSec = Math.max(1, Number(autofeeIntervalHours || 4)) * 3600
       const cooldownUpSec = Math.max(1, Number(autofeeCooldownUp || 3)) * 3600
       const cooldownDownSec = Math.max(2, Number(autofeeCooldownDown || 4)) * 3600
-      const minPpmRaw = Math.max(1, Number(autofeeMinPpm || 10))
-      let maxPpmRaw = Math.max(1, Number(autofeeMaxPpm || 2000))
+      const minPpmRaw = Math.max(0, Number(autofeeMinPpm || 0))
+      let maxPpmRaw = Math.max(0, Number(autofeeMaxPpm || 2000))
       if (maxPpmRaw < minPpmRaw) {
         maxPpmRaw = minPpmRaw
       }
@@ -1521,7 +1521,7 @@ export default function LightningOps() {
               </label>
               <label className="text-sm text-fog/70">
                 {t('lightningOps.autofeeMinPpm')}
-                <input className="input-field mt-2" type="number" min={1} value={autofeeMinPpm} onChange={(e) => setAutofeeMinPpm(e.target.value)} />
+                <input className="input-field mt-2" type="number" min={0} value={autofeeMinPpm} onChange={(e) => setAutofeeMinPpm(e.target.value)} />
               </label>
               <label className="text-sm text-fog/70">
                 {t('lightningOps.autofeeMaxPpm')}

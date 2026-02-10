@@ -556,7 +556,7 @@ from autofee_config where id=$1
     cfg.LookbackDays = autofeeMaxLookbackDays
   }
   if cfg.MinPpm <= 0 {
-    cfg.MinPpm = 10
+    cfg.MinPpm = 0
   }
   if cfg.MaxPpm <= 0 {
     cfg.MaxPpm = 2000
@@ -635,7 +635,7 @@ func (s *AutofeeService) UpdateConfig(ctx context.Context, req AutofeeConfigUpda
     current.LookbackDays = autofeeMaxLookbackDays
   }
   if current.MinPpm <= 0 {
-    current.MinPpm = 10
+    current.MinPpm = 0
   }
   if current.MaxPpm <= 0 {
     current.MaxPpm = 2000
