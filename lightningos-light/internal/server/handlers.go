@@ -84,11 +84,23 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
   btcCtx, btcCancel := context.WithTimeout(r.Context(), 3*time.Second)
   defer btcCancel()
-  bitcoin, err := s.bitcoinStatus(btcCtx)
-  if err != nil {
-    issues = append(issues, healthIssue{Component: "bitcoin", Level: "WARN", Message: "Bitcoin remote check failed"})
-    status = elevate(status, "WARN")
+  bitcoinSource := readBitcoinSource()
+  bitcoin := bitcoinStatus{}
+  var err error
+  if bitcoinSource == "local" {
+    bitcoin, err = s.bitcoinLocalStatusActive(btcCtx)
+    if err != nil {
+      issues = append(issues, healthIssue{Component: "bitcoin", Level: "WARN", Message: "Bitcoin local check failed"})
+      status = elevate(status, "WARN")
+    }
   } else {
+    bitcoin, err = s.bitcoinStatus(btcCtx)
+    if err != nil {
+      issues = append(issues, healthIssue{Component: "bitcoin", Level: "WARN", Message: "Bitcoin remote check failed"})
+      status = elevate(status, "WARN")
+    }
+  }
+  if err == nil {
     if !bitcoin.RPCOk {
       issues = append(issues, healthIssue{Component: "bitcoin", Level: "ERR", Message: "Bitcoin RPC unreachable"})
       status = elevate(status, "ERR")
