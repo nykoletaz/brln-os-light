@@ -2141,6 +2141,19 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
 
+  capRefPpm := 0
+  if perCost > 0 {
+    capRefPpm = perCost
+  } else if st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour {
+    capRefPpm = st.LastRebalCost
+  } else if outPpm7d > 0 && fwdCount >= 4 {
+    capRefPpm = outPpm7d
+  } else if st.LastOutrate > 0 && !st.LastOutrateTs.IsZero() && e.now.Sub(st.LastOutrateTs) <= 21*24*time.Hour {
+    capRefPpm = st.LastOutrate
+  } else if seed > 0 {
+    capRefPpm = int(seed)
+  }
+
   discoveryHit := false
   discoveryHard := false
   explorerActive := false
@@ -2239,7 +2252,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
 
-  rawStep := applyStepCap(localPpm, target, capFrac, minStep)
+  rawStep := applyStepCap(localPpm, target, capFrac, minStep, capRefPpm)
   if e.cfg.CircuitBreakerEnabled && st.LastDir == "up" && !st.LastTs.IsZero() {
     daysSince := e.now.Sub(st.LastTs).Hours() / 24.0
     if daysSince <= float64(e.profile.CircuitBreakerGraceDays) && st.BaselineFwd7d > 0 {
@@ -2804,11 +2817,15 @@ func absInt(v int) int {
   return v
 }
 
-func applyStepCap(current int, target int, capFrac float64, minStep int) int {
+func applyStepCap(current int, target int, capFrac float64, minStep int, capBase int) int {
   if current <= 0 {
     return target
   }
-  cap := int(math.Max(float64(minStep), math.Abs(float64(current))*capFrac))
+  base := capBase
+  if base <= 0 {
+    base = current
+  }
+  cap := int(math.Max(float64(minStep), math.Abs(float64(base))*capFrac))
   delta := target - current
   if delta > cap {
     return current + cap

@@ -188,11 +188,14 @@ Key behavior:
 - Auto targets are ranked by **economic score** = (expected gain − estimated cost), so higher-margin channels are prioritized.
 - A **profit guardrail** prevents auto enqueues when expected gain is lower than estimated cost (when both are known). If ROI is indeterminate (cost = 0 with positive spread), auto is still allowed.
 - Source selection is weighted by pair history: recent successful pairs with lower fees are prioritized, while recent failures are de‑prioritized.
-- The overview shows **Last scan** in local time and a scan status (e.g., no sources, no candidates, budget exhausted) plus economic telemetry (top score, profit guardrail skips).
+- The overview shows **Last scan** in local time and a scan status (e.g., no sources, no candidates, budget exhausted) plus economic telemetry (top score, profit guardrail skips) and optional skip details.
+- Manual rebalances can optionally **auto-restart** (per-channel toggle) with a 60s cooldown until the target is reached.
+- Route **pre-probing** runs before sending, searching for the largest feasible amount on the route.
 
 Channel Workbench:
 - Set per-channel target outbound percentage.
 - Toggle `Auto` to allow auto mode to rebalance that channel.
+- Toggle the restart icon to auto-restart manual rebalances for that channel.
 - Toggle `Exclude source` to block a channel from ever being used as a source.
 - Sort toggle: **Economic** (score-based) or **Emptiest** (lowest local % first).
 
@@ -222,6 +225,7 @@ Configuration parameters:
 - `Adaptive amount probing`: caps the next attempt based on the last successful amount.
 - `Attempt timeout (sec)`: maximum time per attempt before moving to the next fee/amount.
 - `Rebalance timeout (sec)`: maximum runtime per rebalance job (auto or manual).
+- `Mission control half-life (sec)`: decay time for mission control failures (lower = forget faster, 0 = LND default).
 - `Payback policy`: three modes can be enabled together.
 - `Release by payback`: unlocks protected liquidity once routing revenue repays the rebalance cost.
 - `Release by time`: unlocks after `Unlock days` since the last rebalance.
@@ -241,7 +245,8 @@ UI parameters:
 - `Lookback window (days)`: 5 to 21 days for stats.
 - `Run interval (hours)`: minimum 1 hour.
 - `Cooldown up / down (hours)`: minimum time between fee increases / decreases.
-- `Min fee (ppm)` and `Max fee (ppm)`: hard clamps.
+- `Min fee (ppm)` and `Max fee (ppm)`: hard clamps (min can be `0`).
+- `Rebalance cost mode`: `Per-channel`, `Global`, or `Blend` (controls the cost anchor used in floors/margins).
 - `Amboss fee reference`: optional seed source; requires API token.
 - `Inbound passive rebalance`: uses inbound discount for sink channels.
 - `Discovery mode`: faster lowering for idle/high-outbound channels.
@@ -270,6 +275,7 @@ Autofee Results lines:
 - Seed: Amboss and fallback usage.
 - Calibration: node size, liquidity, and calibrated thresholds.
 - Per-channel lines: decision, target, floors, margins, and tags.
+- Results filters: you can show the last N runs and optionally filter by a local time range.
 
 Tag glossary (Autofee Results):
 - `🧭discovery`: channel in discovery mode.
@@ -279,6 +285,7 @@ Tag glossary (Autofee Results):
 - `📈surge+X%`: surge bump applied.
 - `💎top-rev`: top revenue share bump applied.
 - `⚠️neg-margin`: negative margin protection bump.
+- `💹negm+X%`: negative margin surge (profit-protection uplift).
 - `🧱revfloor`: revenue floor applied.
 - `📊outrate-floor`: outrate floor applied.
 - `📌peg`: peg to observed outrate.
@@ -292,6 +299,9 @@ Tag glossary (Autofee Results):
 - `🧊hold-small`: change below min delta/percent.
 - `🟰same-ppm`: target equals current ppm.
 - `🚫down-low`: no down-move while deeply drained.
+- `🚫down-neg`: no down-move while margin is negative.
+- `🧱sink-floor`: extra floor margin applied to sink channels.
+- `📈trend-up` / `📉trend-down` / `➡️trend-flat`: expected direction of the next move.
 - `🔥super-source`: channel classified as super source.
 - `🔥super-source-like`: router-like super source.
 - `↘️inb-<n>`: inbound discount (passive rebalance).
