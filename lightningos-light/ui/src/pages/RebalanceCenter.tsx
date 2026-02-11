@@ -174,7 +174,7 @@ export default function RebalanceCenter() {
   const [saving, setSaving] = useState(false)
   const [autoOpen, setAutoOpen] = useState(false)
   const [editTargets, setEditTargets] = useState<Record<number, string>>({})
-  const [manualRestart, setManualRestart] = useState<Record<number, boolean>>({})
+  const [manualRestart, setManualRestart] = useState<Record<string, boolean>>({})
   const [channelSort, setChannelSort] = useState<'economic' | 'emptiest'>('economic')
   const [skipDetailsOpen, setSkipDetailsOpen] = useState(false)
   const configRef = useRef<RebalanceConfig | null>(null)
@@ -397,9 +397,9 @@ export default function RebalanceCenter() {
       setOverview(ovw as RebalanceOverview)
       const channelList = Array.isArray((ch as any)?.channels) ? (ch as any).channels : []
       setChannels(channelList)
-      const restartState: Record<number, boolean> = {}
+      const restartState: Record<string, boolean> = {}
       channelList.forEach((channel: RebalanceChannel) => {
-        restartState[channel.channel_id] = channel.manual_restart_enabled
+        restartState[channel.channel_point] = channel.manual_restart_enabled
       })
       setManualRestart(restartState)
       setQueueJobs(Array.isArray((queue as any)?.jobs) ? (queue as any).jobs : [])
@@ -549,7 +549,7 @@ export default function RebalanceCenter() {
   const handleRunRebalance = async (channel: RebalanceChannel) => {
     const nextValue = editTargets[channel.channel_id]
     const parsed = nextValue ? Number(nextValue) : channel.target_outbound_pct
-    const autoRestart = manualRestart[channel.channel_id] === true
+    const autoRestart = manualRestart[channel.channel_point] === true
     try {
       await runRebalance({
         channel_id: channel.channel_id,
@@ -564,15 +564,18 @@ export default function RebalanceCenter() {
   }
 
   const handleManualRestartToggle = async (channel: RebalanceChannel, enabled: boolean) => {
+    const key = channel.channel_point
+    const previous = manualRestart[key] === true
+    setManualRestart((prev) => ({ ...prev, [key]: enabled }))
     try {
       await updateRebalanceChannelManualRestart({
         channel_id: channel.channel_id,
         channel_point: channel.channel_point,
         enabled
       })
-      setManualRestart((prev) => ({ ...prev, [channel.channel_id]: enabled }))
       loadAll()
     } catch (err) {
+      setManualRestart((prev) => ({ ...prev, [key]: previous }))
       setStatus(err instanceof Error ? err.message : t('rebalanceCenter.saveFailed'))
     }
   }
@@ -1241,7 +1244,7 @@ export default function RebalanceCenter() {
                         <span className="text-sm">⟳</span>
                         <input
                           type="checkbox"
-                          checked={manualRestart[ch.channel_id] === true}
+                          checked={manualRestart[ch.channel_point] === true}
                           onChange={(e) => handleManualRestartToggle(ch, e.target.checked)}
                         />
                       </div>
