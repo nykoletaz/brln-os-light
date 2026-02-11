@@ -2157,6 +2157,13 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
 
   target = clampInt(target, e.cfg.MinPpm, e.cfg.MaxPpm)
+  if target > localPpm {
+    tags = append(tags, "trend-up")
+  } else if target < localPpm {
+    tags = append(tags, "trend-down")
+  } else {
+    tags = append(tags, "trend-flat")
+  }
 
   capFrac := e.profile.StepCap
   minStep := 5
@@ -2907,6 +2914,12 @@ func formatAutofeeTags(d *decision) string {
       add("🔥super-source")
     case t == "super-source-like":
       add("🔥super-source-like")
+    case t == "trend-up":
+      add("📈trend-up")
+    case t == "trend-down":
+      add("📉trend-down")
+    case t == "trend-flat":
+      add("➡️trend-flat")
     case strings.HasPrefix(t, "seed:amboss"):
       add("🌐" + strings.ReplaceAll(t, "seed:", "seed-"))
     case strings.HasPrefix(t, "seed:med"):

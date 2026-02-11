@@ -522,6 +522,12 @@ export default function LightningOps() {
         add('🔥super-source')
       } else if (tag === 'super-source-like') {
         add('🔥super-source-like')
+      } else if (tag === 'trend-up') {
+        add('📈trend-up')
+      } else if (tag === 'trend-down') {
+        add('📉trend-down')
+      } else if (tag === 'trend-flat') {
+        add('➡️trend-flat')
       } else if (tag.startsWith('seed:amboss')) {
         add(`🌐${tag.replace('seed:', 'seed-')}`)
       } else if (tag.startsWith('seed:med')) {
