@@ -32,6 +32,20 @@ const (
 const superSourceBaseFeeMsatDefault = 1000
 const rebalCostModeDefault = "blend"
 
+const (
+  persistentLowThresh = 0.10
+  sinkMinMargin = 150
+  minSoftCeiling = 100
+  seedCeilingMult = 1.50
+  seedFloorMult = 1.10
+  seedP95Boost = 1.15
+  sourceSeedTargetFrac = 0.55
+  globalNegLockSoften = true
+  softenMinOutRatio = 0.45
+  softenRequirePosChanMargin = true
+  softenMaxDropToPegFrac = 0.95
+)
+
 func normalizeRebalCostMode(value string) string {
   mode := strings.ToLower(strings.TrimSpace(value))
   switch mode {
@@ -147,6 +161,8 @@ type autofeeLogItem struct {
   Error string `json:"error,omitempty"`
   Delta int `json:"delta,omitempty"`
   DeltaPct float64 `json:"delta_pct,omitempty"`
+  PredictionCode string `json:"prediction_code,omitempty"`
+  PredictionCooldownHours int `json:"prediction_cooldown_hours,omitempty"`
 }
 
 type autofeeProfile struct {
@@ -1286,11 +1302,15 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   }
 
   totalOutFeeMsat := int64(0)
+  totalOutAmtMsat := int64(0)
   for _, item := range forwardStats {
     totalOutFeeMsat += item.FeeMsat
+    totalOutAmtMsat += item.AmtMsat
   }
   rebalGlobal := rebalStats.Global
   rebalGlobalPpm := ppmMsat(rebalGlobal.FeeMsat, rebalGlobal.AmtMsat)
+  outPpmTotal := ppmMsat(totalOutFeeMsat, totalOutAmtMsat)
+  negMarginGlobal := rebalGlobalPpm > 0 && outPpmTotal > 0 && outPpmTotal < rebalGlobalPpm
   e.calibrateNode(channels, state, forwardStats)
 
   runID := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -1319,7 +1339,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     }
 
     st := state[ch.ChannelID]
-    decision := e.evaluateChannel(ch, st, forwardStats, forwardStats1d, forwardStats7d, inboundStats, rebalStats, totalOutFeeMsat, rebalGlobalPpm)
+    decision := e.evaluateChannel(ch, st, forwardStats, forwardStats1d, forwardStats7d, inboundStats, rebalStats, totalOutFeeMsat, rebalGlobalPpm, negMarginGlobal)
     if decision == nil {
       continue
     }
@@ -1754,6 +1774,10 @@ type decision struct {
   Margin int
   RevShare float64
   ClassLabel string
+  FwdCount int
+  NegMarginGlobal bool
+  PredictionCode string
+  PredictionCooldownHours int
   Apply bool
   Error error
   State *autofeeChannelState
@@ -1895,6 +1919,8 @@ func buildAutofeeChannelLogEntry(d *decision, category string, dryRun bool, err 
     SkipReason: skipReason,
     Delta: delta,
     DeltaPct: deltaPct,
+    PredictionCode: d.PredictionCode,
+    PredictionCooldownHours: d.PredictionCooldownHours,
   }
   if err != nil {
     payload.Error = err.Error()
@@ -1906,7 +1932,7 @@ func buildAutofeeChannelLogEntry(d *decision, category string, dryRun bool, err 
 
 func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeChannelState, forwardStats map[uint64]forwardStat,
   forwardStats1d map[uint64]forwardStat, forwardStats7d map[uint64]forwardStat, inboundStats map[uint64]inboundStat,
-  rebalStats rebalStats, totalOutFeeMsat int64, rebalGlobalPpm int) *decision {
+  rebalStats rebalStats, totalOutFeeMsat int64, rebalGlobalPpm int, negMarginGlobal bool) *decision {
 
   localPpm := 0
   if ch.FeeRatePpm != nil {
@@ -2004,7 +2030,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     st.SuperSourceBadSince = badSince
   }
 
-  seed, seedTags := e.seedForChannel(ch.RemotePubkey, st)
+  seed, seedP95, seedTags := e.seedForChannel(ch.RemotePubkey, st)
   if seed <= 0 {
     seed = 200
   }
@@ -2207,14 +2233,6 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     target = localPpm
     tags = append(tags, "no-down-neg-margin")
   }
-  if target > localPpm {
-    tags = append(tags, "trend-up")
-  } else if target < localPpm {
-    tags = append(tags, "trend-down")
-  } else {
-    tags = append(tags, "trend-flat")
-  }
-
   capFrac := e.profile.StepCap
   minStep := 5
   if outRatio < 0.03 {
@@ -2235,6 +2253,53 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     capFrac = math.Max(capFrac, e.profile.DiscoveryStepCapDown)
   }
 
+  globalNegLockApplied := false
+  lockSkipTag := ""
+  if negMarginGlobal {
+    hasRecentRebal := perCost > 0 || (st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour)
+    hasRecentOutrate := (outPpm7d > 0 && fwdCount >= 4) || (st.LastOutrate > 0 && !st.LastOutrateTs.IsZero() && e.now.Sub(st.LastOutrateTs) <= 21*24*time.Hour)
+    canLockGlobally := hasRecentRebal || hasRecentOutrate
+    if canLockGlobally {
+      allowSoften := false
+      if globalNegLockSoften {
+        chanOk := outRatio >= softenMinOutRatio
+        if softenRequirePosChanMargin {
+          chanOk = chanOk && marginPpm7d >= 0
+        }
+        if chanOk && !discoveryHit {
+          allowSoften = true
+        }
+      }
+      if strings.EqualFold(classLabel, "sink") && marginPpm7d > sinkMinMargin {
+        lockSkipTag = "lock-skip-sink-profit"
+        capFrac = math.Max(capFrac, e.profile.StepCap)
+      } else if target < localPpm && !discoveryHit {
+        if allowSoften {
+          if outPpm7d > 0 {
+            pegFloor := int(math.Round(float64(outPpm7d) * softenMaxDropToPegFrac))
+            if target < pegFloor {
+              target = pegFloor
+            }
+          }
+        } else {
+          target = localPpm
+          globalNegLockApplied = true
+        }
+      }
+      capFrac = math.Max(capFrac, e.profile.StepCap+0.05)
+    } else if target < localPpm && !discoveryHit {
+      lockSkipTag = "lock-skip-no-chan-rebal"
+    }
+  }
+
+  if target > localPpm {
+    tags = append(tags, "trend-up")
+  } else if target < localPpm {
+    tags = append(tags, "trend-down")
+  } else {
+    tags = append(tags, "trend-flat")
+  }
+
   if e.cfg.ExtremeDrainEnabled && target > localPpm && e.profile.ExtremeDrainStreak > 0 {
     if st.LowStreak >= e.profile.ExtremeDrainStreak && outRatio <= e.profile.ExtremeDrainOutMax {
       capFrac = math.Max(capFrac, e.profile.ExtremeDrainStepCap)
@@ -2252,7 +2317,14 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
 
-  rawStep := applyStepCap(localPpm, target, capFrac, minStep, capRefPpm)
+  minStepUp := minStep
+  minStepDown := 5
+  stepMin := minStepDown
+  if target > localPpm {
+    stepMin = minStepUp
+  }
+
+  rawStep := applyStepCap(localPpm, target, capFrac, stepMin, capRefPpm)
   if e.cfg.CircuitBreakerEnabled && st.LastDir == "up" && !st.LastTs.IsZero() {
     daysSince := e.now.Sub(st.LastTs).Hours() / 24.0
     if daysSince <= float64(e.profile.CircuitBreakerGraceDays) && st.BaselineFwd7d > 0 {
@@ -2312,6 +2384,21 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
 
+  if explorerActive {
+    rebalFloorPpm := 0
+    if perCost > 0 {
+      rebalFloorPpm = int(math.Ceil(float64(perCost) * 1.10))
+    } else if st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour {
+      rebalFloorPpm = int(math.Ceil(float64(st.LastRebalCost) * 1.10))
+    }
+    if rebalFloorPpm > 0 && rebalFloorPpm > floor {
+      floor = rebalFloorPpm
+      if floorSrc != "peg" && floorSrc != "outrate" {
+        floorSrc = "rebal"
+      }
+    }
+  }
+
   revfloorBaseline := e.profile.RevfloorBaselineThresh
   if e.calib.RevfloorBaseline > 0 {
     revfloorBaseline = e.calib.RevfloorBaseline
@@ -2335,7 +2422,89 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     floorSrc = "super-source"
   }
 
-  finalPpm := clampInt(maxInt(rawStep, floor), e.cfg.MinPpm, e.cfg.MaxPpm)
+  finalCandidate := clampInt(maxInt(rawStep, floor), e.cfg.MinPpm, e.cfg.MaxPpm)
+  if strings.EqualFold(classLabel, "source") && finalCandidate < localPpm {
+    pref := clampInt(int(math.Round(seed*sourceSeedTargetFrac)), e.cfg.MinPpm, e.cfg.MaxPpm)
+    if pref < finalCandidate {
+      finalCandidate = pref
+    }
+  }
+
+  seedP95Val := seedP95
+  if seedP95Val <= 0 {
+    seedP95Val = seed
+  }
+  baseCeiling := int(math.Round(seed * seedCeilingMult))
+  seedFloor := int(math.Round(seed * seedFloorMult))
+  p95Floor := int(math.Round(seedP95Val * seedP95Boost))
+  localMax := maxInt(minSoftCeiling, maxInt(baseCeiling, maxInt(seedFloor, p95Floor)))
+  localMax = minInt(localMax, e.cfg.MaxPpm)
+  if localMax < e.cfg.MinPpm {
+    localMax = e.cfg.MinPpm
+  }
+
+  if strings.EqualFold(classLabel, "sink") && outRatio < persistentLowThresh && marginPpm7d >= sinkMinMargin {
+    localMax = e.cfg.MaxPpm
+  } else {
+    demandException := (outPpm7d > 0 && fwdCount >= 4 && seed > 0 && float64(outPpm7d) >= seed*outratePegSeedMult) ||
+      (outRatio < persistentLowThresh)
+    if demandException {
+      capBase := int(math.Round(seed * outratePegSeedMult))
+      if outPpm7d > capBase {
+        capBase = outPpm7d
+      }
+      if capBase > localMax {
+        localMax = capBase
+      }
+      if localMax > e.cfg.MaxPpm {
+        localMax = e.cfg.MaxPpm
+      }
+    }
+  }
+
+  if strings.EqualFold(classLabel, "source") {
+    srcCap := int(math.Round(seed * 1.10))
+    if outPpm7d > 0 {
+      srcCap = minInt(srcCap, int(math.Round(float64(outPpm7d)*1.10)))
+    }
+    srcCap = clampInt(srcCap, e.cfg.MinPpm, e.cfg.MaxPpm)
+    if srcCap < localMax {
+      localMax = srcCap
+    }
+  }
+
+  if finalCandidate > localMax {
+    finalCandidate = localMax
+  }
+
+  stepMinFinal := minStepDown
+  if finalCandidate > localPpm {
+    stepMinFinal = minStepUp
+  }
+  finalPpm := applyStepCap(localPpm, finalCandidate, capFrac, stepMinFinal, capRefPpm)
+  if finalPpm < floor {
+    finalPpm = floor
+  }
+  finalPpm = clampInt(finalPpm, e.cfg.MinPpm, e.cfg.MaxPpm)
+
+  if rawStep != target {
+    dirSame := (target > localPpm && rawStep > localPpm) || (target < localPpm && rawStep < localPpm)
+    if dirSame {
+      tags = append(tags, "stepcap")
+    }
+  }
+  if finalPpm == floor && target != floor {
+    tags = append(tags, "floor-lock")
+  }
+  if finalPpm == localPpm && target != localPpm && floor <= localPpm {
+    tags = append(tags, "stepcap-lock")
+  }
+  if globalNegLockApplied {
+    tags = append(tags, "global-neg-lock")
+  }
+  if lockSkipTag != "" {
+    tags = append(tags, lockSkipTag)
+  }
 
   inboundDiscount := 0
   if e.cfg.InboundPassiveEnabled && classLabel == "sink" && outRatio <= 0.10 && fwdCount >= 5 && marginPpm7d >= 200 {
@@ -2422,6 +2591,20 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     st.ExplorerState.Rounds++
   }
 
+  cooldownRemaining := 0.0
+  if containsTag(tags, "cooldown") && !st.LastTs.IsZero() {
+    hoursSince := e.now.Sub(st.LastTs).Hours()
+    cooldownHours := float64(e.cfg.CooldownDownSec) / 3600.0
+    if finalPpm > localPpm {
+      cooldownHours = float64(e.cfg.CooldownUpSec) / 3600.0
+    }
+    remaining := cooldownHours - hoursSince
+    if remaining > 0 {
+      cooldownRemaining = remaining
+    }
+  }
+  predictionCode, predictionCooldownHours := buildAutofeePrediction(outRatio, marginPpm7d, target, localPpm, finalPpm, fwdCount, negMarginGlobal, discoveryHit, cooldownRemaining)
+
   tags = append(tags, seedTags...)
   return &decision{
     ChannelID: ch.ChannelID,
@@ -2442,6 +2625,10 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     Margin: marginPpm7d,
     RevShare: revShare,
     ClassLabel: classLabel,
+    FwdCount: fwdCount,
+    NegMarginGlobal: negMarginGlobal,
+    PredictionCode: predictionCode,
+    PredictionCooldownHours: predictionCooldownHours,
     Apply: apply && finalPpm != localPpm,
     State: st,
   }
@@ -2477,7 +2664,7 @@ func (e *autofeeEngine) evalExplorer(st *autofeeChannelState, outRatio float64, 
   }
   return true
 }
-func (e *autofeeEngine) seedForChannel(pubkey string, st *autofeeChannelState) (float64, []string) {
+func (e *autofeeEngine) seedForChannel(pubkey string, st *autofeeChannelState) (float64, float64, []string) {
   tags := []string{}
   if e.cfg.AmbossEnabled {
     token, err := e.fetchAmbossToken(context.Background())
@@ -2486,7 +2673,7 @@ func (e *autofeeEngine) seedForChannel(pubkey string, st *autofeeChannelState) (
     } else if token == "" {
       tags = append(tags, "seed:amboss-missing")
     } else if pubkey != "" {
-      seed, seedTags, err := e.fetchAmbossSeed(pubkey, token)
+      seed, seedP95, seedTags, err := e.fetchAmbossSeed(pubkey, token)
       if err != nil {
         tags = append(tags, "seed:amboss-error")
       } else if seed > 0 {
@@ -2499,7 +2686,7 @@ func (e *autofeeEngine) seedForChannel(pubkey string, st *autofeeChannelState) (
             tags = append(tags, "seed:guard")
           }
         }
-        return seed, tags
+        return seed, seedP95, tags
       } else {
         tags = append(tags, "seed:amboss-empty")
       }
@@ -2507,12 +2694,12 @@ func (e *autofeeEngine) seedForChannel(pubkey string, st *autofeeChannelState) (
   }
 
   if st.LastOutrate > 0 && !st.LastOutrateTs.IsZero() && e.now.Sub(st.LastOutrateTs) <= 21*24*time.Hour {
-    return float64(st.LastOutrate), append(tags, "seed:outrate")
+    return float64(st.LastOutrate), 0, append(tags, "seed:outrate")
   }
   if st.LastSeed > 0 {
-    return float64(st.LastSeed), append(tags, "seed:mem")
+    return float64(st.LastSeed), 0, append(tags, "seed:mem")
   }
-  return 200.0, append(tags, "seed:default")
+  return 200.0, 0, append(tags, "seed:default")
 }
 
 func (e *autofeeEngine) fetchAmbossToken(ctx context.Context) (string, error) {
@@ -2535,13 +2722,13 @@ type ambossSeriesResp struct {
   } `json:"data"`
 }
 
-func (e *autofeeEngine) fetchAmbossSeed(pubkey string, token string) (float64, []string, error) {
+func (e *autofeeEngine) fetchAmbossSeed(pubkey string, token string) (float64, float64, []string, error) {
   vals, err := fetchAmbossSeries(pubkey, token, e.cfg.LookbackDays, "incoming_fee_rate_metrics", "weighted_corrected_mean")
   if err != nil {
-    return 0, nil, err
+    return 0, 0, nil, err
   }
   if len(vals) == 0 {
-    return 0, nil, nil
+    return 0, 0, nil, nil
   }
   p65 := percentile(vals, 0.65)
   p95 := percentile(vals, 0.95)
@@ -2590,7 +2777,7 @@ func (e *autofeeEngine) fetchAmbossSeed(pubkey string, token string) (float64, [
     tags = append(tags, "seed:absmax")
   }
   tags = append(tags, "seed:amboss")
-  return seed, tags, nil
+  return seed, p95, tags, nil
 }
 
 func ambossAvgSeries(pubkey string, token string, lookbackDays int, metric string, submetric string) (float64, error) {
@@ -2953,7 +3140,7 @@ func formatAutofeeTags(d *decision) string {
     case t == "extreme-drain":
       add("⚡extreme")
     case t == "extreme-drain-turbo":
-      add("⚡turbo")
+      add("🚀extreme-drain+")
     case t == "revfloor":
       add("🧱revfloor")
     case t == "peg":
@@ -2988,6 +3175,18 @@ func formatAutofeeTags(d *decision) string {
       add("📉trend-down")
     case t == "trend-flat":
       add("➡️trend-flat")
+    case t == "stepcap":
+      add("⛔stepcap")
+    case t == "stepcap-lock":
+      add("⛔stepcap-lock")
+    case t == "floor-lock":
+      add("🧱floor-lock")
+    case t == "global-neg-lock":
+      add("🛡️global-neg-lock")
+    case t == "lock-skip-no-chan-rebal":
+      add("🛡️lock-skip(no-chan-rebal)")
+    case t == "lock-skip-sink-profit":
+      add("🔓sink-global-neg")
     case strings.HasPrefix(t, "seed:amboss"):
       add("🌐" + strings.ReplaceAll(t, "seed:", "seed-"))
     case strings.HasPrefix(t, "seed:med"):
@@ -3018,6 +3217,32 @@ func formatAutofeeTags(d *decision) string {
   }
 
   return strings.Join(tags, " ")
+}
+
+func buildAutofeePrediction(outRatio float64, marginPpm7d int, target int, localPpm int, newPpm int, fwdCount int,
+  negMarginGlobal bool, discoveryHit bool, cooldownRemainingHours float64) (string, int) {
+  if outRatio < 0.05 && (marginPpm7d < 0 || negMarginGlobal) {
+    return "hold_or_up", 0
+  }
+  if outRatio > 0.10 && marginPpm7d > 0 {
+    return "reduce", 0
+  }
+  if discoveryHit && newPpm < localPpm {
+    return "discovery_fast", 0
+  }
+  if fwdCount == 0 && outRatio > 0.60 {
+    return "idle_reduce", 0
+  }
+  if target > localPpm && newPpm >= localPpm {
+    if cooldownRemainingHours > 0 {
+      return "bias_up", int(math.Round(cooldownRemainingHours))
+    }
+    return "bias_up", 0
+  }
+  if target < localPpm && newPpm <= localPpm {
+    return "bias_down", 0
+  }
+  return "stable", 0
 }
 
 func nullableFloat(val float64) any {

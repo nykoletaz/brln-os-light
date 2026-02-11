@@ -169,6 +169,8 @@ type AutofeeResultItem = {
   error?: string
   delta?: number
   delta_pct?: number
+  prediction_code?: string
+  prediction_cooldown_hours?: number
 }
 
 export default function LightningOps() {
@@ -579,6 +581,33 @@ export default function LightningOps() {
     }
   }
 
+  const formatAutofeePrediction = (item: AutofeeResultItem) => {
+    const code = (item.prediction_code || '').trim()
+    if (!code) return ''
+    const hours = typeof item.prediction_cooldown_hours === 'number' ? item.prediction_cooldown_hours : 0
+    switch (code) {
+      case 'hold_or_up':
+        return t('lightningOps.autofeeResultsPredictionHoldOrUp')
+      case 'reduce':
+        return t('lightningOps.autofeeResultsPredictionReduce')
+      case 'discovery_fast':
+        return t('lightningOps.autofeeResultsPredictionDiscoveryFast')
+      case 'idle_reduce':
+        return t('lightningOps.autofeeResultsPredictionIdleReduce')
+      case 'bias_up':
+        if (hours > 0) {
+          return t('lightningOps.autofeeResultsPredictionBiasUpCooldown', { hours })
+        }
+        return t('lightningOps.autofeeResultsPredictionBiasUp')
+      case 'bias_down':
+        return t('lightningOps.autofeeResultsPredictionBiasDown')
+      case 'stable':
+        return t('lightningOps.autofeeResultsPredictionStable')
+      default:
+        return ''
+    }
+  }
+
   const formatAutofeeChannelLine = (item: AutofeeResultItem) => {
     const alias = (item.alias || '').trim() || (item.channel_id ? `chan-${item.channel_id}` : t('common.unknown'))
     const localPpm = item.local_ppm ?? 0
@@ -637,7 +666,9 @@ export default function LightningOps() {
     const revShare = typeof item.rev_share === 'number' ? item.rev_share : 0
     const tagLine = formatAutofeeTags(tags, item.inbound_discount, item.class_label) || '-'
 
-    return `${prefix} ${alias}: ${action}${deltaStr} | ${t('lightningOps.autofeeResultsLabelTarget')} ${item.target ?? 0} | ${t('lightningOps.autofeeResultsLabelOutRatio')} ${outRatio.toFixed(2)} | ${t('lightningOps.autofeeResultsLabelOutPpm7d')}≈${outPpm7d} | ${t('lightningOps.autofeeResultsLabelRebalPpm7d')}≈${rebalPpm7d} | ${t('lightningOps.autofeeResultsLabelSeed')}≈${seed} | ${t('lightningOps.autofeeResultsLabelFloor')}≥${floor}${floorSrc} | ${t('lightningOps.autofeeResultsLabelMargin')}≈${margin} | ${t('lightningOps.autofeeResultsLabelRevShare')}≈${revShare.toFixed(2)} | ${tagLine}`
+    const prediction = formatAutofeePrediction(item)
+    const baseLine = `${prefix} ${alias}: ${action}${deltaStr} | ${t('lightningOps.autofeeResultsLabelTarget')} ${item.target ?? 0} | ${t('lightningOps.autofeeResultsLabelOutRatio')} ${outRatio.toFixed(2)} | ${t('lightningOps.autofeeResultsLabelOutPpm7d')}≈${outPpm7d} | ${t('lightningOps.autofeeResultsLabelRebalPpm7d')}≈${rebalPpm7d} | ${t('lightningOps.autofeeResultsLabelSeed')}≈${seed} | ${t('lightningOps.autofeeResultsLabelFloor')}≥${floor}${floorSrc} | ${t('lightningOps.autofeeResultsLabelMargin')}≈${margin} | ${t('lightningOps.autofeeResultsLabelRevShare')}≈${revShare.toFixed(2)} | ${tagLine}`
+    return prediction ? `${baseLine} | ${prediction}` : baseLine
   }
 
   const formatAutofeeSectionLine = (category?: string) => {
