@@ -538,6 +538,7 @@ func (s *RebalanceService) runAutoScan() {
   }()
 
   revenueByChannel, _ := s.fetchChannelRevenue7d(ctx)
+  lastAutoByTarget := s.loadLastAutoEnqueueTimes(ctx)
 
   s.mu.Lock()
   criticalActive := cfg.CriticalCycles > 0 && s.criticalMissCount >= cfg.CriticalCycles
@@ -610,6 +611,7 @@ func (s *RebalanceService) runAutoScan() {
         ExpectedROI: expectedROI,
         ExpectedROIValid: roiValid,
         Score: score,
+        LastAutoAt: lastAutoByTarget[snapshot.ChannelID],
       })
       if !topScoreSet || score > topScore {
         topScore = score
@@ -648,16 +650,29 @@ func (s *RebalanceService) runAutoScan() {
   s.mu.Unlock()
 
   sort.Slice(candidates, func(i, j int) bool {
-    if candidates[i].Score != candidates[j].Score {
-      return candidates[i].Score > candidates[j].Score
+    a := candidates[i]
+    b := candidates[j]
+    if a.LastAutoAt.IsZero() != b.LastAutoAt.IsZero() {
+      return a.LastAutoAt.IsZero()
     }
-    if candidates[i].ExpectedROI != candidates[j].ExpectedROI {
-      return candidates[i].ExpectedROI > candidates[j].ExpectedROI
+    if !a.LastAutoAt.IsZero() && !b.LastAutoAt.IsZero() {
+      if !a.LastAutoAt.Equal(b.LastAutoAt) {
+        return a.LastAutoAt.Before(b.LastAutoAt)
+      }
     }
-    if candidates[i].Channel.TargetAmountSat != candidates[j].Channel.TargetAmountSat {
-      return candidates[i].Channel.TargetAmountSat > candidates[j].Channel.TargetAmountSat
+    if a.Score != b.Score {
+      return a.Score > b.Score
     }
-    return candidates[i].Channel.LocalPct < candidates[j].Channel.LocalPct
+    if a.ExpectedROI != b.ExpectedROI {
+      return a.ExpectedROI > b.ExpectedROI
+    }
+    if a.Channel.TargetAmountSat != b.Channel.TargetAmountSat {
+      return a.Channel.TargetAmountSat > b.Channel.TargetAmountSat
+    }
+    if a.Channel.LocalPct != b.Channel.LocalPct {
+      return a.Channel.LocalPct < b.Channel.LocalPct
+    }
+    return a.Channel.ChannelID < b.Channel.ChannelID
   })
 
   budget, spentAuto, _, _ := s.getDailyBudget(ctx)
@@ -762,6 +777,7 @@ type rebalanceTarget struct {
   ExpectedROI float64
   ExpectedROIValid bool
   Score int64
+  LastAutoAt time.Time
 }
 
 func (s *RebalanceService) startJob(targetChannelID uint64, source string, reason string, amountOverride int64, manualAutoRestart bool) (int64, error) {
@@ -3921,6 +3937,34 @@ func (s *RebalanceService) computeEligibilityCounts(ctx context.Context, cfg Reb
     }
   }
   return eligibleSources, targetsNeeding
+}
+
+func (s *RebalanceService) loadLastAutoEnqueueTimes(ctx context.Context) map[uint64]time.Time {
+  result := map[uint64]time.Time{}
+  if s.db == nil {
+    return result
+  }
+  rows, err := s.db.Query(ctx, `
+select target_channel_id, max(created_at)
+from rebalance_jobs
+where source='auto'
+group by target_channel_id
+`)
+  if err != nil {
+    return result
+  }
+  defer rows.Close()
+  for rows.Next() {
+    var channelID int64
+    var last time.Time
+    if err := rows.Scan(&channelID, &last); err != nil {
+      return result
+    }
+    if channelID > 0 {
+      result[uint64(channelID)] = last
+    }
+  }
+  return result
 }
 
 func (s *RebalanceService) Queue(ctx context.Context) ([]RebalanceJob, []RebalanceAttempt, error) {
