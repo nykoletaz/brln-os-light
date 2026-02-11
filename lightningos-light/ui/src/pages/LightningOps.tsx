@@ -490,6 +490,8 @@ export default function LightningOps() {
         add('💎top-rev')
       } else if (tag === 'neg-margin') {
         add('⚠️neg-margin')
+      } else if (tag.startsWith('negm+')) {
+        add(`💹${tag}`)
       } else if (tag === 'outrate-floor') {
         add('📊outrate-floor')
       } else if (tag === 'circuit-breaker') {
@@ -518,10 +520,14 @@ export default function LightningOps() {
         add('🟰same-ppm')
       } else if (tag === 'no-down-low') {
         add('🚫down-low')
+      } else if (tag === 'no-down-neg-margin') {
+        add('🚫down-neg')
       } else if (tag === 'super-source') {
         add('🔥super-source')
       } else if (tag === 'super-source-like') {
         add('🔥super-source-like')
+      } else if (tag === 'sink-floor') {
+        add('🧱sink-floor')
       } else if (tag === 'trend-up') {
         add('📈trend-up')
       } else if (tag === 'trend-down') {

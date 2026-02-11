@@ -1075,9 +1075,14 @@
       "dailySpentManual": "Manual spent: {{value}}",
       "lastQueued": "Queued last scan: {{count}}",
       "topScore": "Top economic score: {{value}}",
-      "profitSkipped": "Skipped by profit guardrail: {{count}}",
-      "autoMode": "Auto mode",
-      "scanInterval": "Scan: {{value}}s"
+        "profitSkipped": "Skipped by profit guardrail: {{count}}",
+        "skipDetails": "Details",
+        "skipReasonProfit": "Profit guardrail (gain < cost)",
+        "skipReasonRoi": "ROI below minimum",
+        "skipCalc": "Gain {{gain}} · Cost {{cost}} · ROI {{roi}}",
+        "skipTarget": "Target {{target}} · Amount {{amount}}",
+        "autoMode": "Auto mode",
+        "scanInterval": "Scan: {{value}}s"
     },
     "settings": {
       "title": "Rebalance Settings",

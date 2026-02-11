@@ -1076,6 +1076,11 @@
       "lastQueued": "Enfileirados na última varredura: {{count}}",
       "topScore": "Score econômico (topo): {{value}}",
       "profitSkipped": "Pulados pelo guardrail de lucro: {{count}}",
+      "skipDetails": "Detalhes",
+      "skipReasonProfit": "Guardrail de lucro (ganho < custo)",
+      "skipReasonRoi": "ROI abaixo do mínimo",
+      "skipCalc": "Ganho {{gain}} · Custo {{cost}} · ROI {{roi}}",
+      "skipTarget": "Alvo {{target}} · Amount {{amount}}",
       "autoMode": "Modo automático",
       "scanInterval": "Varredura: {{value}}s"
     },

@@ -41,6 +41,10 @@ const (
 )
 
 const (
+  scanSkipDetailLimit = 50
+)
+
+const (
   paybackModePayback  = 1 << 0
   paybackModeTime     = 1 << 1
   paybackModeCritical = 1 << 2
@@ -83,6 +87,7 @@ type RebalanceOverview struct {
   LastScanTopScoreSat int64 `json:"last_scan_top_score_sat"`
   LastScanProfitSkipped int `json:"last_scan_profit_skipped"`
   LastScanQueued int `json:"last_scan_queued"`
+  LastScanSkipped []RebalanceSkipDetail `json:"last_scan_skipped,omitempty"`
   DailyBudgetSat int64 `json:"daily_budget_sat"`
   DailySpentSat int64 `json:"daily_spent_sat"`
   DailySpentAutoSat int64 `json:"daily_spent_auto_sat"`
@@ -92,6 +97,19 @@ type RebalanceOverview struct {
   ROI7d float64 `json:"roi_7d"`
   EligibleSources int `json:"eligible_sources"`
   TargetsNeeding int `json:"targets_needing"`
+}
+
+type RebalanceSkipDetail struct {
+  ChannelID uint64 `json:"channel_id"`
+  ChannelPoint string `json:"channel_point"`
+  PeerAlias string `json:"peer_alias"`
+  TargetOutboundPct float64 `json:"target_outbound_pct"`
+  TargetAmountSat int64 `json:"target_amount_sat"`
+  ExpectedGainSat int64 `json:"expected_gain_sat"`
+  EstimatedCostSat int64 `json:"estimated_cost_sat"`
+  ExpectedROI float64 `json:"expected_roi"`
+  ExpectedROIValid bool `json:"expected_roi_valid"`
+  Reason string `json:"reason"`
 }
 
 type RebalanceChannel struct {
@@ -218,6 +236,7 @@ type RebalanceService struct {
   lastScanTopScoreSat int64
   lastScanProfitSkipped int
   lastScanQueued int
+  lastScanSkipped []RebalanceSkipDetail
   criticalMissCount int
   sem chan struct{}
   channelLocks map[uint64]bool
@@ -502,6 +521,7 @@ func (s *RebalanceService) runAutoScan() {
   profitSkipped := 0
   topScore := int64(0)
   queuedCount := 0
+  skippedDetails := []RebalanceSkipDetail{}
   defer func() {
     s.mu.Lock()
     s.lastScan = scanAt
@@ -510,6 +530,10 @@ func (s *RebalanceService) runAutoScan() {
     s.lastScanTopScoreSat = topScore
     s.lastScanProfitSkipped = profitSkipped
     s.lastScanQueued = queuedCount
+    if len(skippedDetails) > scanSkipDetailLimit {
+      skippedDetails = skippedDetails[:scanSkipDetailLimit]
+    }
+    s.lastScanSkipped = skippedDetails
     s.mu.Unlock()
   }()
 
@@ -548,10 +572,34 @@ func (s *RebalanceService) runAutoScan() {
       expectedROI, roiValid := estimateTargetROI(expectedGain, estimatedCost, targetAmount, snapshot.OutgoingFeePpm, snapshot.PeerFeeRatePpm)
       if cfg.ROIMin > 0 && roiValid && expectedROI < cfg.ROIMin {
         roiSkipped++
+        skippedDetails = append(skippedDetails, RebalanceSkipDetail{
+          ChannelID: snapshot.ChannelID,
+          ChannelPoint: snapshot.ChannelPoint,
+          PeerAlias: snapshot.PeerAlias,
+          TargetOutboundPct: snapshot.TargetOutboundPct,
+          TargetAmountSat: targetAmount,
+          ExpectedGainSat: expectedGain,
+          EstimatedCostSat: estimatedCost,
+          ExpectedROI: expectedROI,
+          ExpectedROIValid: roiValid,
+          Reason: "roi_guardrail",
+        })
         continue
       }
       if expectedGain > 0 && estimatedCost > 0 && expectedGain < estimatedCost {
         profitSkipped++
+        skippedDetails = append(skippedDetails, RebalanceSkipDetail{
+          ChannelID: snapshot.ChannelID,
+          ChannelPoint: snapshot.ChannelPoint,
+          PeerAlias: snapshot.PeerAlias,
+          TargetOutboundPct: snapshot.TargetOutboundPct,
+          TargetAmountSat: targetAmount,
+          ExpectedGainSat: expectedGain,
+          EstimatedCostSat: estimatedCost,
+          ExpectedROI: expectedROI,
+          ExpectedROIValid: roiValid,
+          Reason: "profit_guardrail",
+        })
         continue
       }
       score := expectedGain - estimatedCost
@@ -3776,6 +3824,7 @@ where report_date >= current_date - interval '6 days'
   lastScanTopScore := s.lastScanTopScoreSat
   lastScanProfitSkipped := s.lastScanProfitSkipped
   lastScanQueued := s.lastScanQueued
+  lastScanSkipped := append([]RebalanceSkipDetail(nil), s.lastScanSkipped...)
   s.mu.Unlock()
 
   overview := RebalanceOverview{
@@ -3792,6 +3841,7 @@ where report_date >= current_date - interval '6 days'
     LastScanTopScoreSat: lastScanTopScore,
     LastScanProfitSkipped: lastScanProfitSkipped,
     LastScanQueued: lastScanQueued,
+    LastScanSkipped: lastScanSkipped,
     EligibleSources: eligibleSources,
     TargetsNeeding: targetsNeeding,
   }

@@ -164,6 +164,10 @@ type autofeeProfile struct {
   ProfitDownMarginMin int
   ProfitDownFwdsMin int
   ProfitDownExtraHours int
+  NegMarginSurgeBump float64
+  NegMarginSurgeMinFwds int
+  NegMarginSurgeFwdsRatio float64
+  SinkExtraFloorMargin float64
   RevfloorBaselineThresh int
   RevfloorMinAbs int
   RevfloorBaselineScale float64
@@ -213,6 +217,10 @@ var autofeeProfiles = map[string]autofeeProfile{
     ProfitDownMarginMin: 20,
     ProfitDownFwdsMin: 10,
     ProfitDownExtraHours: 4,
+    NegMarginSurgeBump: 0.06,
+    NegMarginSurgeMinFwds: 6,
+    NegMarginSurgeFwdsRatio: 0.25,
+    SinkExtraFloorMargin: 0.06,
     RevfloorBaselineThresh: 80,
     RevfloorMinAbs: 160,
     RevfloorBaselineScale: 1.2,
@@ -251,6 +259,10 @@ var autofeeProfiles = map[string]autofeeProfile{
     ProfitDownMarginMin: 10,
     ProfitDownFwdsMin: 8,
     ProfitDownExtraHours: 2,
+    NegMarginSurgeBump: 0.08,
+    NegMarginSurgeMinFwds: 4,
+    NegMarginSurgeFwdsRatio: 0.20,
+    SinkExtraFloorMargin: 0.04,
     RevfloorBaselineThresh: 60,
     RevfloorMinAbs: 140,
     RevfloorBaselineScale: 1.0,
@@ -289,6 +301,10 @@ var autofeeProfiles = map[string]autofeeProfile{
     ProfitDownMarginMin: 5,
     ProfitDownFwdsMin: 5,
     ProfitDownExtraHours: 1,
+    NegMarginSurgeBump: 0.12,
+    NegMarginSurgeMinFwds: 3,
+    NegMarginSurgeFwdsRatio: 0.15,
+    SinkExtraFloorMargin: 0.03,
     RevfloorBaselineThresh: 40,
     RevfloorMinAbs: 120,
     RevfloorBaselineScale: 0.8,
@@ -2103,9 +2119,26 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     baseCostPpm = e.cfg.MinPpm
   }
   marginPpm7d := outPpm7d - int(float64(baseCostPpm)*1.10)
-  if marginPpm7d < 0 && fwdCount >= 5 {
-    target = int(math.Ceil(float64(target) * 1.05))
+  if marginPpm7d < 0 {
     tags = append(tags, "neg-margin")
+    minFwds := e.profile.NegMarginSurgeMinFwds
+    if e.profile.NegMarginSurgeFwdsRatio > 0 {
+      baseFwds := st.BaselineFwd7d
+      if baseFwds <= 0 {
+        baseFwds = fwdCount
+      }
+      if baseFwds <= 0 {
+        baseFwds = 1
+      }
+      ratioFwds := int(math.Round(float64(baseFwds) * e.profile.NegMarginSurgeFwdsRatio))
+      if ratioFwds > minFwds {
+        minFwds = ratioFwds
+      }
+    }
+    if e.profile.NegMarginSurgeBump > 0 && fwdCount >= minFwds {
+      target = int(math.Ceil(float64(target) * (1.0 + e.profile.NegMarginSurgeBump)))
+      tags = append(tags, fmt.Sprintf("negm+%d%%", int(math.Round(e.profile.NegMarginSurgeBump*100))))
+    }
   }
 
   discoveryHit := false
@@ -2157,6 +2190,10 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
 
   target = clampInt(target, e.cfg.MinPpm, e.cfg.MaxPpm)
+  if marginPpm7d < 0 && target < localPpm {
+    target = localPpm
+    tags = append(tags, "no-down-neg-margin")
+  }
   if target > localPpm {
     tags = append(tags, "trend-up")
   } else if target < localPpm {
@@ -2216,6 +2253,14 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
 
   floor := int(math.Ceil(float64(baseCostPpm) * 1.10))
   floorSrc := "rebal"
+  if strings.EqualFold(classLabel, "sink") && baseCostPpm > 0 && e.profile.SinkExtraFloorMargin > 0 {
+    sinkFloor := int(math.Ceil(float64(baseCostPpm) * (1.10 + e.profile.SinkExtraFloorMargin)))
+    if sinkFloor > floor {
+      floor = sinkFloor
+      floorSrc = "rebal-sink"
+      tags = append(tags, "sink-floor")
+    }
+  }
   if outPpm7d > 0 && !discoveryHit && !explorerActive {
     outrateFloorActive := true
     factor := outrateFloorFactor
@@ -2882,6 +2927,8 @@ func formatAutofeeTags(d *decision) string {
       add("💎top-rev")
     case t == "neg-margin":
       add("⚠️neg-margin")
+    case strings.HasPrefix(t, "negm+"):
+      add("💹" + t)
     case t == "outrate-floor":
       add("📊outrate-floor")
     case t == "circuit-breaker":
@@ -2910,10 +2957,14 @@ func formatAutofeeTags(d *decision) string {
       add("🟰same-ppm")
     case t == "no-down-low":
       add("🚫down-low")
+    case t == "no-down-neg-margin":
+      add("🚫down-neg")
     case t == "super-source":
       add("🔥super-source")
     case t == "super-source-like":
       add("🔥super-source-like")
+    case t == "sink-floor":
+      add("🧱sink-floor")
     case t == "trend-up":
       add("📈trend-up")
     case t == "trend-down":
