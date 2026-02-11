@@ -114,6 +114,7 @@ type RebalanceChannel struct {
   TargetOutboundPct float64 `json:"target_outbound_pct"`
   TargetAmountSat int64 `json:"target_amount_sat"`
   AutoEnabled bool `json:"auto_enabled"`
+  ManualRestartEnabled bool `json:"manual_restart_enabled"`
   EligibleAsTarget bool `json:"eligible_as_target"`
   EligibleAsSource bool `json:"eligible_as_source"`
   ProtectedLiquiditySat int64 `json:"protected_liquidity_sat"`
@@ -167,6 +168,7 @@ type channelSetting struct {
   ChannelPoint string
   TargetOutboundPct float64
   AutoEnabled bool
+  ManualRestartEnabled bool
 }
 
 type channelLedger struct {
@@ -2389,6 +2391,9 @@ func (s *RebalanceService) scheduleManualRestart(info manualRestartInfo) {
   }
 
   setting := settings[target.ChannelID]
+  if !setting.ManualRestartEnabled {
+    return
+  }
   snapshot := s.buildChannelSnapshot(ctx, cfg, false, target, setting, ledger[target.ChannelID], revenueByChannel[target.ChannelID], exclusions[target.ChannelID])
   deficit := computeDeficitAmount(target, snapshot.TargetOutboundPct)
   if deficit <= 0 {
@@ -2545,6 +2550,7 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
     TargetOutboundPct: target,
     TargetAmountSat: targetAmount,
     AutoEnabled: setting.AutoEnabled,
+    ManualRestartEnabled: setting.ManualRestartEnabled,
     EligibleAsTarget: eligibleTarget,
     EligibleAsSource: eligibleSource && !excluded,
     ProtectedLiquiditySat: protected,
@@ -3021,11 +3027,15 @@ end $$;
   alter table rebalance_config
     add column if not exists mc_half_life_sec bigint not null default 0;
 
+  alter table if exists rebalance_channel_settings
+    add column if not exists manual_restart_enabled boolean not null default false;
+
 create table if not exists rebalance_channel_settings (
   channel_id bigint primary key,
   channel_point text not null,
   target_outbound_pct double precision not null default 50,
   auto_enabled boolean not null default false,
+  manual_restart_enabled boolean not null default false,
   updated_at timestamptz not null default now()
 );
 
@@ -3227,7 +3237,7 @@ func (s *RebalanceService) loadChannelSettings(ctx context.Context) (map[uint64]
     return settings, nil
   }
   rows, err := s.db.Query(ctx, `
-select channel_id, channel_point, target_outbound_pct, auto_enabled from rebalance_channel_settings
+select channel_id, channel_point, target_outbound_pct, auto_enabled, manual_restart_enabled from rebalance_channel_settings
 `)
   if err != nil {
     return settings, err
@@ -3236,7 +3246,7 @@ select channel_id, channel_point, target_outbound_pct, auto_enabled from rebalan
   for rows.Next() {
     var channelID int64
     var setting channelSetting
-    if err := rows.Scan(&channelID, &setting.ChannelPoint, &setting.TargetOutboundPct, &setting.AutoEnabled); err != nil {
+    if err := rows.Scan(&channelID, &setting.ChannelPoint, &setting.TargetOutboundPct, &setting.AutoEnabled, &setting.ManualRestartEnabled); err != nil {
       return settings, err
     }
     setting.ChannelID = uint64(channelID)
@@ -4069,6 +4079,18 @@ func (s *RebalanceService) SetChannelAuto(ctx context.Context, channelID uint64,
   values ($1,$2, $3, $4, now())
    on conflict (channel_id) do update set channel_point=excluded.channel_point, auto_enabled=excluded.auto_enabled, updated_at=now()
   `, int64(channelID), channelPoint, rebalanceDefaultTargetOutboundPct, autoEnabled)
+  return err
+}
+
+func (s *RebalanceService) SetChannelManualRestart(ctx context.Context, channelID uint64, channelPoint string, enabled bool) error {
+  if s.db == nil {
+    return errors.New("db unavailable")
+  }
+  _, err := s.db.Exec(ctx, `
+  insert into rebalance_channel_settings (channel_id, channel_point, target_outbound_pct, auto_enabled, manual_restart_enabled, updated_at)
+  values ($1,$2,$3,false,$4,now())
+   on conflict (channel_id) do update set channel_point=excluded.channel_point, manual_restart_enabled=excluded.manual_restart_enabled, updated_at=now()
+  `, int64(channelID), channelPoint, rebalanceDefaultTargetOutboundPct, enabled)
   return err
 }
 

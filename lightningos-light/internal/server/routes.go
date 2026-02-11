@@ -113,6 +113,7 @@ func (s *Server) routes() http.Handler {
     r.Post("/stop", s.handleRebalanceStop)
     r.Post("/channel/target", s.handleRebalanceChannelTarget)
     r.Post("/channel/auto", s.handleRebalanceChannelAuto)
+    r.Post("/channel/manual-restart", s.handleRebalanceChannelManualRestart)
     r.Post("/channel/exclude", s.handleRebalanceExclude)
     r.Get("/stream", s.handleRebalanceStream)
   })

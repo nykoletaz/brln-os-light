@@ -9,6 +9,7 @@ import {
   getRebalanceQueue,
   runRebalance,
   updateRebalanceChannelAuto,
+  updateRebalanceChannelManualRestart,
   updateRebalanceChannelTarget,
   updateRebalanceConfig,
   updateRebalanceExclude
@@ -83,6 +84,7 @@ type RebalanceChannel = {
   target_outbound_pct: number
   target_amount_sat: number
   auto_enabled: boolean
+  manual_restart_enabled: boolean
   eligible_as_target: boolean
   eligible_as_source: boolean
   protected_liquidity_sat: number
@@ -380,6 +382,11 @@ export default function RebalanceCenter() {
       setOverview(ovw as RebalanceOverview)
       const channelList = Array.isArray((ch as any)?.channels) ? (ch as any).channels : []
       setChannels(channelList)
+      const restartState: Record<number, boolean> = {}
+      channelList.forEach((channel: RebalanceChannel) => {
+        restartState[channel.channel_id] = channel.manual_restart_enabled
+      })
+      setManualRestart(restartState)
       setQueueJobs(Array.isArray((queue as any)?.jobs) ? (queue as any).jobs : [])
       setQueueAttempts(Array.isArray((queue as any)?.attempts) ? (queue as any).attempts : [])
       setHistoryJobs(Array.isArray((hist as any)?.jobs) ? (hist as any).jobs : [])
@@ -538,6 +545,20 @@ export default function RebalanceCenter() {
       loadAll()
     } catch (err) {
       setStatus(err instanceof Error ? err.message : t('rebalanceCenter.runFailed'))
+    }
+  }
+
+  const handleManualRestartToggle = async (channel: RebalanceChannel, enabled: boolean) => {
+    try {
+      await updateRebalanceChannelManualRestart({
+        channel_id: channel.channel_id,
+        channel_point: channel.channel_point,
+        enabled
+      })
+      setManualRestart((prev) => ({ ...prev, [channel.channel_id]: enabled }))
+      loadAll()
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : t('rebalanceCenter.saveFailed'))
     }
   }
 
@@ -1157,9 +1178,7 @@ export default function RebalanceCenter() {
                         <input
                           type="checkbox"
                           checked={manualRestart[ch.channel_id] === true}
-                          onChange={(e) =>
-                            setManualRestart((prev) => ({ ...prev, [ch.channel_id]: e.target.checked }))
-                          }
+                          onChange={(e) => handleManualRestartToggle(ch, e.target.checked)}
                         />
                       </div>
                     </div>

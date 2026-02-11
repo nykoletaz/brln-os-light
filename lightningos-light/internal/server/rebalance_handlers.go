@@ -59,6 +59,12 @@ type rebalanceChannelAutoPayload struct {
   AutoEnabled bool `json:"auto_enabled"`
 }
 
+type rebalanceChannelManualRestartPayload struct {
+  ChannelID uint64 `json:"channel_id"`
+  ChannelPoint string `json:"channel_point"`
+  Enabled bool `json:"enabled"`
+}
+
 type rebalanceExcludePayload struct {
   ChannelID uint64 `json:"channel_id"`
   ChannelPoint string `json:"channel_point"`
@@ -361,6 +367,34 @@ func (s *Server) handleRebalanceChannelAuto(w http.ResponseWriter, r *http.Reque
     return
   }
   if err := s.rebalance.SetChannelAuto(ctx, resolvedID, resolvedPoint, payload.AutoEnabled); err != nil {
+    writeError(w, http.StatusInternalServerError, err.Error())
+    return
+  }
+  writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleRebalanceChannelManualRestart(w http.ResponseWriter, r *http.Request) {
+  if s.rebalance == nil {
+    writeError(w, http.StatusServiceUnavailable, "rebalance unavailable")
+    return
+  }
+  var payload rebalanceChannelManualRestartPayload
+  if err := readJSON(r, &payload); err != nil {
+    writeError(w, http.StatusBadRequest, "invalid json")
+    return
+  }
+  if payload.ChannelID == 0 && strings.TrimSpace(payload.ChannelPoint) == "" {
+    writeError(w, http.StatusBadRequest, "channel_id or channel_point required")
+    return
+  }
+  ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+  defer cancel()
+  resolvedID, resolvedPoint, err := s.rebalance.ResolveChannel(ctx, payload.ChannelID, payload.ChannelPoint)
+  if err != nil {
+    writeError(w, http.StatusBadRequest, err.Error())
+    return
+  }
+  if err := s.rebalance.SetChannelManualRestart(ctx, resolvedID, resolvedPoint, payload.Enabled); err != nil {
     writeError(w, http.StatusInternalServerError, err.Error())
     return
   }
