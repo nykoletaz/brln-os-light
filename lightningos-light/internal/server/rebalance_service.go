@@ -219,6 +219,7 @@ type RebalanceService struct {
   channelLocks map[uint64]bool
   jobCancel map[int64]context.CancelFunc
   manualRestart map[int64]manualRestartInfo
+  manualRestartCancel map[uint64]context.CancelFunc
 }
 
 func NewRebalanceService(db *pgxpool.Pool, lnd *lndclient.Client, logger *log.Logger) *RebalanceService {
@@ -230,6 +231,7 @@ func NewRebalanceService(db *pgxpool.Pool, lnd *lndclient.Client, logger *log.Lo
     channelLocks: map[uint64]bool{},
     jobCancel: map[int64]context.CancelFunc{},
     manualRestart: map[int64]manualRestartInfo{},
+    manualRestartCancel: map[uint64]context.CancelFunc{},
   }
 }
 
@@ -2335,6 +2337,44 @@ func (s *RebalanceService) takeManualRestart(jobID int64) (manualRestartInfo, bo
   return info, ok
 }
 
+func (s *RebalanceService) setManualRestartCancel(channelID uint64, cancel context.CancelFunc) {
+  s.mu.Lock()
+  if s.manualRestartCancel == nil {
+    s.manualRestartCancel = map[uint64]context.CancelFunc{}
+  }
+  if existing, ok := s.manualRestartCancel[channelID]; ok && existing != nil {
+    existing()
+  }
+  s.manualRestartCancel[channelID] = cancel
+  s.mu.Unlock()
+}
+
+func (s *RebalanceService) clearManualRestartCancel(channelID uint64, cancel context.CancelFunc) {
+  s.mu.Lock()
+  if s.manualRestartCancel == nil {
+    s.mu.Unlock()
+    return
+  }
+  if existing, ok := s.manualRestartCancel[channelID]; ok && existing == cancel {
+    delete(s.manualRestartCancel, channelID)
+  }
+  s.mu.Unlock()
+}
+
+func (s *RebalanceService) cancelManualRestart(channelID uint64) {
+  s.mu.Lock()
+  if s.manualRestartCancel == nil {
+    s.mu.Unlock()
+    return
+  }
+  cancel := s.manualRestartCancel[channelID]
+  delete(s.manualRestartCancel, channelID)
+  s.mu.Unlock()
+  if cancel != nil {
+    cancel()
+  }
+}
+
 func (s *RebalanceService) shouldManualRestart(status string, reason string) bool {
   if status == "partial" {
     return true
@@ -2350,9 +2390,17 @@ func (s *RebalanceService) scheduleManualRestart(info manualRestartInfo) {
   if cooldown <= 0 {
     cooldown = manualRestartCooldownSec
   }
+  ctx, cancel := context.WithCancel(context.Background())
+  s.setManualRestartCancel(info.TargetChannelID, cancel)
+  defer s.clearManualRestartCancel(info.TargetChannelID, cancel)
   timer := time.NewTimer(time.Duration(cooldown) * time.Second)
   select {
   case <-timer.C:
+  case <-ctx.Done():
+    if !timer.Stop() {
+      <-timer.C
+    }
+    return
   case <-s.stop:
     if !timer.Stop() {
       <-timer.C
@@ -4085,6 +4133,9 @@ func (s *RebalanceService) SetChannelAuto(ctx context.Context, channelID uint64,
 func (s *RebalanceService) SetChannelManualRestart(ctx context.Context, channelID uint64, channelPoint string, enabled bool) error {
   if s.db == nil {
     return errors.New("db unavailable")
+  }
+  if !enabled {
+    s.cancelManualRestart(channelID)
   }
   _, err := s.db.Exec(ctx, `
   insert into rebalance_channel_settings (channel_id, channel_point, target_outbound_pct, auto_enabled, manual_restart_enabled, updated_at)
