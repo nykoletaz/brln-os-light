@@ -195,6 +195,10 @@ type manualRestartInfo struct {
   CooldownSec int
 }
 
+type manualRestartHandle struct {
+  cancel context.CancelFunc
+}
+
 type RebalanceService struct {
   db *pgxpool.Pool
   lnd *lndclient.Client
@@ -219,7 +223,7 @@ type RebalanceService struct {
   channelLocks map[uint64]bool
   jobCancel map[int64]context.CancelFunc
   manualRestart map[int64]manualRestartInfo
-  manualRestartCancel map[uint64]context.CancelFunc
+  manualRestartCancel map[uint64]*manualRestartHandle
 }
 
 func NewRebalanceService(db *pgxpool.Pool, lnd *lndclient.Client, logger *log.Logger) *RebalanceService {
@@ -231,7 +235,7 @@ func NewRebalanceService(db *pgxpool.Pool, lnd *lndclient.Client, logger *log.Lo
     channelLocks: map[uint64]bool{},
     jobCancel: map[int64]context.CancelFunc{},
     manualRestart: map[int64]manualRestartInfo{},
-    manualRestartCancel: map[uint64]context.CancelFunc{},
+    manualRestartCancel: map[uint64]*manualRestartHandle{},
   }
 }
 
@@ -2337,25 +2341,27 @@ func (s *RebalanceService) takeManualRestart(jobID int64) (manualRestartInfo, bo
   return info, ok
 }
 
-func (s *RebalanceService) setManualRestartCancel(channelID uint64, cancel context.CancelFunc) {
+func (s *RebalanceService) setManualRestartCancel(channelID uint64, cancel context.CancelFunc) *manualRestartHandle {
   s.mu.Lock()
   if s.manualRestartCancel == nil {
-    s.manualRestartCancel = map[uint64]context.CancelFunc{}
+    s.manualRestartCancel = map[uint64]*manualRestartHandle{}
   }
-  if existing, ok := s.manualRestartCancel[channelID]; ok && existing != nil {
-    existing()
+  if existing, ok := s.manualRestartCancel[channelID]; ok && existing != nil && existing.cancel != nil {
+    existing.cancel()
   }
-  s.manualRestartCancel[channelID] = cancel
+  handle := &manualRestartHandle{cancel: cancel}
+  s.manualRestartCancel[channelID] = handle
   s.mu.Unlock()
+  return handle
 }
 
-func (s *RebalanceService) clearManualRestartCancel(channelID uint64, cancel context.CancelFunc) {
+func (s *RebalanceService) clearManualRestartCancel(channelID uint64, handle *manualRestartHandle) {
   s.mu.Lock()
   if s.manualRestartCancel == nil {
     s.mu.Unlock()
     return
   }
-  if existing, ok := s.manualRestartCancel[channelID]; ok && existing == cancel {
+  if existing, ok := s.manualRestartCancel[channelID]; ok && existing == handle {
     delete(s.manualRestartCancel, channelID)
   }
   s.mu.Unlock()
@@ -2367,11 +2373,11 @@ func (s *RebalanceService) cancelManualRestart(channelID uint64) {
     s.mu.Unlock()
     return
   }
-  cancel := s.manualRestartCancel[channelID]
+  handle := s.manualRestartCancel[channelID]
   delete(s.manualRestartCancel, channelID)
   s.mu.Unlock()
-  if cancel != nil {
-    cancel()
+  if handle != nil && handle.cancel != nil {
+    handle.cancel()
   }
 }
 
@@ -2391,8 +2397,8 @@ func (s *RebalanceService) scheduleManualRestart(info manualRestartInfo) {
     cooldown = manualRestartCooldownSec
   }
   ctx, cancel := context.WithCancel(context.Background())
-  s.setManualRestartCancel(info.TargetChannelID, cancel)
-  defer s.clearManualRestartCancel(info.TargetChannelID, cancel)
+  handle := s.setManualRestartCancel(info.TargetChannelID, cancel)
+  defer s.clearManualRestartCancel(info.TargetChannelID, handle)
   timer := time.NewTimer(time.Duration(cooldown) * time.Second)
   select {
   case <-timer.C:
@@ -2412,16 +2418,16 @@ func (s *RebalanceService) scheduleManualRestart(info manualRestartInfo) {
     return
   }
 
-  ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-  defer cancel()
+  restartCtx, restartCancel := context.WithTimeout(context.Background(), 8*time.Second)
+  defer restartCancel()
 
-  cfg, _ := s.loadConfig(ctx)
-  settings, _ := s.loadChannelSettings(ctx)
-  exclusions, _ := s.loadExclusions(ctx)
-  ledger, _ := s.loadLedger(ctx)
-  revenueByChannel, _ := s.fetchChannelRevenue7d(ctx)
+  cfg, _ := s.loadConfig(restartCtx)
+  settings, _ := s.loadChannelSettings(restartCtx)
+  exclusions, _ := s.loadExclusions(restartCtx)
+  ledger, _ := s.loadLedger(restartCtx)
+  revenueByChannel, _ := s.fetchChannelRevenue7d(restartCtx)
 
-  channels, err := s.lnd.ListChannels(ctx)
+  channels, err := s.lnd.ListChannels(restartCtx)
   if err != nil {
     return
   }
@@ -2442,7 +2448,7 @@ func (s *RebalanceService) scheduleManualRestart(info manualRestartInfo) {
   if !setting.ManualRestartEnabled {
     return
   }
-  snapshot := s.buildChannelSnapshot(ctx, cfg, false, target, setting, ledger[target.ChannelID], revenueByChannel[target.ChannelID], exclusions[target.ChannelID])
+  snapshot := s.buildChannelSnapshot(restartCtx, cfg, false, target, setting, ledger[target.ChannelID], revenueByChannel[target.ChannelID], exclusions[target.ChannelID])
   deficit := computeDeficitAmount(target, snapshot.TargetOutboundPct)
   if deficit <= 0 {
     return
