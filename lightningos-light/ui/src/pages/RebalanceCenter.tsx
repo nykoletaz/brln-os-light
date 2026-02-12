@@ -177,6 +177,7 @@ export default function RebalanceCenter() {
   const [manualRestart, setManualRestart] = useState<Record<string, boolean>>({})
   const [channelSort, setChannelSort] = useState<'economic' | 'emptiest'>('economic')
   const [skipDetailsOpen, setSkipDetailsOpen] = useState(false)
+  const [scanDetailsOpen, setScanDetailsOpen] = useState(false)
   const configRef = useRef<RebalanceConfig | null>(null)
   const autoOpenRef = useRef(false)
 
@@ -583,12 +584,20 @@ export default function RebalanceCenter() {
     if (!overview?.last_scan_skipped) return []
     return overview.last_scan_skipped.filter((item) => item.reason === 'profit_guardrail')
   }, [overview])
+  const diagnosticSkipDetails = useMemo(() => {
+    if (!overview?.last_scan_skipped) return []
+    return overview.last_scan_skipped.filter((item) => item.reason !== 'profit_guardrail')
+  }, [overview])
   const formatSkipReason = (reason: string) => {
     switch (reason) {
       case 'roi_guardrail':
         return t('rebalanceCenter.overview.skipReasonRoi')
       case 'profit_guardrail':
         return t('rebalanceCenter.overview.skipReasonProfit')
+      case 'channel_busy':
+        return t('rebalanceCenter.overview.skipReasonBusy')
+      case 'recently_attempted':
+        return t('rebalanceCenter.overview.skipReasonRecent')
       default:
         return reason
     }
@@ -637,9 +646,18 @@ export default function RebalanceCenter() {
                 </p>
               )}
               {overview.auto_enabled && overview.last_scan_detail && (
-                <p className="text-xs text-amber-200">
-                  {t('rebalanceCenter.overview.scanDetail', { value: overview.last_scan_detail })}
-                </p>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-amber-200">
+                  <span>{t('rebalanceCenter.overview.scanDetail', { value: overview.last_scan_detail })}</span>
+                  {diagnosticSkipDetails.length > 0 && (
+                    <button
+                      type="button"
+                      className="text-[11px] underline underline-offset-2 text-fog/70"
+                      onClick={() => setScanDetailsOpen((prev) => !prev)}
+                    >
+                      {t('rebalanceCenter.overview.skipDetails')}
+                    </button>
+                  )}
+                </div>
               )}
               {overview.auto_enabled && (overview.last_scan_queued ?? 0) > 0 && (
                 <p className="text-xs text-fog/50">
@@ -663,6 +681,32 @@ export default function RebalanceCenter() {
                       {t('rebalanceCenter.overview.skipDetails')}
                     </button>
                   )}
+                </div>
+              )}
+              {scanDetailsOpen && diagnosticSkipDetails.length > 0 && (
+                <div className="mt-2 space-y-2 text-[11px] text-fog/70">
+                  {diagnosticSkipDetails.map((item) => (
+                    <div key={`${item.channel_id}-${item.reason}`} className="rounded-lg border border-white/10 bg-white/5 p-2">
+                      <div className="text-fog/80">
+                        {item.peer_alias || item.channel_point}
+                      </div>
+                      <div>
+                        {formatSkipReason(item.reason)}
+                        {' Â· '}
+                        {t('rebalanceCenter.overview.skipCalc', {
+                          gain: formatSats(item.expected_gain_sat),
+                          cost: formatSats(item.estimated_cost_sat),
+                          roi: item.expected_roi_valid ? formatRoi(item.expected_roi) : 'n/a'
+                        })}
+                      </div>
+                      <div className="text-fog/60">
+                        {t('rebalanceCenter.overview.skipTarget', {
+                          target: formatPct(item.target_outbound_pct),
+                          amount: formatSats(item.target_amount_sat)
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
               {skipDetailsOpen && profitSkipDetails.length > 0 && (

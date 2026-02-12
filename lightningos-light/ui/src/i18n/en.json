@@ -1087,6 +1087,8 @@
         "skipDetails": "Details",
         "skipReasonProfit": "Profit guardrail (gain < cost)",
         "skipReasonRoi": "ROI below minimum",
+        "skipReasonBusy": "Channel busy",
+        "skipReasonRecent": "Recently attempted",
         "skipCalc": "Gain {{gain}} · Cost {{cost}} · ROI {{roi}}",
         "skipTarget": "Target {{target}} · Amount {{amount}}",
         "autoMode": "Auto mode",

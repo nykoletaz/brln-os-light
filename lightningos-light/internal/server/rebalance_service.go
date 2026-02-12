@@ -785,6 +785,18 @@ func (s *RebalanceService) runAutoScan() {
       switch err.Error() {
       case "channel busy":
         noteSkip("channel_busy")
+        skippedDetails = append(skippedDetails, RebalanceSkipDetail{
+          ChannelID: target.Channel.ChannelID,
+          ChannelPoint: target.Channel.ChannelPoint,
+          PeerAlias: target.Channel.PeerAlias,
+          TargetOutboundPct: target.Channel.TargetOutboundPct,
+          TargetAmountSat: target.Channel.TargetAmountSat,
+          ExpectedGainSat: target.ExpectedGainSat,
+          EstimatedCostSat: target.EstimatedCostSat,
+          ExpectedROI: target.ExpectedROI,
+          ExpectedROIValid: target.ExpectedROIValid,
+          Reason: "channel_busy",
+        })
       case "target already within range":
         noteSkip("target_already_balanced")
       case "target channel not found":
