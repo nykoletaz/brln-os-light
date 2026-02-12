@@ -129,6 +129,14 @@ export const updateLnHtlcManager = (payload: {
 }) => request('/api/lnops/channel/htlc-manager', { method: 'POST', body: JSON.stringify(payload) })
 export const getLnHtlcManagerLogs = (limit = 100) =>
   request(`/api/lnops/channel/htlc-manager/logs?limit=${encodeURIComponent(String(limit))}`)
+export const getLnTorPeerChecker = () => request('/api/lnops/channel/tor-peers')
+export const updateLnTorPeerChecker = (payload: {
+  enabled?: boolean
+  interval_hours?: number
+  run_now?: boolean
+}) => request('/api/lnops/channel/tor-peers', { method: 'POST', body: JSON.stringify(payload) })
+export const getLnTorPeerCheckerLogs = (limit = 100) =>
+  request(`/api/lnops/channel/tor-peers/logs?limit=${encodeURIComponent(String(limit))}`)
 export const getAutofeeConfig = () => request('/api/lnops/autofee/config')
 export const updateAutofeeConfig = (payload: {
   enabled?: boolean

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeResults, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnHtlcManager, getLnHtlcManagerLogs, getLnPeers, getMempoolFees, openChannel, runAutofee, signLnMessage, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus, updateLnHtlcManager } from '../api'
+import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeResults, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnHtlcManager, getLnHtlcManagerLogs, getLnPeers, getLnTorPeerChecker, getLnTorPeerCheckerLogs, getMempoolFees, openChannel, runAutofee, signLnMessage, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus, updateLnHtlcManager, updateLnTorPeerChecker } from '../api'
 
 type Channel = {
   channel_point: string
@@ -95,6 +95,30 @@ type HtlcManagerLogEntry = {
   old_max_msat: number
   new_max_msat: number
   result: string
+}
+
+type TorPeerCheckerStatus = {
+  enabled: boolean
+  status: string
+  interval_hours: number
+  last_attempt_at?: string
+  last_ok_at?: string
+  last_error?: string
+  last_error_at?: string
+  last_checked_count?: number
+  last_hybrid_on_tor_count?: number
+  last_attempted_count?: number
+  last_switched_count?: number
+}
+
+type TorPeerCheckerLogEntry = {
+  ts: string
+  alias: string
+  pub_key?: string
+  from_address?: string
+  to_address?: string
+  result: string
+  detail?: string
 }
 
 type BitcoinLocalCadenceBucket = {
@@ -238,6 +262,12 @@ export default function LightningOps() {
   const [htlcManagerMaxPct, setHtlcManagerMaxPct] = useState('0')
   const [htlcManagerLogs, setHtlcManagerLogs] = useState<HtlcManagerLogEntry[]>([])
   const [htlcManagerLogsOpen, setHtlcManagerLogsOpen] = useState(false)
+  const [torPeerChecker, setTorPeerChecker] = useState<TorPeerCheckerStatus | null>(null)
+  const [torPeerCheckerStatus, setTorPeerCheckerStatus] = useState('')
+  const [torPeerCheckerBusy, setTorPeerCheckerBusy] = useState(false)
+  const [torPeerCheckerIntervalHours, setTorPeerCheckerIntervalHours] = useState('2')
+  const [torPeerCheckerLogs, setTorPeerCheckerLogs] = useState<TorPeerCheckerLogEntry[]>([])
+  const [torPeerCheckerLogsOpen, setTorPeerCheckerLogsOpen] = useState(false)
   const [signMessage, setSignMessage] = useState('')
   const [signSignature, setSignSignature] = useState('')
   const [signStatus, setSignStatus] = useState('')
@@ -836,6 +866,13 @@ export default function LightningOps() {
     return 'warn'
   }
 
+  const torPeerCheckerTone = (): 'ok' | 'warn' | 'muted' => {
+    if (!torPeerChecker?.enabled) return 'muted'
+    if (torPeerChecker?.status === 'ok') return 'ok'
+    if (torPeerChecker?.status === 'checking') return 'muted'
+    return 'warn'
+  }
+
   const badgeClass = (tone: 'ok' | 'warn' | 'muted') => {
     if (tone === 'ok') {
       return 'bg-emerald-500/15 text-emerald-200 border border-emerald-400/30'
@@ -867,6 +904,13 @@ export default function LightningOps() {
     return t('common.check')
   }
 
+  const torPeerCheckerBadgeLabel = () => {
+    if (!torPeerChecker?.enabled) return t('common.disabled')
+    if (torPeerChecker?.status === 'ok') return t('common.ok')
+    if (torPeerChecker?.status === 'checking') return t('common.check')
+    return t('common.check')
+  }
+
   const ambossURL = (pubkey: string) => `https://amboss.space/node/${pubkey}`
 
   const load = async () => {
@@ -875,14 +919,17 @@ export default function LightningOps() {
     setAmbossStatus(t('lightningOps.ambossHealthLoading'))
     setChanHealStatus(t('lightningOps.chanHealLoading'))
     setHtlcManagerStatus(t('lightningOps.htlcManagerLoading'))
+    setTorPeerCheckerStatus(t('lightningOps.torPeerLoading'))
     setAutofeeMessage(t('lightningOps.autofeeLoading'))
-    const [channelsResult, peersResult, ambossResult, chanHealResult, htlcManagerResult, htlcManagerLogsResult, bitcoinLocalResult, autofeeConfigResult, autofeeStatusResult, autofeeChannelsResult, autofeeResultsResult] = await Promise.allSettled([
+    const [channelsResult, peersResult, ambossResult, chanHealResult, htlcManagerResult, htlcManagerLogsResult, torPeerCheckerResult, torPeerCheckerLogsResult, bitcoinLocalResult, autofeeConfigResult, autofeeStatusResult, autofeeChannelsResult, autofeeResultsResult] = await Promise.allSettled([
       getLnChannels(),
       getLnPeers(),
       getAmbossHealth(),
       getLnChanHeal(),
       getLnHtlcManager(),
       getLnHtlcManagerLogs(),
+      getLnTorPeerChecker(),
+      getLnTorPeerCheckerLogs(),
       getBitcoinLocalStatus(),
       getAutofeeConfig(),
       getAutofeeStatus(),
@@ -949,6 +996,21 @@ export default function LightningOps() {
       setHtlcManagerLogs(Array.isArray(entries) ? entries : [])
     } else if (htlcManagerResult.status === 'fulfilled') {
       setHtlcManagerLogs([])
+    }
+    if (torPeerCheckerResult.status === 'fulfilled') {
+      const payload = torPeerCheckerResult.value as TorPeerCheckerStatus
+      setTorPeerChecker(payload)
+      setTorPeerCheckerIntervalHours(String(payload?.interval_hours ?? 2))
+      setTorPeerCheckerStatus('')
+    } else {
+      const message = (torPeerCheckerResult.reason as any)?.message || t('lightningOps.torPeerStatusUnavailable')
+      setTorPeerCheckerStatus(message)
+    }
+    if (torPeerCheckerLogsResult.status === 'fulfilled') {
+      const entries = (torPeerCheckerLogsResult.value as any)?.entries
+      setTorPeerCheckerLogs(Array.isArray(entries) ? entries : [])
+    } else if (torPeerCheckerResult.status === 'fulfilled') {
+      setTorPeerCheckerLogs([])
     }
     if (bitcoinLocalResult.status === 'fulfilled') {
       setBitcoinLocal(bitcoinLocalResult.value as BitcoinLocalStatus)
@@ -1070,10 +1132,35 @@ export default function LightningOps() {
           setHtlcManagerLogs([])
         })
     }
+    const fetchTorPeerChecker = () => {
+      getLnTorPeerChecker()
+        .then((data) => {
+          if (!mounted) return
+          const payload = data as TorPeerCheckerStatus
+          setTorPeerChecker(payload)
+          setTorPeerCheckerIntervalHours(String(payload?.interval_hours ?? 2))
+          setTorPeerCheckerStatus('')
+        })
+        .catch((err: any) => {
+          if (!mounted) return
+          setTorPeerCheckerStatus(err?.message || t('lightningOps.torPeerStatusUnavailable'))
+        })
+      getLnTorPeerCheckerLogs()
+        .then((data: any) => {
+          if (!mounted) return
+          const entries = data?.entries
+          setTorPeerCheckerLogs(Array.isArray(entries) ? entries : [])
+        })
+        .catch(() => {
+          if (!mounted) return
+          setTorPeerCheckerLogs([])
+        })
+    }
     const timer = window.setInterval(() => {
       fetchAmboss()
       fetchChanHeal()
       fetchHtlcManager()
+      fetchTorPeerChecker()
     }, 30000)
     return () => {
       mounted = false
@@ -1491,6 +1578,60 @@ export default function LightningOps() {
       setHtlcManagerStatus(err?.message || t('lightningOps.htlcManagerRunFailed'))
     } finally {
       setHtlcManagerBusy(false)
+    }
+  }
+
+  const handleToggleTorPeerChecker = async () => {
+    if (torPeerCheckerBusy) return
+    const nextEnabled = !torPeerChecker?.enabled
+    setTorPeerCheckerBusy(true)
+    setTorPeerCheckerStatus(t('lightningOps.torPeerSaving'))
+    try {
+      const res = await updateLnTorPeerChecker({ enabled: nextEnabled })
+      setTorPeerChecker(res as TorPeerCheckerStatus)
+      setTorPeerCheckerStatus(nextEnabled ? t('lightningOps.torPeerEnabled') : t('lightningOps.torPeerDisabled'))
+    } catch (err: any) {
+      setTorPeerCheckerStatus(err?.message || t('lightningOps.torPeerSaveFailed'))
+    } finally {
+      setTorPeerCheckerBusy(false)
+    }
+  }
+
+  const handleSaveTorPeerChecker = async () => {
+    if (torPeerCheckerBusy) return
+    const intervalHours = Number(torPeerCheckerIntervalHours || 0)
+    if (!intervalHours || intervalHours < 2 || intervalHours > 168) {
+      setTorPeerCheckerStatus(t('lightningOps.torPeerIntervalInvalid'))
+      return
+    }
+    setTorPeerCheckerBusy(true)
+    setTorPeerCheckerStatus(t('lightningOps.torPeerSaving'))
+    try {
+      const res = await updateLnTorPeerChecker({ interval_hours: intervalHours })
+      setTorPeerChecker(res as TorPeerCheckerStatus)
+      setTorPeerCheckerStatus(t('lightningOps.torPeerSaved'))
+    } catch (err: any) {
+      setTorPeerCheckerStatus(err?.message || t('lightningOps.torPeerSaveFailed'))
+    } finally {
+      setTorPeerCheckerBusy(false)
+    }
+  }
+
+  const handleRunTorPeerCheckerNow = async () => {
+    if (torPeerCheckerBusy) return
+    setTorPeerCheckerBusy(true)
+    setTorPeerCheckerStatus(t('lightningOps.torPeerRunning'))
+    try {
+      const res = await updateLnTorPeerChecker({ run_now: true })
+      setTorPeerChecker(res as TorPeerCheckerStatus)
+      const logsRes = await getLnTorPeerCheckerLogs()
+      const entries = (logsRes as any)?.entries
+      setTorPeerCheckerLogs(Array.isArray(entries) ? entries : [])
+      setTorPeerCheckerStatus(t('lightningOps.torPeerRunDone'))
+    } catch (err: any) {
+      setTorPeerCheckerStatus(err?.message || t('lightningOps.torPeerRunFailed'))
+    } finally {
+      setTorPeerCheckerBusy(false)
     }
   }
 
@@ -2648,6 +2789,108 @@ export default function LightningOps() {
           <p className="text-xs text-amber-200">
             {t('lightningOps.chanHealLastError')}: {chanHeal.last_error}
           </p>
+        )}
+      </div>
+
+      <div className="section-card space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold">{t('lightningOps.torPeerTitle')}</h3>
+            <p className="text-sm text-fog/60">{t('lightningOps.torPeerSubtitle')}</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className={`text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full ${badgeClass(torPeerCheckerTone())}`}>
+              {torPeerCheckerBadgeLabel()}
+            </span>
+            <button
+              className={`relative flex h-9 w-36 items-center rounded-full border border-white/10 bg-ink/60 px-2 transition ${torPeerCheckerBusy ? 'opacity-70' : 'hover:border-white/30'}`}
+              onClick={handleToggleTorPeerChecker}
+              type="button"
+              disabled={torPeerCheckerBusy}
+              aria-label={t('lightningOps.toggleTorPeerChecker')}
+            >
+              <span
+                className={`absolute top-1 h-7 w-16 rounded-full bg-glow shadow transition-all ${torPeerChecker?.enabled ? 'left-[70px]' : 'left-[6px]'}`}
+              />
+              <span className={`relative z-10 flex-1 text-center text-xs ${!torPeerChecker?.enabled ? 'text-ink' : 'text-fog/60'}`}>{t('common.disabled')}</span>
+              <span className={`relative z-10 flex-1 text-center text-xs ${torPeerChecker?.enabled ? 'text-ink' : 'text-fog/60'}`}>{t('common.enabled')}</span>
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-sm text-fog/70">
+            {t('lightningOps.torPeerInterval')}
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              className="input-field w-32"
+              type="number"
+              min={2}
+              max={168}
+              value={torPeerCheckerIntervalHours}
+              onChange={(e) => setTorPeerCheckerIntervalHours(e.target.value)}
+            />
+            <button
+              className="btn-secondary text-xs px-3 py-2"
+              type="button"
+              onClick={handleSaveTorPeerChecker}
+              disabled={torPeerCheckerBusy}
+            >
+              {t('common.save')}
+            </button>
+          </div>
+          <button className="btn-secondary text-xs px-3 py-2" type="button" onClick={handleRunTorPeerCheckerNow} disabled={torPeerCheckerBusy}>
+            {t('lightningOps.torPeerRunNow')}
+          </button>
+          <button
+            className="btn-secondary text-xs px-3 py-2"
+            type="button"
+            onClick={() => setTorPeerCheckerLogsOpen((open) => !open)}
+          >
+            {torPeerCheckerLogsOpen ? t('common.hide') : t('lightningOps.torPeerLogsShow', { count: torPeerCheckerLogs.length })}
+          </button>
+        </div>
+        {torPeerCheckerStatus && <p className="text-sm text-brass">{torPeerCheckerStatus}</p>}
+        <div className="grid gap-3 text-xs text-fog/70 lg:grid-cols-4">
+          <div>
+            {t('lightningOps.torPeerLastRun')}: <span className="text-fog">{formatAmbossTime(torPeerChecker?.last_ok_at)}</span>
+          </div>
+          <div>
+            {t('lightningOps.torPeerLastAttempt')}: <span className="text-fog">{formatAmbossTime(torPeerChecker?.last_attempt_at)}</span>
+          </div>
+          <div>
+            {t('lightningOps.torPeerLastChecked')}: <span className="text-fog">{torPeerChecker?.last_checked_count ?? 0}</span>
+          </div>
+          <div>
+            {t('lightningOps.torPeerLastSwitched')}: <span className="text-fog">{torPeerChecker?.last_switched_count ?? 0}</span>
+          </div>
+        </div>
+        {torPeerChecker?.last_error && (
+          <p className="text-xs text-amber-200">
+            {t('lightningOps.torPeerLastError')}: {torPeerChecker.last_error}
+          </p>
+        )}
+        {torPeerCheckerLogsOpen && (
+          <div className="rounded-2xl border border-white/10 bg-ink/60 p-3 max-h-[260px] overflow-y-auto">
+            {torPeerCheckerLogs.length ? (
+              <div className="space-y-2 text-xs text-fog/70">
+                {torPeerCheckerLogs.map((entry, idx) => (
+                  <p key={`${entry.ts}-${entry.pub_key || entry.alias}-${idx}`}>
+                    {t('lightningOps.torPeerLogLine', {
+                      ts: formatAmbossTime(entry.ts),
+                      alias: entry.alias || entry.pub_key || '-',
+                      result: entry.result || '-',
+                      detail: entry.detail || '-',
+                      from: entry.from_address || '-',
+                      to: entry.to_address || '-'
+                    })}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-fog/50">{t('lightningOps.torPeerLogsEmpty')}</p>
+            )}
+          </div>
         )}
       </div>
 

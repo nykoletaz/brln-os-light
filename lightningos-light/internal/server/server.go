@@ -37,6 +37,10 @@ type Server struct {
   htlcManagerMu sync.Mutex
   htlcManager *HtlcManager
   htlcManagerErr string
+  torPeerCheckerInitAt time.Time
+  torPeerCheckerMu sync.Mutex
+  torPeerChecker *TorPeerChecker
+  torPeerCheckerErr string
   autofeeInitAt time.Time
   autofeeMu sync.Mutex
   autofee *AutofeeService
@@ -63,6 +67,7 @@ func (s *Server) Run() error {
   s.initReports()
   s.initRebalance()
   s.initHTLCManager()
+  s.initTorPeerChecker()
   s.initAutofee()
   if s.chat != nil {
     s.chat.Start()
@@ -78,6 +83,9 @@ func (s *Server) Run() error {
   }
   if s.htlcManager != nil {
     s.htlcManager.Start()
+  }
+  if s.torPeerChecker != nil {
+    s.torPeerChecker.Start()
   }
   if s.autofee != nil {
     s.autofee.Start()

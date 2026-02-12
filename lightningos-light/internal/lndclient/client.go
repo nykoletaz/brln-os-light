@@ -1357,6 +1357,46 @@ func (c *Client) DisconnectPeer(ctx context.Context, pubkey string) error {
   return err
 }
 
+func (c *Client) GetNodeDetails(ctx context.Context, pubkey string) (NodeDetails, error) {
+  trimmed := strings.TrimSpace(pubkey)
+  if trimmed == "" {
+    return NodeDetails{}, errors.New("pubkey required")
+  }
+
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return NodeDetails{}, err
+  }
+  defer conn.Close()
+
+  client := lnrpc.NewLightningClient(conn)
+  info, err := client.GetNodeInfo(ctx, &lnrpc.NodeInfoRequest{PubKey: trimmed, IncludeChannels: false})
+  if err != nil {
+    return NodeDetails{}, err
+  }
+  node := info.GetNode()
+  if node == nil {
+    return NodeDetails{}, errors.New("node not found")
+  }
+
+  addresses := make([]NodeAddress, 0, len(node.Addresses))
+  for _, item := range node.Addresses {
+    if item == nil {
+      continue
+    }
+    addresses = append(addresses, NodeAddress{
+      Network: item.Network,
+      Addr: item.Addr,
+    })
+  }
+
+  return NodeDetails{
+    PubKey: trimmed,
+    Alias: node.Alias,
+    Addresses: addresses,
+  }, nil
+}
+
 func (c *Client) OpenChannel(ctx context.Context, pubkeyHex string, localFundingSat int64, closeAddress string, private bool, satPerVbyte int64) (string, error) {
   pubkeyHex = strings.TrimSpace(pubkeyHex)
   if pubkeyHex == "" {
@@ -1670,6 +1710,17 @@ type PeerInfo struct {
   SyncType string `json:"sync_type"`
   LastError string `json:"last_error"`
   LastErrorTime int64 `json:"last_error_time,omitempty"`
+}
+
+type NodeAddress struct {
+  Network string `json:"network"`
+  Addr string `json:"addr"`
+}
+
+type NodeDetails struct {
+  PubKey string `json:"pub_key"`
+  Alias string `json:"alias"`
+  Addresses []NodeAddress `json:"addresses,omitempty"`
 }
 
 type PendingChannelInfo struct {
