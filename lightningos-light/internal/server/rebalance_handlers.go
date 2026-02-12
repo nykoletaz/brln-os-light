@@ -31,6 +31,7 @@ type rebalanceConfigPayload struct {
   AmountProbeAdaptive *bool `json:"amount_probe_adaptive,omitempty"`
   AttemptTimeoutSec *int `json:"attempt_timeout_sec,omitempty"`
   RebalanceTimeoutSec *int `json:"rebalance_timeout_sec,omitempty"`
+  ManualRestartWatch *bool `json:"manual_restart_watch,omitempty"`
   MissionControlHalfLifeSec *int64 `json:"mc_half_life_sec,omitempty"`
   PaybackModeFlags *int `json:"payback_mode_flags,omitempty"`
   UnlockDays *int `json:"unlock_days,omitempty"`
@@ -163,6 +164,9 @@ func (s *Server) handleRebalanceConfigPost(w http.ResponseWriter, r *http.Reques
   }
   if payload.RebalanceTimeoutSec != nil {
     cfg.RebalanceTimeoutSec = *payload.RebalanceTimeoutSec
+  }
+  if payload.ManualRestartWatch != nil {
+    cfg.ManualRestartWatch = *payload.ManualRestartWatch
   }
   if payload.MissionControlHalfLifeSec != nil {
     cfg.MissionControlHalfLifeSec = *payload.MissionControlHalfLifeSec

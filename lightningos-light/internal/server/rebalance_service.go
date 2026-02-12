@@ -74,6 +74,7 @@ type RebalanceConfig struct {
   AmountProbeAdaptive bool `json:"amount_probe_adaptive"`
   AttemptTimeoutSec int `json:"attempt_timeout_sec"`
   RebalanceTimeoutSec int `json:"rebalance_timeout_sec"`
+  ManualRestartWatch bool `json:"manual_restart_watch"`
   MissionControlHalfLifeSec int64 `json:"mc_half_life_sec"`
   PaybackModeFlags int `json:"payback_mode_flags"`
   UnlockDays int `json:"unlock_days"`
@@ -285,6 +286,7 @@ func defaultRebalanceConfig() RebalanceConfig {
     AmountProbeAdaptive: true,
     AttemptTimeoutSec: 20,
     RebalanceTimeoutSec: 600,
+    ManualRestartWatch: false,
     MissionControlHalfLifeSec: 0,
     PaybackModeFlags: paybackModePayback | paybackModeTime | paybackModeCritical,
     UnlockDays: 14,
@@ -329,6 +331,7 @@ func (s *RebalanceService) Start() {
   s.resetSemaphore()
 
   go s.runAutoLoop()
+  go s.runManualRestartWatchLoop()
 }
 
 func (s *RebalanceService) ResolveChannel(ctx context.Context, channelID uint64, channelPoint string) (uint64, string, error) {
@@ -491,6 +494,75 @@ func (s *RebalanceService) runAutoLoop() {
         <-timer.C
       }
       return
+    }
+  }
+}
+
+func (s *RebalanceService) runManualRestartWatchLoop() {
+  interval := time.Duration(manualRestartCooldownSec) * time.Second
+  if interval <= 0 {
+    interval = time.Minute
+  }
+  timer := time.NewTimer(interval)
+  defer timer.Stop()
+  for {
+    select {
+    case <-timer.C:
+      s.runManualRestartWatch()
+      timer.Reset(interval)
+    case <-s.stop:
+      if !timer.Stop() {
+        <-timer.C
+      }
+      return
+    }
+  }
+}
+
+func (s *RebalanceService) runManualRestartWatch() {
+  cfg, err := s.loadConfig(context.Background())
+  if err != nil || !cfg.ManualRestartWatch {
+    return
+  }
+  if s.lnd == nil {
+    return
+  }
+  ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+  defer cancel()
+
+  settings, _ := s.loadChannelSettings(ctx)
+  exclusions, _ := s.loadExclusions(ctx)
+  ledger, _ := s.loadLedger(ctx)
+  _ = s.applyForwardDeltas(ctx, ledger)
+  revenueByChannel, _ := s.fetchChannelRevenue7d(ctx)
+
+  channels, err := s.lnd.ListChannels(ctx)
+  if err != nil {
+    return
+  }
+
+  for _, ch := range channels {
+    setting := settings[ch.ChannelID]
+    if !setting.ManualRestartEnabled {
+      continue
+    }
+    if s.isChannelBusy(ch.ChannelID) {
+      continue
+    }
+    snapshot := s.buildChannelSnapshot(ctx, cfg, false, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], exclusions[ch.ChannelID])
+    if !snapshot.EligibleAsTarget {
+      continue
+    }
+    deficit := computeDeficitAmount(ch, snapshot.TargetOutboundPct)
+    if deficit <= 0 {
+      continue
+    }
+    if cfg.MinAmountSat > 0 && deficit < cfg.MinAmountSat {
+      continue
+    }
+    _, err := s.startJob(ch.ChannelID, "manual", "auto-restart", 0, true)
+    if err != nil && err.Error() == "channel busy" {
+      continue
     }
   }
 }
@@ -3169,6 +3241,7 @@ end $$;
     amount_probe_adaptive boolean not null default true,
     attempt_timeout_sec integer not null default 20,
     rebalance_timeout_sec integer not null default 600,
+    manual_restart_watch boolean not null default false,
     mc_half_life_sec bigint not null default 0,
     payback_mode_flags integer not null default 7,
     unlock_days integer not null default 14,
@@ -3197,6 +3270,8 @@ end $$;
     add column if not exists attempt_timeout_sec integer not null default 20;
   alter table rebalance_config
     add column if not exists rebalance_timeout_sec integer not null default 600;
+  alter table rebalance_config
+    add column if not exists manual_restart_watch boolean not null default false;
   alter table rebalance_config
     add column if not exists mc_half_life_sec bigint not null default 0;
 
@@ -3316,7 +3391,7 @@ func (s *RebalanceService) loadConfig(ctx context.Context) (RebalanceConfig, err
 
   row := s.db.QueryRow(ctx, `
   select auto_enabled, scan_interval_sec, deadband_pct, source_min_local_pct, econ_ratio, econ_ratio_max_ppm, fee_limit_ppm, lost_profit, fail_tolerance_ppm, roi_min, daily_budget_pct,
-    max_concurrent, min_amount_sat, max_amount_sat, fee_ladder_steps, amount_probe_steps, amount_probe_adaptive, attempt_timeout_sec, rebalance_timeout_sec, mc_half_life_sec, payback_mode_flags,
+    max_concurrent, min_amount_sat, max_amount_sat, fee_ladder_steps, amount_probe_steps, amount_probe_adaptive, attempt_timeout_sec, rebalance_timeout_sec, manual_restart_watch, mc_half_life_sec, payback_mode_flags,
     unlock_days, critical_release_pct, critical_min_sources, critical_min_available_sats, critical_cycles
   from rebalance_config where id=$1`, rebalanceConfigID)
 
@@ -3341,6 +3416,7 @@ func (s *RebalanceService) loadConfig(ctx context.Context) (RebalanceConfig, err
     &cfg.AmountProbeAdaptive,
     &cfg.AttemptTimeoutSec,
     &cfg.RebalanceTimeoutSec,
+    &cfg.ManualRestartWatch,
     &cfg.MissionControlHalfLifeSec,
     &cfg.PaybackModeFlags,
     &cfg.UnlockDays,
@@ -3367,9 +3443,9 @@ func (s *RebalanceService) upsertConfig(ctx context.Context, cfg RebalanceConfig
   _, err := s.db.Exec(ctx, `
   insert into rebalance_config (
     id, auto_enabled, scan_interval_sec, deadband_pct, source_min_local_pct, econ_ratio, econ_ratio_max_ppm, fee_limit_ppm, lost_profit, fail_tolerance_ppm, roi_min, daily_budget_pct,
-    max_concurrent, min_amount_sat, max_amount_sat, fee_ladder_steps, amount_probe_steps, amount_probe_adaptive, attempt_timeout_sec, rebalance_timeout_sec, mc_half_life_sec, payback_mode_flags,
+    max_concurrent, min_amount_sat, max_amount_sat, fee_ladder_steps, amount_probe_steps, amount_probe_adaptive, attempt_timeout_sec, rebalance_timeout_sec, manual_restart_watch, mc_half_life_sec, payback_mode_flags,
     unlock_days, critical_release_pct, critical_min_sources, critical_min_available_sats, critical_cycles, updated_at
-  ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,now())
+  ) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,now())
    on conflict (id) do update set
     auto_enabled = excluded.auto_enabled,
     scan_interval_sec = excluded.scan_interval_sec,
@@ -3390,6 +3466,7 @@ func (s *RebalanceService) upsertConfig(ctx context.Context, cfg RebalanceConfig
     amount_probe_adaptive = excluded.amount_probe_adaptive,
     attempt_timeout_sec = excluded.attempt_timeout_sec,
     rebalance_timeout_sec = excluded.rebalance_timeout_sec,
+    manual_restart_watch = excluded.manual_restart_watch,
     mc_half_life_sec = excluded.mc_half_life_sec,
     payback_mode_flags = excluded.payback_mode_flags,
     unlock_days = excluded.unlock_days,
@@ -3399,7 +3476,7 @@ func (s *RebalanceService) upsertConfig(ctx context.Context, cfg RebalanceConfig
     critical_cycles = excluded.critical_cycles,
     updated_at = now()
   `, rebalanceConfigID, cfg.AutoEnabled, cfg.ScanIntervalSec, cfg.DeadbandPct, cfg.SourceMinLocalPct, cfg.EconRatio, cfg.EconRatioMaxPpm, cfg.FeeLimitPpm, cfg.LostProfit, cfg.FailTolerancePpm, cfg.ROIMin, cfg.DailyBudgetPct, cfg.MaxConcurrent,
-    cfg.MinAmountSat, cfg.MaxAmountSat, cfg.FeeLadderSteps, cfg.AmountProbeSteps, cfg.AmountProbeAdaptive, cfg.AttemptTimeoutSec, cfg.RebalanceTimeoutSec, cfg.MissionControlHalfLifeSec, cfg.PaybackModeFlags, cfg.UnlockDays, cfg.CriticalReleasePct, cfg.CriticalMinSources, cfg.CriticalMinAvailableSats, cfg.CriticalCycles,
+    cfg.MinAmountSat, cfg.MaxAmountSat, cfg.FeeLadderSteps, cfg.AmountProbeSteps, cfg.AmountProbeAdaptive, cfg.AttemptTimeoutSec, cfg.RebalanceTimeoutSec, cfg.ManualRestartWatch, cfg.MissionControlHalfLifeSec, cfg.PaybackModeFlags, cfg.UnlockDays, cfg.CriticalReleasePct, cfg.CriticalMinSources, cfg.CriticalMinAvailableSats, cfg.CriticalCycles,
   )
   return err
 }

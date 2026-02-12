@@ -1,4 +1,4 @@
-
+﻿
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -36,6 +36,7 @@ type RebalanceConfig = {
   amount_probe_adaptive: boolean
   attempt_timeout_sec: number
   rebalance_timeout_sec: number
+  manual_restart_watch: boolean
   mc_half_life_sec: number
   payback_mode_flags: number
   unlock_days: number
@@ -214,6 +215,7 @@ export default function RebalanceCenter() {
       amount_probe_adaptive: cfg.amount_probe_adaptive,
       attempt_timeout_sec: cfg.attempt_timeout_sec,
       rebalance_timeout_sec: cfg.rebalance_timeout_sec,
+      manual_restart_watch: cfg.manual_restart_watch,
       mc_half_life_sec: cfg.mc_half_life_sec,
       payback_mode_flags: cfg.payback_mode_flags,
       unlock_days: cfg.unlock_days,
@@ -389,6 +391,7 @@ export default function RebalanceCenter() {
           amount_probe_adaptive: nextConfig.amount_probe_adaptive ?? true,
           attempt_timeout_sec: nextConfig.attempt_timeout_sec || 20,
           rebalance_timeout_sec: nextConfig.rebalance_timeout_sec || 600,
+          manual_restart_watch: nextConfig.manual_restart_watch ?? false,
           mc_half_life_sec: nextConfig.mc_half_life_sec || 0
         }
         setServerConfig(normalizedConfig)
@@ -452,6 +455,7 @@ export default function RebalanceCenter() {
           amount_probe_adaptive: config.amount_probe_adaptive,
           attempt_timeout_sec: config.attempt_timeout_sec,
           rebalance_timeout_sec: config.rebalance_timeout_sec,
+          manual_restart_watch: config.manual_restart_watch,
           mc_half_life_sec: config.mc_half_life_sec,
           payback_mode_flags: config.payback_mode_flags,
           unlock_days: config.unlock_days,
@@ -749,7 +753,7 @@ export default function RebalanceCenter() {
                         </div>
                         <div>
                           {formatSkipReason(item.reason)}
-                          {' � '}
+                          {' · '}
                           {t('rebalanceCenter.overview.skipCalc', {
                             gain: formatSats(item.expected_gain_sat),
                             cost: formatSats(item.estimated_cost_sat),
@@ -785,7 +789,7 @@ export default function RebalanceCenter() {
                       </div>
                       <div>
                         {formatSkipReason(item.reason)}
-                        {' · '}
+                        {' Â· '}
                         {t('rebalanceCenter.overview.skipCalc', {
                           gain: formatSats(item.expected_gain_sat),
                           cost: formatSats(item.estimated_cost_sat),
@@ -1062,6 +1066,16 @@ export default function RebalanceCenter() {
               />
             </div>
             <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.manualRestartWatch')}>
+                <input
+                  type="checkbox"
+                  checked={config.manual_restart_watch}
+                  onChange={(e) => setConfig({ ...config, manual_restart_watch: e.target.checked })}
+                />
+                {t('rebalanceCenter.settings.manualRestartWatch')}
+              </label>
+            </div>
+            <div className="space-y-2">
               <label className="text-sm text-fog/70" title={t('rebalanceCenter.settingsHints.mcHalfLife')}>
                 {t('rebalanceCenter.settings.mcHalfLife')}
               </label>
@@ -1298,7 +1312,7 @@ export default function RebalanceCenter() {
                   </td>
                   <td className="py-3 pl-6">
                     <div>
-                      {t('rebalanceCenter.channels.feeOut', { value: ch.outgoing_fee_ppm })} ·{' '}
+                      {t('rebalanceCenter.channels.feeOut', { value: ch.outgoing_fee_ppm })} Â·{' '}
                       {t('rebalanceCenter.channels.feePeer', { value: ch.peer_fee_rate_ppm })}
                     </div>
                     <div className="text-xs text-fog/50">{t('rebalanceCenter.channels.spread', { value: ch.spread_ppm })}</div>
@@ -1352,7 +1366,7 @@ export default function RebalanceCenter() {
                         className="flex flex-col items-center gap-1 text-[10px] text-fog/60"
                         title={t('rebalanceCenter.channelsHints.rebalanceRestart')}
                       >
-                        <span className="text-sm">⟳</span>
+                        <span className="text-sm">âŸ³</span>
                         <input
                           type="checkbox"
                           checked={manualRestart[ch.channel_point] === true}
@@ -1502,7 +1516,7 @@ export default function RebalanceCenter() {
                           ? t('rebalanceCenter.history.source.manual')
                           : job.source}{' '}
                       <span className="text-xs text-fog/50">
-                        · {formatTimestamp(job.completed_at || job.created_at)}
+                        Â· {formatTimestamp(job.completed_at || job.created_at)}
                       </span>
                     </p>
                     <p className="text-xs text-fog/70">{t('rebalanceCenter.history.targetLabel', { value: job.target_peer_alias || job.target_channel_point })}</p>
@@ -1599,4 +1613,6 @@ export default function RebalanceCenter() {
     </section>
   )
 }
+
+
 

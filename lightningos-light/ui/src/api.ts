@@ -261,6 +261,7 @@ export const updateRebalanceConfig = (payload: {
   amount_probe_adaptive?: boolean
   attempt_timeout_sec?: number
   rebalance_timeout_sec?: number
+  manual_restart_watch?: boolean
   mc_half_life_sec?: number
   payback_mode_flags?: number
   unlock_days?: number
