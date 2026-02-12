@@ -1276,9 +1276,19 @@ export default function RebalanceCenter() {
             </thead>
             <tbody>
               {sortedChannels.map((ch) => {
-                const meetsRoi = !config || config.roi_min <= 0 || !ch.roi_estimate_valid || ch.roi_estimate >= config.roi_min
-                const isAutoTarget = ch.eligible_as_target && ch.auto_enabled && meetsRoi
                 const scoreMeta = config ? computeChannelScore(ch, config.econ_ratio) : null
+                const expectedRoiValid = scoreMeta
+                  ? scoreMeta.estimatedCost > 0
+                    ? true
+                    : ch.target_amount_sat > 0 && ch.outgoing_fee_ppm > ch.peer_fee_rate_ppm
+                      ? false
+                      : true
+                  : true
+                const expectedRoi = scoreMeta ? (scoreMeta.estimatedCost > 0 ? scoreMeta.expectedRoi : 0) : 0
+                const meetsRoi =
+                  !config || config.roi_min <= 0 || !expectedRoiValid || expectedRoi >= config.roi_min
+                const passesProfit = !scoreMeta || !(scoreMeta.expectedGain > 0 && scoreMeta.estimatedCost > 0 && scoreMeta.expectedGain < scoreMeta.estimatedCost)
+                const isAutoTarget = ch.eligible_as_target && ch.auto_enabled && meetsRoi && passesProfit
                 const scoreTitle =
                   scoreMeta
                     ? t('rebalanceCenter.channels.scoreHint', {
@@ -1392,11 +1402,11 @@ export default function RebalanceCenter() {
                         {t('rebalanceCenter.channels.excludeSource')}
                       </label>
                     </div>
-                      <div className="text-xs text-fog/50">
-                        {ch.roi_estimate_valid
-                          ? t('rebalanceCenter.channels.roiEstimate', { value: formatRoi(ch.roi_estimate) })
-                          : t('rebalanceCenter.channels.roiEstimateNA')}
-                      </div>
+                    <div className="text-xs text-fog/50">
+                      {scoreMeta && expectedRoiValid
+                        ? t('rebalanceCenter.channels.roiEstimate', { value: formatRoi(expectedRoi) })
+                        : t('rebalanceCenter.channels.roiEstimateNA')}
+                    </div>
                     </td>
                   </tr>
                 )
