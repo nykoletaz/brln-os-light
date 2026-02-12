@@ -228,13 +228,6 @@ func (m *HtlcManager) Start() {
   }
 
   go m.run()
-
-  m.mu.Lock()
-  enabled := m.config.Enabled
-  m.mu.Unlock()
-  if enabled {
-    m.trigger(false)
-  }
 }
 
 func (m *HtlcManager) Stop() {
@@ -299,9 +292,6 @@ func (m *HtlcManager) UpdateConfig(ctx context.Context, update HtlcManagerConfig
     case intervalUpdated <- struct{}{}:
     default:
     }
-  }
-  if current.Enabled {
-    m.trigger(false)
   }
   if update.RunNow {
     m.trigger(true)
