@@ -1006,7 +1006,7 @@ func (s *AutofeeService) Run(ctx context.Context, dryRun bool, reason string) er
     s.setLastError(err)
     return err
   }
-  if !cfg.Enabled {
+  if !cfg.Enabled && reason != "manual" {
     return nil
   }
 
