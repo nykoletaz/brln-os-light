@@ -119,6 +119,16 @@ export const signLnMessage = (payload: { message: string }) =>
 export const getLnChanHeal = () => request('/api/lnops/channel/auto-heal')
 export const updateLnChanHeal = (payload: { enabled?: boolean; interval_sec?: number }) =>
   request('/api/lnops/channel/auto-heal', { method: 'POST', body: JSON.stringify(payload) })
+export const getLnHtlcManager = () => request('/api/lnops/channel/htlc-manager')
+export const updateLnHtlcManager = (payload: {
+  enabled?: boolean
+  interval_hours?: number
+  min_htlc_sat?: number
+  max_local_pct?: number
+  run_now?: boolean
+}) => request('/api/lnops/channel/htlc-manager', { method: 'POST', body: JSON.stringify(payload) })
+export const getLnHtlcManagerLogs = (limit = 100) =>
+  request(`/api/lnops/channel/htlc-manager/logs?limit=${encodeURIComponent(String(limit))}`)
 export const getAutofeeConfig = () => request('/api/lnops/autofee/config')
 export const updateAutofeeConfig = (payload: {
   enabled?: boolean

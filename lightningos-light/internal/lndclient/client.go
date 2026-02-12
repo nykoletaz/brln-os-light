@@ -153,8 +153,24 @@ type ChannelPolicy struct {
   BaseFeeMsat int64
   FeeRatePpm int64
   TimeLockDelta int64
+  MinHtlcMsat uint64
+  MaxHtlcMsat uint64
   InboundBaseMsat int64
   InboundFeeRatePpm int64
+}
+
+type UpdateChannelPolicyParams struct {
+  ChannelPoint string
+  ApplyAll bool
+  BaseFeeMsat int64
+  FeeRatePpm int64
+  TimeLockDelta int64
+  InboundEnabled bool
+  InboundBaseMsat int64
+  InboundFeeRatePpm int64
+  MaxHtlcMsat *uint64
+  MinHtlcMsat *uint64
+  MinHtlcMsatSpecified bool
 }
 
 type infoSnapshot struct {
@@ -414,6 +430,8 @@ func (c *Client) GetChannelPolicy(ctx context.Context, channelPoint string) (Cha
     BaseFeeMsat: policy.FeeBaseMsat,
     FeeRatePpm: policy.FeeRateMilliMsat,
     TimeLockDelta: int64(policy.TimeLockDelta),
+    MinHtlcMsat: maxInt64ToUint64(policy.MinHtlc),
+    MaxHtlcMsat: policy.MaxHtlcMsat,
     InboundBaseMsat: int64(policy.InboundFeeBaseMsat),
     InboundFeeRatePpm: int64(policy.InboundFeeRateMilliMsat),
   }, nil
@@ -1397,6 +1415,19 @@ func (c *Client) CloseChannel(ctx context.Context, channelPoint string, force bo
 }
 
 func (c *Client) UpdateChannelFees(ctx context.Context, channelPoint string, applyAll bool, baseFeeMsat int64, feeRatePpm int64, timeLockDelta int64, inboundEnabled bool, inboundBaseMsat int64, inboundFeeRatePpm int64) error {
+  return c.UpdateChannelPolicy(ctx, UpdateChannelPolicyParams{
+    ChannelPoint: channelPoint,
+    ApplyAll: applyAll,
+    BaseFeeMsat: baseFeeMsat,
+    FeeRatePpm: feeRatePpm,
+    TimeLockDelta: timeLockDelta,
+    InboundEnabled: inboundEnabled,
+    InboundBaseMsat: inboundBaseMsat,
+    InboundFeeRatePpm: inboundFeeRatePpm,
+  })
+}
+
+func (c *Client) UpdateChannelPolicy(ctx context.Context, params UpdateChannelPolicyParams) error {
   conn, err := c.dial(ctx, true)
   if err != nil {
     return err
@@ -1404,26 +1435,34 @@ func (c *Client) UpdateChannelFees(ctx context.Context, channelPoint string, app
   defer conn.Close()
 
   req := &lnrpc.PolicyUpdateRequest{
-    BaseFeeMsat: baseFeeMsat,
-    FeeRatePpm: uint32(feeRatePpm),
-    TimeLockDelta: uint32(timeLockDelta),
+    BaseFeeMsat: params.BaseFeeMsat,
+    FeeRatePpm: uint32(params.FeeRatePpm),
+    TimeLockDelta: uint32(params.TimeLockDelta),
   }
-  if inboundEnabled {
-    if inboundBaseMsat < math.MinInt32 || inboundBaseMsat > math.MaxInt32 {
+  if params.InboundEnabled {
+    if params.InboundBaseMsat < math.MinInt32 || params.InboundBaseMsat > math.MaxInt32 {
       return fmt.Errorf("inbound base fee out of range")
     }
-    if inboundFeeRatePpm < math.MinInt32 || inboundFeeRatePpm > math.MaxInt32 {
+    if params.InboundFeeRatePpm < math.MinInt32 || params.InboundFeeRatePpm > math.MaxInt32 {
       return fmt.Errorf("inbound fee rate out of range")
     }
     req.InboundFee = &lnrpc.InboundFee{
-      BaseFeeMsat: int32(inboundBaseMsat),
-      FeeRatePpm: int32(inboundFeeRatePpm),
+      BaseFeeMsat: int32(params.InboundBaseMsat),
+      FeeRatePpm: int32(params.InboundFeeRatePpm),
     }
   }
-  if applyAll {
+  if params.MaxHtlcMsat != nil {
+    req.MaxHtlcMsat = *params.MaxHtlcMsat
+  }
+  if params.MinHtlcMsat != nil {
+    req.MinHtlcMsat = *params.MinHtlcMsat
+  }
+  req.MinHtlcMsatSpecified = params.MinHtlcMsatSpecified
+
+  if params.ApplyAll {
     req.Scope = &lnrpc.PolicyUpdateRequest_Global{Global: true}
   } else {
-    cp, err := parseChannelPoint(channelPoint)
+    cp, err := parseChannelPoint(params.ChannelPoint)
     if err != nil {
       return err
     }
@@ -1546,6 +1585,13 @@ func uniqueStrings(items []string) []string {
     out = append(out, trimmed)
   }
   return out
+}
+
+func maxInt64ToUint64(v int64) uint64 {
+  if v <= 0 {
+    return 0
+  }
+  return uint64(v)
 }
 
 func addressTypeLabel(addrType lnrpc.AddressType) string {

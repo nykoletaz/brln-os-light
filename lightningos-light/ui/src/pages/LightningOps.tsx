@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeResults, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnPeers, getMempoolFees, openChannel, runAutofee, signLnMessage, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus } from '../api'
+import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeResults, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnHtlcManager, getLnHtlcManagerLogs, getLnPeers, getMempoolFees, openChannel, runAutofee, signLnMessage, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus, updateLnHtlcManager } from '../api'
 
 type Channel = {
   channel_point: string
@@ -70,6 +70,31 @@ type ChanHealStatus = {
   last_attempt_at?: string
   interval_sec?: number
   last_updated?: number
+}
+
+type HtlcManagerStatus = {
+  enabled: boolean
+  status: string
+  interval_hours: number
+  min_htlc_sat: number
+  max_local_pct: number
+  last_attempt_at?: string
+  last_ok_at?: string
+  last_error?: string
+  last_error_at?: string
+  last_changed_count?: number
+}
+
+type HtlcManagerLogEntry = {
+  ts: string
+  alias: string
+  channel_id: number
+  channel_point: string
+  old_min_msat: number
+  new_min_msat: number
+  old_max_msat: number
+  new_max_msat: number
+  result: string
 }
 
 type BitcoinLocalCadenceBucket = {
@@ -205,6 +230,14 @@ export default function LightningOps() {
   const [chanHealStatus, setChanHealStatus] = useState('')
   const [chanHealBusy, setChanHealBusy] = useState(false)
   const [chanHealInterval, setChanHealInterval] = useState('300')
+  const [htlcManager, setHtlcManager] = useState<HtlcManagerStatus | null>(null)
+  const [htlcManagerStatus, setHtlcManagerStatus] = useState('')
+  const [htlcManagerBusy, setHtlcManagerBusy] = useState(false)
+  const [htlcManagerIntervalHours, setHtlcManagerIntervalHours] = useState('4')
+  const [htlcManagerMinSat, setHtlcManagerMinSat] = useState('1')
+  const [htlcManagerMaxPct, setHtlcManagerMaxPct] = useState('0')
+  const [htlcManagerLogs, setHtlcManagerLogs] = useState<HtlcManagerLogEntry[]>([])
+  const [htlcManagerLogsOpen, setHtlcManagerLogsOpen] = useState(false)
   const [signMessage, setSignMessage] = useState('')
   const [signSignature, setSignSignature] = useState('')
   const [signStatus, setSignStatus] = useState('')
@@ -796,6 +829,13 @@ export default function LightningOps() {
     return 'warn'
   }
 
+  const htlcManagerTone = (): 'ok' | 'warn' | 'muted' => {
+    if (!htlcManager?.enabled) return 'muted'
+    if (htlcManager?.status === 'ok') return 'ok'
+    if (htlcManager?.status === 'checking') return 'muted'
+    return 'warn'
+  }
+
   const badgeClass = (tone: 'ok' | 'warn' | 'muted') => {
     if (tone === 'ok') {
       return 'bg-emerald-500/15 text-emerald-200 border border-emerald-400/30'
@@ -820,6 +860,13 @@ export default function LightningOps() {
     return t('common.check')
   }
 
+  const htlcManagerBadgeLabel = () => {
+    if (!htlcManager?.enabled) return t('common.disabled')
+    if (htlcManager?.status === 'ok') return t('common.ok')
+    if (htlcManager?.status === 'checking') return t('common.check')
+    return t('common.check')
+  }
+
   const ambossURL = (pubkey: string) => `https://amboss.space/node/${pubkey}`
 
   const load = async () => {
@@ -827,12 +874,15 @@ export default function LightningOps() {
     setPeerListStatus(t('lightningOps.loadingPeers'))
     setAmbossStatus(t('lightningOps.ambossHealthLoading'))
     setChanHealStatus(t('lightningOps.chanHealLoading'))
+    setHtlcManagerStatus(t('lightningOps.htlcManagerLoading'))
     setAutofeeMessage(t('lightningOps.autofeeLoading'))
-    const [channelsResult, peersResult, ambossResult, chanHealResult, bitcoinLocalResult, autofeeConfigResult, autofeeStatusResult, autofeeChannelsResult, autofeeResultsResult] = await Promise.allSettled([
+    const [channelsResult, peersResult, ambossResult, chanHealResult, htlcManagerResult, htlcManagerLogsResult, bitcoinLocalResult, autofeeConfigResult, autofeeStatusResult, autofeeChannelsResult, autofeeResultsResult] = await Promise.allSettled([
       getLnChannels(),
       getLnPeers(),
       getAmbossHealth(),
       getLnChanHeal(),
+      getLnHtlcManager(),
+      getLnHtlcManagerLogs(),
       getBitcoinLocalStatus(),
       getAutofeeConfig(),
       getAutofeeStatus(),
@@ -878,6 +928,27 @@ export default function LightningOps() {
     } else {
       const message = (chanHealResult.reason as any)?.message || t('lightningOps.chanHealStatusUnavailable')
       setChanHealStatus(message)
+    }
+    if (htlcManagerResult.status === 'fulfilled') {
+      const payload = htlcManagerResult.value as HtlcManagerStatus
+      setHtlcManager(payload)
+      if (payload?.interval_hours) {
+        setHtlcManagerIntervalHours(String(payload.interval_hours))
+      }
+      if (payload?.min_htlc_sat) {
+        setHtlcManagerMinSat(String(payload.min_htlc_sat))
+      }
+      setHtlcManagerMaxPct(String(payload?.max_local_pct ?? 0))
+      setHtlcManagerStatus('')
+    } else {
+      const message = (htlcManagerResult.reason as any)?.message || t('lightningOps.htlcManagerStatusUnavailable')
+      setHtlcManagerStatus(message)
+    }
+    if (htlcManagerLogsResult.status === 'fulfilled') {
+      const entries = (htlcManagerLogsResult.value as any)?.entries
+      setHtlcManagerLogs(Array.isArray(entries) ? entries : [])
+    } else if (htlcManagerResult.status === 'fulfilled') {
+      setHtlcManagerLogs([])
     }
     if (bitcoinLocalResult.status === 'fulfilled') {
       setBitcoinLocal(bitcoinLocalResult.value as BitcoinLocalStatus)
@@ -969,9 +1040,40 @@ export default function LightningOps() {
           setChanHealStatus(err?.message || t('lightningOps.chanHealStatusUnavailable'))
         })
     }
+    const fetchHtlcManager = () => {
+      getLnHtlcManager()
+        .then((data) => {
+          if (!mounted) return
+          const payload = data as HtlcManagerStatus
+          setHtlcManager(payload)
+          if (payload?.interval_hours) {
+            setHtlcManagerIntervalHours(String(payload.interval_hours))
+          }
+          if (payload?.min_htlc_sat) {
+            setHtlcManagerMinSat(String(payload.min_htlc_sat))
+          }
+          setHtlcManagerMaxPct(String(payload?.max_local_pct ?? 0))
+          setHtlcManagerStatus('')
+        })
+        .catch((err: any) => {
+          if (!mounted) return
+          setHtlcManagerStatus(err?.message || t('lightningOps.htlcManagerStatusUnavailable'))
+        })
+      getLnHtlcManagerLogs()
+        .then((data: any) => {
+          if (!mounted) return
+          const entries = data?.entries
+          setHtlcManagerLogs(Array.isArray(entries) ? entries : [])
+        })
+        .catch(() => {
+          if (!mounted) return
+          setHtlcManagerLogs([])
+        })
+    }
     const timer = window.setInterval(() => {
       fetchAmboss()
       fetchChanHeal()
+      fetchHtlcManager()
     }, 30000)
     return () => {
       mounted = false
@@ -1321,6 +1423,74 @@ export default function LightningOps() {
       setChanHealStatus(err?.message || t('lightningOps.chanHealSaveFailed'))
     } finally {
       setChanHealBusy(false)
+    }
+  }
+
+  const handleToggleHtlcManager = async () => {
+    if (htlcManagerBusy) return
+    const nextEnabled = !htlcManager?.enabled
+    setHtlcManagerBusy(true)
+    setHtlcManagerStatus(t('lightningOps.htlcManagerSaving'))
+    try {
+      const res = await updateLnHtlcManager({ enabled: nextEnabled })
+      setHtlcManager(res as HtlcManagerStatus)
+      setHtlcManagerStatus(nextEnabled ? t('lightningOps.htlcManagerEnabled') : t('lightningOps.htlcManagerDisabled'))
+    } catch (err: any) {
+      setHtlcManagerStatus(err?.message || t('lightningOps.htlcManagerSaveFailed'))
+    } finally {
+      setHtlcManagerBusy(false)
+    }
+  }
+
+  const handleSaveHtlcManager = async () => {
+    if (htlcManagerBusy) return
+    const intervalHours = Number(htlcManagerIntervalHours || 0)
+    const minSat = Number(htlcManagerMinSat || 0)
+    const maxPct = Number(htlcManagerMaxPct || 0)
+    if (!intervalHours || intervalHours < 1 || intervalHours > 48) {
+      setHtlcManagerStatus(t('lightningOps.htlcManagerIntervalInvalid'))
+      return
+    }
+    if (!minSat || minSat < 1) {
+      setHtlcManagerStatus(t('lightningOps.htlcManagerMinInvalid'))
+      return
+    }
+    if (maxPct < 0) {
+      setHtlcManagerStatus(t('lightningOps.htlcManagerMaxPctInvalid'))
+      return
+    }
+    setHtlcManagerBusy(true)
+    setHtlcManagerStatus(t('lightningOps.htlcManagerSaving'))
+    try {
+      const res = await updateLnHtlcManager({
+        interval_hours: intervalHours,
+        min_htlc_sat: minSat,
+        max_local_pct: maxPct
+      })
+      setHtlcManager(res as HtlcManagerStatus)
+      setHtlcManagerStatus(t('lightningOps.htlcManagerSaved'))
+    } catch (err: any) {
+      setHtlcManagerStatus(err?.message || t('lightningOps.htlcManagerSaveFailed'))
+    } finally {
+      setHtlcManagerBusy(false)
+    }
+  }
+
+  const handleRunHtlcManagerNow = async () => {
+    if (htlcManagerBusy) return
+    setHtlcManagerBusy(true)
+    setHtlcManagerStatus(t('lightningOps.htlcManagerRunning'))
+    try {
+      const res = await updateLnHtlcManager({ run_now: true })
+      setHtlcManager(res as HtlcManagerStatus)
+      const logsRes = await getLnHtlcManagerLogs()
+      const entries = (logsRes as any)?.entries
+      setHtlcManagerLogs(Array.isArray(entries) ? entries : [])
+      setHtlcManagerStatus(t('lightningOps.htlcManagerRunDone'))
+    } catch (err: any) {
+      setHtlcManagerStatus(err?.message || t('lightningOps.htlcManagerRunFailed'))
+    } finally {
+      setHtlcManagerBusy(false)
     }
   }
 
@@ -2250,6 +2420,120 @@ export default function LightningOps() {
           <button className="btn-secondary" onClick={handleUpdateFees}>{t('lightningOps.updateFees')}</button>
           {feeStatus && <p className="text-sm text-brass">{feeStatus}</p>}
         </div>
+      </div>
+
+      <div className="section-card space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold">{t('lightningOps.htlcManagerTitle')}</h3>
+            <p className="text-sm text-fog/60">{t('lightningOps.htlcManagerSubtitle')}</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className={`text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full ${badgeClass(htlcManagerTone())}`}>
+              {htlcManagerBadgeLabel()}
+            </span>
+            <button
+              className={`relative flex h-9 w-36 items-center rounded-full border border-white/10 bg-ink/60 px-2 transition ${htlcManagerBusy ? 'opacity-70' : 'hover:border-white/30'}`}
+              onClick={handleToggleHtlcManager}
+              type="button"
+              disabled={htlcManagerBusy}
+              aria-label={t('lightningOps.toggleHtlcManager')}
+            >
+              <span
+                className={`absolute top-1 h-7 w-16 rounded-full bg-glow shadow transition-all ${htlcManager?.enabled ? 'left-[70px]' : 'left-[6px]'}`}
+              />
+              <span className={`relative z-10 flex-1 text-center text-xs ${!htlcManager?.enabled ? 'text-ink' : 'text-fog/60'}`}>{t('common.disabled')}</span>
+              <span className={`relative z-10 flex-1 text-center text-xs ${htlcManager?.enabled ? 'text-ink' : 'text-fog/60'}`}>{t('common.enabled')}</span>
+            </button>
+          </div>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-3">
+          <label className="text-sm text-fog/70">
+            {t('lightningOps.htlcManagerMinSat')}
+            <input
+              className="input-field mt-2"
+              type="number"
+              min={1}
+              value={htlcManagerMinSat}
+              onChange={(e) => setHtlcManagerMinSat(e.target.value)}
+            />
+          </label>
+          <label className="text-sm text-fog/70">
+            {t('lightningOps.htlcManagerMaxPct')}
+            <input
+              className="input-field mt-2"
+              type="number"
+              min={0}
+              value={htlcManagerMaxPct}
+              onChange={(e) => setHtlcManagerMaxPct(e.target.value)}
+            />
+          </label>
+          <label className="text-sm text-fog/70">
+            {t('lightningOps.htlcManagerInterval')}
+            <input
+              className="input-field mt-2"
+              type="number"
+              min={1}
+              max={48}
+              value={htlcManagerIntervalHours}
+              onChange={(e) => setHtlcManagerIntervalHours(e.target.value)}
+            />
+          </label>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button className="btn-secondary text-xs px-3 py-2" type="button" onClick={handleSaveHtlcManager} disabled={htlcManagerBusy}>
+            {t('common.save')}
+          </button>
+          <button className="btn-secondary text-xs px-3 py-2" type="button" onClick={handleRunHtlcManagerNow} disabled={htlcManagerBusy}>
+            {t('lightningOps.htlcManagerRunNow')}
+          </button>
+          <button
+            className="btn-secondary text-xs px-3 py-2"
+            type="button"
+            onClick={() => setHtlcManagerLogsOpen((open) => !open)}
+          >
+            {htlcManagerLogsOpen ? t('common.hide') : t('lightningOps.htlcManagerLogsShow', { count: htlcManagerLogs.length })}
+          </button>
+        </div>
+        {htlcManagerStatus && <p className="text-sm text-brass">{htlcManagerStatus}</p>}
+        <div className="grid gap-3 text-xs text-fog/70 lg:grid-cols-3">
+          <div>
+            {t('lightningOps.htlcManagerLastRun')}: <span className="text-fog">{formatAmbossTime(htlcManager?.last_ok_at)}</span>
+          </div>
+          <div>
+            {t('lightningOps.htlcManagerLastAttempt')}: <span className="text-fog">{formatAmbossTime(htlcManager?.last_attempt_at)}</span>
+          </div>
+          <div>
+            {t('lightningOps.htlcManagerLastChanged')}: <span className="text-fog">{htlcManager?.last_changed_count ?? 0}</span>
+          </div>
+        </div>
+        {htlcManager?.last_error && (
+          <p className="text-xs text-amber-200">
+            {t('lightningOps.htlcManagerLastError')}: {htlcManager.last_error}
+          </p>
+        )}
+        {htlcManagerLogsOpen && (
+          <div className="rounded-2xl border border-white/10 bg-ink/60 p-3 max-h-[260px] overflow-y-auto">
+            {htlcManagerLogs.length ? (
+              <div className="space-y-2 text-xs text-fog/70">
+                {htlcManagerLogs.map((entry, idx) => (
+                  <p key={`${entry.ts}-${entry.channel_point}-${idx}`}>
+                    {t('lightningOps.htlcManagerLogLine', {
+                      ts: formatAmbossTime(entry.ts),
+                      alias: entry.alias || entry.channel_point,
+                      oldMinSat: Math.round((entry.old_min_msat || 0) / 1000),
+                      newMinSat: Math.round((entry.new_min_msat || 0) / 1000),
+                      oldMaxSat: Math.round((entry.old_max_msat || 0) / 1000),
+                      newMaxSat: Math.round((entry.new_max_msat || 0) / 1000)
+                    })}
+                  </p>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-fog/50">{t('lightningOps.htlcManagerLogsEmpty')}</p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="section-card space-y-4">

@@ -1921,6 +1921,8 @@ func (s *Server) handleLNChannelFees(w http.ResponseWriter, r *http.Request) {
     "base_fee_msat": policy.BaseFeeMsat,
     "fee_rate_ppm": policy.FeeRatePpm,
     "time_lock_delta": policy.TimeLockDelta,
+    "min_htlc_msat": policy.MinHtlcMsat,
+    "max_htlc_msat": policy.MaxHtlcMsat,
     "inbound_base_msat": policy.InboundBaseMsat,
     "inbound_fee_rate_ppm": policy.InboundFeeRatePpm,
   })

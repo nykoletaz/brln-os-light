@@ -33,6 +33,10 @@ type Server struct {
   rebalanceInitAt time.Time
   rebalance *RebalanceService
   rebalanceErr string
+  htlcManagerInitAt time.Time
+  htlcManagerMu sync.Mutex
+  htlcManager *HtlcManager
+  htlcManagerErr string
   autofeeInitAt time.Time
   autofeeMu sync.Mutex
   autofee *AutofeeService
@@ -58,6 +62,7 @@ func (s *Server) Run() error {
   s.initNotifications()
   s.initReports()
   s.initRebalance()
+  s.initHTLCManager()
   s.initAutofee()
   if s.chat != nil {
     s.chat.Start()
@@ -70,6 +75,9 @@ func (s *Server) Run() error {
   }
   if s.rebalance != nil {
     s.rebalance.Start()
+  }
+  if s.htlcManager != nil {
+    s.htlcManager.Start()
   }
   if s.autofee != nil {
     s.autofee.Start()
