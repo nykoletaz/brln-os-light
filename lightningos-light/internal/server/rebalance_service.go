@@ -45,6 +45,10 @@ const (
 )
 
 const (
+  autoTargetCooldownMin = 10 * time.Minute
+)
+
+const (
   paybackModePayback  = 1 << 0
   paybackModeTime     = 1 << 1
   paybackModeCritical = 1 << 2
@@ -684,6 +688,29 @@ func (s *RebalanceService) runAutoScan() {
     return a.Channel.ChannelID < b.Channel.ChannelID
   })
 
+  cooldown := time.Duration(cfg.ScanIntervalSec) * time.Second
+  if cooldown <= 0 {
+    cooldown = autoTargetCooldownMin
+  } else if cooldown < autoTargetCooldownMin {
+    cooldown = autoTargetCooldownMin
+  }
+  recentSkipped := 0
+  if len(candidates) > 1 {
+    filtered := make([]rebalanceTarget, 0, len(candidates))
+    for _, target := range candidates {
+      if !target.LastAutoAt.IsZero() && scanAt.Sub(target.LastAutoAt) < cooldown {
+        recentSkipped++
+        continue
+      }
+      filtered = append(filtered, target)
+    }
+    if len(filtered) > 0 {
+      candidates = filtered
+    } else {
+      recentSkipped = 0
+    }
+  }
+
   budget, spentAuto, _, _ := s.getDailyBudget(ctx)
   remaining := budget - spentAuto
   if remaining < 0 {
@@ -700,6 +727,9 @@ func (s *RebalanceService) runAutoScan() {
       return
     }
     skipReasons[key]++
+  }
+  for i := 0; i < recentSkipped; i++ {
+    noteSkip("recently_attempted")
   }
 
   for _, target := range candidates {
@@ -2867,6 +2897,7 @@ func buildScanDetail(reasons map[string]int, remaining int64) string {
   ordered := []reasonEntry{
     {key: "channel_busy", label: "channel busy"},
     {key: "target_already_balanced", label: "target already balanced"},
+    {key: "recently_attempted", label: "recently attempted"},
     {key: "fee_cap_zero", label: "fee cap zero"},
     {key: "budget_below_min", label: "budget below min amount"},
     {key: "budget_too_low", label: "budget too low"},
