@@ -1085,6 +1085,7 @@
       "topScore": "Top economic score: {{value}}",
         "profitSkipped": "Skipped by profit guardrail: {{count}}",
         "skipDetails": "Details",
+        "showAllDetails": "Show all ({{count}} more)",
         "skipReasonProfit": "Profit guardrail (gain < cost)",
         "skipReasonRoi": "ROI below minimum",
         "skipReasonBusy": "Channel busy",

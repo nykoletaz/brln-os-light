@@ -1085,6 +1085,7 @@
       "topScore": "Score econômico (topo): {{value}}",
       "profitSkipped": "Pulados pelo guardrail de lucro: {{count}}",
       "skipDetails": "Detalhes",
+      "showAllDetails": "Mostrar todos (mais {{count}})",
         "skipReasonProfit": "Guardrail de lucro (ganho < custo)",
         "skipReasonRoi": "ROI abaixo do mínimo",
         "skipReasonBusy": "Canal ocupado",

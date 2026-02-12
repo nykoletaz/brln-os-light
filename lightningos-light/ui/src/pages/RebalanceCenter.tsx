@@ -178,6 +178,8 @@ export default function RebalanceCenter() {
   const [channelSort, setChannelSort] = useState<'economic' | 'emptiest'>('economic')
   const [skipDetailsOpen, setSkipDetailsOpen] = useState(false)
   const [scanDetailsOpen, setScanDetailsOpen] = useState(false)
+  const [scanDetailsReason, setScanDetailsReason] = useState('all')
+  const [scanDetailsShowAll, setScanDetailsShowAll] = useState(false)
   const configRef = useRef<RebalanceConfig | null>(null)
   const autoOpenRef = useRef(false)
 
@@ -584,10 +586,33 @@ export default function RebalanceCenter() {
     if (!overview?.last_scan_skipped) return []
     return overview.last_scan_skipped.filter((item) => item.reason === 'profit_guardrail')
   }, [overview])
-  const diagnosticSkipDetails = useMemo(() => {
-    if (!overview?.last_scan_skipped) return []
-    return overview.last_scan_skipped.filter((item) => item.reason !== 'profit_guardrail')
+  const diagnosticSkipGroups = useMemo(() => {
+    const groups: Record<string, RebalanceScanSkip[]> = {}
+    if (!overview?.last_scan_skipped) return groups
+    overview.last_scan_skipped.forEach((item) => {
+      if (item.reason === 'profit_guardrail') return
+      if (!groups[item.reason]) {
+        groups[item.reason] = []
+      }
+      groups[item.reason].push(item)
+    })
+    return groups
   }, [overview])
+  const diagnosticReasons = useMemo(() => {
+    return Object.entries(diagnosticSkipGroups).map(([reason, items]) => ({
+      reason,
+      count: items.length
+    }))
+  }, [diagnosticSkipGroups])
+  const diagnosticSkipTotal = useMemo(() => {
+    return diagnosticReasons.reduce((sum, entry) => sum + entry.count, 0)
+  }, [diagnosticReasons])
+  const diagnosticSkipDetails = useMemo(() => {
+    if (scanDetailsReason === 'all') {
+      return Object.values(diagnosticSkipGroups).flat()
+    }
+    return diagnosticSkipGroups[scanDetailsReason] ?? []
+  }, [diagnosticSkipGroups, scanDetailsReason])
   const formatSkipReason = (reason: string) => {
     switch (reason) {
       case 'roi_guardrail':
@@ -648,11 +673,15 @@ export default function RebalanceCenter() {
               {overview.auto_enabled && overview.last_scan_detail && (
                 <div className="flex flex-wrap items-center gap-2 text-xs text-amber-200">
                   <span>{t('rebalanceCenter.overview.scanDetail', { value: overview.last_scan_detail })}</span>
-                  {diagnosticSkipDetails.length > 0 && (
+                  {diagnosticSkipTotal > 0 && (
                     <button
                       type="button"
                       className="text-[11px] underline underline-offset-2 text-fog/70"
-                      onClick={() => setScanDetailsOpen((prev) => !prev)}
+                      onClick={() => {
+                        setScanDetailsOpen((prev) => !prev)
+                        setScanDetailsReason('all')
+                        setScanDetailsShowAll(false)
+                      }}
                     >
                       {t('rebalanceCenter.overview.skipDetails')}
                     </button>
@@ -683,30 +712,68 @@ export default function RebalanceCenter() {
                   )}
                 </div>
               )}
-              {scanDetailsOpen && diagnosticSkipDetails.length > 0 && (
+              {scanDetailsOpen && diagnosticSkipTotal > 0 && (
                 <div className="mt-2 space-y-2 text-[11px] text-fog/70">
-                  {diagnosticSkipDetails.map((item) => (
-                    <div key={`${item.channel_id}-${item.reason}`} className="rounded-lg border border-white/10 bg-white/5 p-2">
-                      <div className="text-fog/80">
-                        {item.peer_alias || item.channel_point}
-                      </div>
-                      <div>
-                        {formatSkipReason(item.reason)}
-                        {' Â· '}
-                        {t('rebalanceCenter.overview.skipCalc', {
-                          gain: formatSats(item.expected_gain_sat),
-                          cost: formatSats(item.estimated_cost_sat),
-                          roi: item.expected_roi_valid ? formatRoi(item.expected_roi) : 'n/a'
-                        })}
-                      </div>
-                      <div className="text-fog/60">
-                        {t('rebalanceCenter.overview.skipTarget', {
-                          target: formatPct(item.target_outbound_pct),
-                          amount: formatSats(item.target_amount_sat)
-                        })}
-                      </div>
+                  {diagnosticReasons.length > 1 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        className={`rounded-full border px-2 py-0.5 text-[10px] ${scanDetailsReason === 'all' ? 'border-emerald-400/70 text-emerald-200' : 'border-white/10 text-fog/60'}`}
+                        onClick={() => {
+                          setScanDetailsReason('all')
+                          setScanDetailsShowAll(false)
+                        }}
+                      >
+                        {t('common.all')} ({diagnosticSkipTotal})
+                      </button>
+                      {diagnosticReasons.map((entry) => (
+                        <button
+                          key={entry.reason}
+                          type="button"
+                          className={`rounded-full border px-2 py-0.5 text-[10px] ${scanDetailsReason === entry.reason ? 'border-emerald-400/70 text-emerald-200' : 'border-white/10 text-fog/60'}`}
+                          onClick={() => {
+                            setScanDetailsReason(entry.reason)
+                            setScanDetailsShowAll(false)
+                          }}
+                        >
+                          {formatSkipReason(entry.reason)} ({entry.count})
+                        </button>
+                      ))}
                     </div>
-                  ))}
+                  )}
+                  <div className="space-y-2">
+                    {(scanDetailsShowAll ? diagnosticSkipDetails : diagnosticSkipDetails.slice(0, 12)).map((item) => (
+                      <div key={`${item.channel_id}-${item.reason}`} className="rounded-lg border border-white/10 bg-white/5 p-2">
+                        <div className="text-fog/80">
+                          {item.peer_alias || item.channel_point}
+                        </div>
+                        <div>
+                          {formatSkipReason(item.reason)}
+                          {' � '}
+                          {t('rebalanceCenter.overview.skipCalc', {
+                            gain: formatSats(item.expected_gain_sat),
+                            cost: formatSats(item.estimated_cost_sat),
+                            roi: item.expected_roi_valid ? formatRoi(item.expected_roi) : 'n/a'
+                          })}
+                        </div>
+                        <div className="text-fog/60">
+                          {t('rebalanceCenter.overview.skipTarget', {
+                            target: formatPct(item.target_outbound_pct),
+                            amount: formatSats(item.target_amount_sat)
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {!scanDetailsShowAll && diagnosticSkipDetails.length > 12 && (
+                    <button
+                      type="button"
+                      className="text-[11px] underline underline-offset-2 text-fog/70"
+                      onClick={() => setScanDetailsShowAll(true)}
+                    >
+                      {t('rebalanceCenter.overview.showAllDetails', { count: diagnosticSkipDetails.length - 12 })}
+                    </button>
+                  )}
                 </div>
               )}
               {skipDetailsOpen && profitSkipDetails.length > 0 && (
