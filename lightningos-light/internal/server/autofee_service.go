@@ -33,17 +33,22 @@ const superSourceBaseFeeMsatDefault = 1000
 const rebalCostModeDefault = "blend"
 
 const (
-  persistentLowThresh = 0.10
-  sinkMinMargin = 150
-  minSoftCeiling = 100
-  seedCeilingMult = 1.50
-  seedFloorMult = 1.10
-  seedP95Boost = 1.15
-  sourceSeedTargetFrac = 0.55
-  globalNegLockSoften = true
-  softenMinOutRatio = 0.45
-  softenRequirePosChanMargin = true
-  softenMaxDropToPegFrac = 0.95
+  defaultLowOutProtectThresh = 0.10
+  defaultSinkMinMargin = 150
+  defaultMinSoftCeiling = 100
+  defaultSeedCeilingMult = 1.50
+  defaultSeedFloorMult = 1.10
+  defaultSeedP95Boost = 1.15
+  defaultSourceSeedTargetFrac = 0.55
+  defaultProfitProtectOutRatio = 0.10
+  defaultProfitProtectRelaxHours = 72
+  defaultProfitProtectRelaxMaxFwds = 1
+  defaultProfitProtectRelaxStepFrac = 0.015
+  defaultProfitProtectRelaxMinStepPpm = 15
+  defaultGlobalNegLockSoften = true
+  defaultSoftenMinOutRatio = 0.45
+  defaultSoftenRequirePosChanMargin = true
+  defaultSoftenMaxDropToPegFrac = 0.95
 )
 
 func normalizeRebalCostMode(value string) string {
@@ -169,6 +174,7 @@ type autofeeProfile struct {
   Name string
   StepCap float64
   LowOutThresh float64
+  LowOutProtectThresh float64
   HighOutThresh float64
   SurgeBumpMax float64
   RunIntervalSec int
@@ -206,6 +212,23 @@ type autofeeProfile struct {
   ExtremeDrainTurboOutMax float64
   ExtremeDrainTurboStepCap float64
   ExtremeDrainTurboMinStepPpm int
+  SinkMinMargin int
+  MinSoftCeiling int
+  SeedCeilingMult float64
+  SeedFloorMult float64
+  SeedP95Boost float64
+  SourceSeedTargetFrac float64
+  ProfitProtectOutRatio float64
+  ProfitProtectMarginPpm int
+  ProfitProtectRelaxHours int
+  ProfitProtectRelaxMaxFwds int
+  ProfitProtectRelaxMarginPpm int
+  ProfitProtectRelaxStepFrac float64
+  ProfitProtectRelaxMinStepPpm int
+  GlobalNegLockSoften bool
+  SoftenMinOutRatio float64
+  SoftenRequirePosChanMargin bool
+  SoftenMaxDropToPegFrac float64
 }
 
 type superSourceThresholds struct {
@@ -222,6 +245,7 @@ var autofeeProfiles = map[string]autofeeProfile{
     Name: "conservative",
     StepCap: 0.03,
     LowOutThresh: 0.08,
+    LowOutProtectThresh: 0.08,
     HighOutThresh: 0.25,
     SurgeBumpMax: 0.10,
     RunIntervalSec: 8 * 3600,
@@ -259,11 +283,29 @@ var autofeeProfiles = map[string]autofeeProfile{
     ExtremeDrainTurboOutMax: 0.01,
     ExtremeDrainTurboStepCap: 0.15,
     ExtremeDrainTurboMinStepPpm: 15,
+    SinkMinMargin: 180,
+    MinSoftCeiling: 150,
+    SeedCeilingMult: 1.40,
+    SeedFloorMult: 1.10,
+    SeedP95Boost: 1.10,
+    SourceSeedTargetFrac: 0.50,
+    ProfitProtectOutRatio: 0.08,
+    ProfitProtectMarginPpm: 0,
+    ProfitProtectRelaxHours: 96,
+    ProfitProtectRelaxMaxFwds: 0,
+    ProfitProtectRelaxMarginPpm: -10,
+    ProfitProtectRelaxStepFrac: 0.010,
+    ProfitProtectRelaxMinStepPpm: 10,
+    GlobalNegLockSoften: true,
+    SoftenMinOutRatio: 0.55,
+    SoftenRequirePosChanMargin: true,
+    SoftenMaxDropToPegFrac: 0.98,
   },
   "moderate": {
     Name: "moderate",
     StepCap: 0.05,
     LowOutThresh: 0.10,
+    LowOutProtectThresh: 0.10,
     HighOutThresh: 0.20,
     SurgeBumpMax: 0.20,
     RunIntervalSec: 4 * 3600,
@@ -301,11 +343,29 @@ var autofeeProfiles = map[string]autofeeProfile{
     ExtremeDrainTurboOutMax: 0.01,
     ExtremeDrainTurboStepCap: 0.20,
     ExtremeDrainTurboMinStepPpm: 20,
+    SinkMinMargin: 150,
+    MinSoftCeiling: 100,
+    SeedCeilingMult: 1.50,
+    SeedFloorMult: 1.10,
+    SeedP95Boost: 1.15,
+    SourceSeedTargetFrac: 0.55,
+    ProfitProtectOutRatio: 0.10,
+    ProfitProtectMarginPpm: 0,
+    ProfitProtectRelaxHours: 72,
+    ProfitProtectRelaxMaxFwds: 1,
+    ProfitProtectRelaxMarginPpm: -30,
+    ProfitProtectRelaxStepFrac: 0.015,
+    ProfitProtectRelaxMinStepPpm: 15,
+    GlobalNegLockSoften: true,
+    SoftenMinOutRatio: 0.45,
+    SoftenRequirePosChanMargin: true,
+    SoftenMaxDropToPegFrac: 0.95,
   },
   "aggressive": {
     Name: "aggressive",
     StepCap: 0.08,
     LowOutThresh: 0.12,
+    LowOutProtectThresh: 0.12,
     HighOutThresh: 0.18,
     SurgeBumpMax: 0.30,
     RunIntervalSec: 2 * 3600,
@@ -343,6 +403,23 @@ var autofeeProfiles = map[string]autofeeProfile{
     ExtremeDrainTurboOutMax: 0.01,
     ExtremeDrainTurboStepCap: 0.20,
     ExtremeDrainTurboMinStepPpm: 20,
+    SinkMinMargin: 120,
+    MinSoftCeiling: 80,
+    SeedCeilingMult: 1.60,
+    SeedFloorMult: 1.10,
+    SeedP95Boost: 1.20,
+    SourceSeedTargetFrac: 0.60,
+    ProfitProtectOutRatio: 0.12,
+    ProfitProtectMarginPpm: -20,
+    ProfitProtectRelaxHours: 48,
+    ProfitProtectRelaxMaxFwds: 2,
+    ProfitProtectRelaxMarginPpm: -50,
+    ProfitProtectRelaxStepFrac: 0.020,
+    ProfitProtectRelaxMinStepPpm: 20,
+    GlobalNegLockSoften: true,
+    SoftenMinOutRatio: 0.40,
+    SoftenRequirePosChanMargin: false,
+    SoftenMaxDropToPegFrac: 0.90,
   },
 }
 
@@ -2059,9 +2136,74 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
   st.LastSeed = int(seed)
 
+  lowOutProtectThresh := e.profile.LowOutProtectThresh
+  if lowOutProtectThresh <= 0 {
+    lowOutProtectThresh = defaultLowOutProtectThresh
+  }
+  sinkMinMargin := e.profile.SinkMinMargin
+  if sinkMinMargin <= 0 {
+    sinkMinMargin = defaultSinkMinMargin
+  }
+  minSoftCeiling := e.profile.MinSoftCeiling
+  if minSoftCeiling <= 0 {
+    minSoftCeiling = defaultMinSoftCeiling
+  }
+  seedCeilingMult := e.profile.SeedCeilingMult
+  if seedCeilingMult <= 0 {
+    seedCeilingMult = defaultSeedCeilingMult
+  }
+  seedFloorMult := e.profile.SeedFloorMult
+  if seedFloorMult <= 0 {
+    seedFloorMult = defaultSeedFloorMult
+  }
+  seedP95Boost := e.profile.SeedP95Boost
+  if seedP95Boost <= 0 {
+    seedP95Boost = defaultSeedP95Boost
+  }
+  sourceSeedTargetFrac := e.profile.SourceSeedTargetFrac
+  if sourceSeedTargetFrac <= 0 {
+    sourceSeedTargetFrac = defaultSourceSeedTargetFrac
+  }
+  profitProtectOutRatio := e.profile.ProfitProtectOutRatio
+  if profitProtectOutRatio <= 0 {
+    profitProtectOutRatio = defaultProfitProtectOutRatio
+  }
+  profitProtectMarginPpm := e.profile.ProfitProtectMarginPpm
+  profitProtectRelaxHours := e.profile.ProfitProtectRelaxHours
+  if profitProtectRelaxHours <= 0 {
+    profitProtectRelaxHours = defaultProfitProtectRelaxHours
+  }
+  profitProtectRelaxMaxFwds := e.profile.ProfitProtectRelaxMaxFwds
+  if profitProtectRelaxMaxFwds < 0 {
+    profitProtectRelaxMaxFwds = defaultProfitProtectRelaxMaxFwds
+  }
+  profitProtectRelaxMarginPpm := e.profile.ProfitProtectRelaxMarginPpm
+  profitProtectRelaxStepFrac := e.profile.ProfitProtectRelaxStepFrac
+  if profitProtectRelaxStepFrac <= 0 {
+    profitProtectRelaxStepFrac = defaultProfitProtectRelaxStepFrac
+  }
+  profitProtectRelaxMinStepPpm := e.profile.ProfitProtectRelaxMinStepPpm
+  if profitProtectRelaxMinStepPpm <= 0 {
+    profitProtectRelaxMinStepPpm = defaultProfitProtectRelaxMinStepPpm
+  }
+  globalNegLockSoften := e.profile.GlobalNegLockSoften
+  softenMinOutRatio := e.profile.SoftenMinOutRatio
+  if softenMinOutRatio <= 0 {
+    softenMinOutRatio = defaultSoftenMinOutRatio
+  }
+  softenRequirePosChanMargin := e.profile.SoftenRequirePosChanMargin
+  softenMaxDropToPegFrac := e.profile.SoftenMaxDropToPegFrac
+  if softenMaxDropToPegFrac <= 0 {
+    softenMaxDropToPegFrac = defaultSoftenMaxDropToPegFrac
+  }
+  if e.profile.SoftenMinOutRatio <= 0 && e.profile.SoftenMaxDropToPegFrac <= 0 && !e.profile.SoftenRequirePosChanMargin {
+    globalNegLockSoften = defaultGlobalNegLockSoften
+    softenRequirePosChanMargin = defaultSoftenRequirePosChanMargin
+  }
+
   target := int(seed) + 25
 
-  if outRatio < 0.10 {
+  if outRatio < lowOutProtectThresh {
     st.LowStreak++
   } else {
     st.LowStreak = 0
@@ -2242,7 +2384,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
 
-  if outRatio < 0.10 && target < localPpm {
+  if outRatio < lowOutProtectThresh && target < localPpm {
     target = localPpm
     tags = append(tags, "no-down-low")
   }
@@ -2466,11 +2608,11 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     localMax = e.cfg.MinPpm
   }
 
-  if strings.EqualFold(classLabel, "sink") && outRatio < persistentLowThresh && marginPpm7d >= sinkMinMargin {
+  if strings.EqualFold(classLabel, "sink") && outRatio < lowOutProtectThresh && marginPpm7d >= sinkMinMargin {
     localMax = e.cfg.MaxPpm
   } else {
     demandException := (outPpm7d > 0 && fwdCount >= 4 && seed > 0 && float64(outPpm7d) >= seed*outratePegSeedMult) ||
-      (outRatio < persistentLowThresh)
+      (outRatio < lowOutProtectThresh)
     if demandException {
       capBase := int(math.Round(seed * outratePegSeedMult))
       if outPpm7d > capBase {
@@ -2510,6 +2652,36 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
   finalPpm = clampInt(finalPpm, e.cfg.MinPpm, e.cfg.MaxPpm)
 
+  profitProtectLocked := false
+  profitProtectRelaxed := false
+  if finalPpm < localPpm &&
+    outRatio < profitProtectOutRatio &&
+    marginPpm7d < profitProtectMarginPpm &&
+    !discoveryHit &&
+    !explorerActive &&
+    !superSourceActive {
+    canRelax := false
+    if marginPpm7d >= profitProtectRelaxMarginPpm && fwdCount <= profitProtectRelaxMaxFwds && !st.LastTs.IsZero() {
+      if e.now.Sub(st.LastTs) >= time.Duration(profitProtectRelaxHours)*time.Hour {
+        relaxStep := int(math.Max(float64(profitProtectRelaxMinStepPpm), math.Round(float64(localPpm)*profitProtectRelaxStepFrac)))
+        if relaxStep > 0 {
+          minAllowed := localPpm - relaxStep
+          if finalPpm < minAllowed {
+            finalPpm = minAllowed
+          }
+          canRelax = true
+        }
+      }
+    }
+    if canRelax {
+      profitProtectRelaxed = true
+    } else {
+      finalPpm = localPpm
+      profitProtectLocked = true
+    }
+    finalPpm = clampInt(finalPpm, e.cfg.MinPpm, e.cfg.MaxPpm)
+  }
+
   if rawStep != target {
     dirSame := (target > localPpm && rawStep > localPpm) || (target < localPpm && rawStep < localPpm)
     if dirSame {
@@ -2527,6 +2699,12 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
   if lockSkipTag != "" {
     tags = append(tags, lockSkipTag)
+  }
+  if profitProtectLocked {
+    tags = append(tags, "profit-protect-lock")
+  }
+  if profitProtectRelaxed {
+    tags = append(tags, "profit-protect-relax")
   }
 
   inboundDiscount := 0
@@ -3027,15 +3205,11 @@ func absInt(v int) int {
   return v
 }
 
-func applyStepCap(current int, target int, capFrac float64, minStep int, capBase int) int {
+func applyStepCap(current int, target int, capFrac float64, minStep int, _ int) int {
   if current <= 0 {
     return target
   }
-  base := capBase
-  if base <= 0 {
-    base = current
-  }
-  cap := int(math.Max(float64(minStep), math.Abs(float64(base))*capFrac))
+  cap := int(math.Max(float64(minStep), math.Abs(float64(current))*capFrac))
   delta := target - current
   if delta > cap {
     return current + cap
@@ -3186,6 +3360,10 @@ func formatAutofeeTags(d *decision) string {
       add("🚫down-low")
     case t == "no-down-neg-margin":
       add("🚫down-neg")
+    case t == "profit-protect-lock":
+      add("🛡️profit-lock")
+    case t == "profit-protect-relax":
+      add("🕊️profit-relax")
     case t == "super-source":
       add("🔥super-source")
     case t == "super-source-like":
