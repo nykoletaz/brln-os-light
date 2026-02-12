@@ -148,7 +148,7 @@ func (m *HtlcManager) EnsureSchema(ctx context.Context) error {
     return errors.New("db unavailable")
   }
 
-  _, err := m.db.Exec(ctx, `
+  if _, err := m.db.Exec(ctx, `
 create table if not exists htlc_manager_config (
   id integer primary key,
   enabled boolean not null default false,
@@ -157,7 +157,11 @@ create table if not exists htlc_manager_config (
   max_local_pct integer not null default 0,
   updated_at timestamptz not null default now()
 );
+`); err != nil {
+    return err
+  }
 
+  _, err := m.db.Exec(ctx, `
 insert into htlc_manager_config (id)
 values ($1)
 on conflict (id) do nothing
