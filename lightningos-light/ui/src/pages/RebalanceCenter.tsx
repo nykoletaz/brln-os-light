@@ -789,7 +789,7 @@ export default function RebalanceCenter() {
                       </div>
                       <div>
                         {formatSkipReason(item.reason)}
-                        {' Â· '}
+                        {' · '}
                         {t('rebalanceCenter.overview.skipCalc', {
                           gain: formatSats(item.expected_gain_sat),
                           cost: formatSats(item.estimated_cost_sat),
@@ -1312,7 +1312,7 @@ export default function RebalanceCenter() {
                   </td>
                   <td className="py-3 pl-6">
                     <div>
-                      {t('rebalanceCenter.channels.feeOut', { value: ch.outgoing_fee_ppm })} Â·{' '}
+                      {t('rebalanceCenter.channels.feeOut', { value: ch.outgoing_fee_ppm })} ·{' '}
                       {t('rebalanceCenter.channels.feePeer', { value: ch.peer_fee_rate_ppm })}
                     </div>
                     <div className="text-xs text-fog/50">{t('rebalanceCenter.channels.spread', { value: ch.spread_ppm })}</div>
@@ -1516,7 +1516,7 @@ export default function RebalanceCenter() {
                           ? t('rebalanceCenter.history.source.manual')
                           : job.source}{' '}
                       <span className="text-xs text-fog/50">
-                        Â· {formatTimestamp(job.completed_at || job.created_at)}
+                         · {formatTimestamp(job.completed_at || job.created_at)}
                       </span>
                     </p>
                     <p className="text-xs text-fog/70">{t('rebalanceCenter.history.targetLabel', { value: job.target_peer_alias || job.target_channel_point })}</p>
