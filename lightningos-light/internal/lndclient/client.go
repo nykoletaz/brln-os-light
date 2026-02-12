@@ -743,6 +743,9 @@ func (c *Client) ListRecent(ctx context.Context, limit int) ([]RecentActivity, e
       if inv.State != lnrpc.Invoice_SETTLED {
         continue
       }
+      if isRebalanceMemo(inv.Memo) {
+        continue
+      }
       hash := ""
       if len(inv.RHash) > 0 {
         hash = hex.EncodeToString(inv.RHash)
@@ -789,6 +792,14 @@ func (c *Client) ListRecent(ctx context.Context, limit int) ([]RecentActivity, e
   }
 
   return items, nil
+}
+
+func isRebalanceMemo(memo string) bool {
+  normalized := strings.ToLower(strings.TrimSpace(memo))
+  if normalized == "" {
+    return false
+  }
+  return strings.HasPrefix(normalized, "rebalance:") || strings.HasPrefix(normalized, "rebalance attempt")
 }
 
 func isSelfPayment(ctx context.Context, pubkey string, client lnrpc.LightningClient, pay *lnrpc.Payment) bool {
