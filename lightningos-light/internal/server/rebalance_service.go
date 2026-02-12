@@ -243,6 +243,7 @@ type RebalanceService struct {
   jobCancel map[int64]context.CancelFunc
   manualRestart map[int64]manualRestartInfo
   manualRestartCancel map[uint64]*manualRestartHandle
+  lastAutoByTarget map[uint64]time.Time
 }
 
 func NewRebalanceService(db *pgxpool.Pool, lnd *lndclient.Client, logger *log.Logger) *RebalanceService {
@@ -255,6 +256,7 @@ func NewRebalanceService(db *pgxpool.Pool, lnd *lndclient.Client, logger *log.Lo
     jobCancel: map[int64]context.CancelFunc{},
     manualRestart: map[int64]manualRestartInfo{},
     manualRestartCancel: map[uint64]*manualRestartHandle{},
+    lastAutoByTarget: map[uint64]time.Time{},
   }
 }
 
@@ -539,6 +541,13 @@ func (s *RebalanceService) runAutoScan() {
 
   revenueByChannel, _ := s.fetchChannelRevenue7d(ctx)
   lastAutoByTarget := s.loadLastAutoEnqueueTimes(ctx)
+  s.mu.Lock()
+  for channelID, last := range s.lastAutoByTarget {
+    if existing, ok := lastAutoByTarget[channelID]; !ok || last.After(existing) {
+      lastAutoByTarget[channelID] = last
+    }
+  }
+  s.mu.Unlock()
 
   s.mu.Lock()
   criticalActive := cfg.CriticalCycles > 0 && s.criticalMissCount >= cfg.CriticalCycles
@@ -737,6 +746,9 @@ func (s *RebalanceService) runAutoScan() {
     }
     _, err = s.startJob(target.Channel.ChannelID, "auto", "", amountOverride, false)
     if err == nil {
+      s.mu.Lock()
+      s.lastAutoByTarget[target.Channel.ChannelID] = scanAt
+      s.mu.Unlock()
       remaining -= estimatedCost
       queuedCount++
     } else {
