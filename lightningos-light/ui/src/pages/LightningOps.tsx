@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeResults, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnHtlcManager, getLnHtlcManagerLogs, getLnPeers, getLnTorPeerChecker, getLnTorPeerCheckerLogs, getMempoolFees, openChannel, runAutofee, signLnMessage, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus, updateLnHtlcManager, updateLnTorPeerChecker } from '../api'
 
@@ -338,6 +338,10 @@ export default function LightningOps() {
   const [inboundFeeRatePpm, setInboundFeeRatePpm] = useState('')
   const [feeLoadStatus, setFeeLoadStatus] = useState('')
   const [feeLoading, setFeeLoading] = useState(false)
+  const chanHealLastAttemptRef = useRef('')
+  const chanHealIntervalDirtyRef = useRef(false)
+  const htlcManagerFormDirtyRef = useRef(false)
+  const torPeerCheckerIntervalDirtyRef = useRef(false)
   const [feeStatus, setFeeStatus] = useState('')
 
   const formatPing = (value: number) => {
@@ -840,9 +844,13 @@ export default function LightningOps() {
   const isLocalChanDisabled = (flags?: string) => {
     if (!flags) return false
     const normalized = flags.toLowerCase()
-    return (normalized.includes('local') && normalized.includes('disabled')) ||
-      normalized.includes('localchandisabled') ||
-      normalized.includes('local_chan_disabled')
+    const tokens = normalized.split(/[|,;\s]+/).filter(Boolean)
+    const scan = tokens.length ? tokens : [normalized]
+    return scan.some((token) => {
+      if (token.includes('localchandisabled') || token.includes('local_chan_disabled')) return true
+      if (!token.includes('disabled') || token.includes('remote')) return false
+      return token.includes('local') || token.includes('chanstatusdisabled') || token === 'disabled'
+    })
   }
 
   const ambossTone = (): 'ok' | 'warn' | 'muted' => {
@@ -913,6 +921,16 @@ export default function LightningOps() {
 
   const ambossURL = (pubkey: string) => `https://amboss.space/node/${pubkey}`
 
+  const applyChannelsPayload = (res: any) => {
+    const list = Array.isArray(res?.channels) ? res.channels : []
+    setChannels(list)
+    setActiveCount(res?.active_count ?? 0)
+    setInactiveCount(res?.inactive_count ?? 0)
+    setPendingOpenCount(res?.pending_open_count ?? 0)
+    setPendingCloseCount(res?.pending_close_count ?? 0)
+    setPendingChannels(Array.isArray(res?.pending_channels) ? res.pending_channels : [])
+  }
+
   const load = async () => {
     setStatus(t('lightningOps.loadingChannels'))
     setPeerListStatus(t('lightningOps.loadingPeers'))
@@ -938,13 +956,7 @@ export default function LightningOps() {
     ])
     if (channelsResult.status === 'fulfilled') {
       const res = channelsResult.value
-      const list = Array.isArray(res?.channels) ? res.channels : []
-      setChannels(list)
-      setActiveCount(res?.active_count ?? 0)
-      setInactiveCount(res?.inactive_count ?? 0)
-      setPendingOpenCount(res?.pending_open_count ?? 0)
-      setPendingCloseCount(res?.pending_close_count ?? 0)
-      setPendingChannels(Array.isArray(res?.pending_channels) ? res.pending_channels : [])
+      applyChannelsPayload(res)
       setStatus('')
     } else {
       const message = (channelsResult.reason as any)?.message || t('lightningOps.loadChannelsFailed')
@@ -968,8 +980,10 @@ export default function LightningOps() {
     if (chanHealResult.status === 'fulfilled') {
       const payload = chanHealResult.value as ChanHealStatus
       setChanHeal(payload)
+      chanHealLastAttemptRef.current = payload?.last_attempt_at || ''
       if (payload?.interval_sec) {
         setChanHealInterval(String(payload.interval_sec))
+        chanHealIntervalDirtyRef.current = false
       }
       setChanHealStatus('')
     } else {
@@ -986,6 +1000,7 @@ export default function LightningOps() {
         setHtlcManagerMinSat(String(payload.min_htlc_sat))
       }
       setHtlcManagerMaxPct(String(payload?.max_local_pct ?? 0))
+      htlcManagerFormDirtyRef.current = false
       setHtlcManagerStatus('')
     } else {
       const message = (htlcManagerResult.reason as any)?.message || t('lightningOps.htlcManagerStatusUnavailable')
@@ -1001,6 +1016,7 @@ export default function LightningOps() {
       const payload = torPeerCheckerResult.value as TorPeerCheckerStatus
       setTorPeerChecker(payload)
       setTorPeerCheckerIntervalHours(String(payload?.interval_hours ?? 2))
+      torPeerCheckerIntervalDirtyRef.current = false
       setTorPeerCheckerStatus('')
     } else {
       const message = (torPeerCheckerResult.reason as any)?.message || t('lightningOps.torPeerStatusUnavailable')
@@ -1075,6 +1091,18 @@ export default function LightningOps() {
 
   useEffect(() => {
     let mounted = true
+    const refreshChannels = () => {
+      getLnChannels()
+        .then((res) => {
+          if (!mounted) return
+          applyChannelsPayload(res)
+          setStatus('')
+        })
+        .catch((err: any) => {
+          if (!mounted) return
+          setStatus(err?.message || t('lightningOps.loadChannelsFailed'))
+        })
+    }
     const fetchAmboss = () => {
       getAmbossHealth()
         .then((data) => {
@@ -1091,9 +1119,16 @@ export default function LightningOps() {
       getLnChanHeal()
         .then((data) => {
           if (!mounted) return
-          setChanHeal(data as ChanHealStatus)
-          if ((data as ChanHealStatus)?.interval_sec) {
-            setChanHealInterval(String((data as ChanHealStatus).interval_sec))
+          const payload = data as ChanHealStatus
+          const prevAttemptAt = chanHealLastAttemptRef.current
+          const nextAttemptAt = payload?.last_attempt_at || ''
+          setChanHeal(payload)
+          if (!chanHealIntervalDirtyRef.current && payload?.interval_sec) {
+            setChanHealInterval(String(payload.interval_sec))
+          }
+          chanHealLastAttemptRef.current = nextAttemptAt
+          if (nextAttemptAt && nextAttemptAt !== prevAttemptAt) {
+            refreshChannels()
           }
           setChanHealStatus('')
         })
@@ -1108,13 +1143,15 @@ export default function LightningOps() {
           if (!mounted) return
           const payload = data as HtlcManagerStatus
           setHtlcManager(payload)
-          if (payload?.interval_hours) {
+          if (!htlcManagerFormDirtyRef.current && payload?.interval_hours) {
             setHtlcManagerIntervalHours(String(payload.interval_hours))
           }
-          if (payload?.min_htlc_sat) {
+          if (!htlcManagerFormDirtyRef.current && payload?.min_htlc_sat) {
             setHtlcManagerMinSat(String(payload.min_htlc_sat))
           }
-          setHtlcManagerMaxPct(String(payload?.max_local_pct ?? 0))
+          if (!htlcManagerFormDirtyRef.current) {
+            setHtlcManagerMaxPct(String(payload?.max_local_pct ?? 0))
+          }
           setHtlcManagerStatus('')
         })
         .catch((err: any) => {
@@ -1138,7 +1175,9 @@ export default function LightningOps() {
           if (!mounted) return
           const payload = data as TorPeerCheckerStatus
           setTorPeerChecker(payload)
-          setTorPeerCheckerIntervalHours(String(payload?.interval_hours ?? 2))
+          if (!torPeerCheckerIntervalDirtyRef.current) {
+            setTorPeerCheckerIntervalHours(String(payload?.interval_hours ?? 2))
+          }
           setTorPeerCheckerStatus('')
         })
         .catch((err: any) => {
@@ -1505,6 +1544,7 @@ export default function LightningOps() {
     try {
       const res = await updateLnChanHeal({ interval_sec: interval })
       setChanHeal(res as ChanHealStatus)
+      chanHealIntervalDirtyRef.current = false
       setChanHealStatus(t('lightningOps.chanHealSaved'))
     } catch (err: any) {
       setChanHealStatus(err?.message || t('lightningOps.chanHealSaveFailed'))
@@ -1555,6 +1595,7 @@ export default function LightningOps() {
         max_local_pct: maxPct
       })
       setHtlcManager(res as HtlcManagerStatus)
+      htlcManagerFormDirtyRef.current = false
       setHtlcManagerStatus(t('lightningOps.htlcManagerSaved'))
     } catch (err: any) {
       setHtlcManagerStatus(err?.message || t('lightningOps.htlcManagerSaveFailed'))
@@ -1609,6 +1650,7 @@ export default function LightningOps() {
     try {
       const res = await updateLnTorPeerChecker({ interval_hours: intervalHours })
       setTorPeerChecker(res as TorPeerCheckerStatus)
+      torPeerCheckerIntervalDirtyRef.current = false
       setTorPeerCheckerStatus(t('lightningOps.torPeerSaved'))
     } catch (err: any) {
       setTorPeerCheckerStatus(err?.message || t('lightningOps.torPeerSaveFailed'))
@@ -2596,7 +2638,10 @@ export default function LightningOps() {
               type="number"
               min={1}
               value={htlcManagerMinSat}
-              onChange={(e) => setHtlcManagerMinSat(e.target.value)}
+              onChange={(e) => {
+                setHtlcManagerMinSat(e.target.value)
+                htlcManagerFormDirtyRef.current = true
+              }}
             />
           </label>
           <label className="text-sm text-fog/70">
@@ -2606,7 +2651,10 @@ export default function LightningOps() {
               type="number"
               min={0}
               value={htlcManagerMaxPct}
-              onChange={(e) => setHtlcManagerMaxPct(e.target.value)}
+              onChange={(e) => {
+                setHtlcManagerMaxPct(e.target.value)
+                htlcManagerFormDirtyRef.current = true
+              }}
             />
           </label>
           <label className="text-sm text-fog/70">
@@ -2617,7 +2665,10 @@ export default function LightningOps() {
               min={1}
               max={48}
               value={htlcManagerIntervalHours}
-              onChange={(e) => setHtlcManagerIntervalHours(e.target.value)}
+              onChange={(e) => {
+                setHtlcManagerIntervalHours(e.target.value)
+                htlcManagerFormDirtyRef.current = true
+              }}
             />
           </label>
         </div>
@@ -2756,7 +2807,10 @@ export default function LightningOps() {
               type="number"
               min={30}
               value={chanHealInterval}
-              onChange={(e) => setChanHealInterval(e.target.value)}
+              onChange={(e) => {
+                setChanHealInterval(e.target.value)
+                chanHealIntervalDirtyRef.current = true
+              }}
             />
             <button
               className="btn-secondary text-xs px-3 py-2"
@@ -2828,7 +2882,10 @@ export default function LightningOps() {
               min={2}
               max={168}
               value={torPeerCheckerIntervalHours}
-              onChange={(e) => setTorPeerCheckerIntervalHours(e.target.value)}
+              onChange={(e) => {
+                setTorPeerCheckerIntervalHours(e.target.value)
+                torPeerCheckerIntervalDirtyRef.current = true
+              }}
             />
             <button
               className="btn-secondary text-xs px-3 py-2"
