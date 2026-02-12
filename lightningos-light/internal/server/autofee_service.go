@@ -1012,6 +1012,27 @@ func (s *AutofeeService) Run(ctx context.Context, dryRun bool, reason string) er
 
   if status, err := s.lnd.GetStatus(ctx); err == nil {
     if !status.SyncedToChain || !status.SyncedToGraph {
+      if reason == "manual" {
+        runID := fmt.Sprintf("%d", time.Now().UnixNano())
+        now := time.Now().UTC()
+        header := fmt.Sprintf("⚡ Autofee %s | %s", strings.ToUpper(reason), now.Format(time.RFC3339))
+        if dryRun {
+          header = header + " (dry-run)"
+        }
+        entries := []autofeeLogEntry{
+          {Line: header, Payload: &autofeeLogItem{Kind: "header", Reason: reason, DryRun: dryRun, Timestamp: now.Format(time.RFC3339)}},
+          {Line: "📊 up 0 | down 0 | flat 0 | cooldown 0 | small 0 | same 0 | disabled 0 | inactive 0 | inb_disc 0 | super_source 0", Payload: &autofeeLogItem{
+            Kind: "summary",
+            Up: 0, Down: 0, Flat: 0, Cooldown: 0, Small: 0, Same: 0, Disabled: 0, Inactive: 0, InboundDisc: 0, SuperSource: 0,
+          }},
+          {Line: "🌱 seed amboss=0 missing=0 err=0 empty=0 outrate=0 mem=0 default=0", Payload: &autofeeLogItem{
+            Kind: "seed",
+            Amboss: 0, Missing: 0, Err: 0, Empty: 0, Outrate: 0, Mem: 0, Default: 0, CooldownIgnored: false,
+          }},
+          {Line: "⚠️ skipped: lnd not synced"},
+        }
+        _ = s.appendAutofeeLines(ctx, runID, entries)
+      }
       return nil
     }
   }
@@ -1486,7 +1507,9 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     entries = append(entries, errorLines...)
   }
 
-  if err := e.svc.appendAutofeeLines(ctx, runID, entries); err != nil {
+  logCtx, logCancel := context.WithTimeout(context.Background(), 5*time.Second)
+  defer logCancel()
+  if err := e.svc.appendAutofeeLines(logCtx, runID, entries); err != nil {
     e.svc.logger.Printf("autofee: log insert failed: %v", err)
   }
   return nil
