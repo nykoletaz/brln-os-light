@@ -1366,7 +1366,7 @@ export default function RebalanceCenter() {
                         className="flex flex-col items-center gap-1 text-[10px] text-fog/60"
                         title={t('rebalanceCenter.channelsHints.rebalanceRestart')}
                       >
-                        <span className="text-sm">âŸ³</span>
+                        <span className="text-sm">⟳</span>
                         <input
                           type="checkbox"
                           checked={manualRestart[ch.channel_point] === true}
