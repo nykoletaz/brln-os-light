@@ -64,6 +64,9 @@ type RebalanceOverview = {
   live_cost_sat: number
   effectiveness_7d: number
   roi_7d: number
+  payback_revenue_sat: number
+  payback_cost_sat: number
+  payback_progress: number
 }
 
 type RebalanceScanSkip = {
@@ -240,8 +243,12 @@ export default function RebalanceCenter() {
     return Math.round(revenue7d * (amountSat / denom))
   }
   const computeChannelScore = (ch: RebalanceChannel) => {
-    const expectedGain = estimateTargetGain(ch.target_amount_sat, ch.revenue_7d_sat, ch.local_balance_sat, ch.capacity_sat)
-    const estimatedCost = estimateHistoricalCost(ch.target_amount_sat, ch.rebalance_cost_7d_ppm)
+    let expectedGain = estimateTargetGain(ch.target_amount_sat, ch.revenue_7d_sat, ch.local_balance_sat, ch.capacity_sat)
+    let estimatedCost = estimateHistoricalCost(ch.target_amount_sat, ch.rebalance_cost_7d_ppm)
+    if (ch.target_amount_sat <= 0) {
+      expectedGain = Math.max(0, ch.revenue_7d_sat || 0)
+      estimatedCost = Math.max(0, ch.rebalance_cost_7d_sat || 0)
+    }
     const expectedRoiValid = expectedGain > 0 && estimatedCost > 0
     return {
       score: expectedGain - estimatedCost,
@@ -780,6 +787,15 @@ export default function RebalanceCenter() {
             <p className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.overview.effectiveness')}</p>
             <p className="text-lg font-semibold text-fog">{formatPct(overview.effectiveness_7d * 100)}</p>
             <p className="text-xs text-fog/50">{t('rebalanceCenter.overview.roi', { value: overview.roi_7d.toFixed(2) })}</p>
+            <p className="text-xs text-fog/50">
+              {t('rebalanceCenter.overview.paybackRevenue', { value: formatSats(overview.payback_revenue_sat || 0) })}
+            </p>
+            <p className="text-xs text-fog/50">
+              {t('rebalanceCenter.overview.paybackCost', { value: formatSats(overview.payback_cost_sat || 0) })}
+            </p>
+            <p className="text-xs text-fog/50">
+              {t('rebalanceCenter.overview.paybackProgress', { value: formatPct((overview.payback_progress || 0) * 100) })}
+            </p>
           </div>
             <div className="section-card space-y-2">
               <p className="text-xs uppercase tracking-wide text-fog/60">{t('rebalanceCenter.overview.dailyBudget')}</p>

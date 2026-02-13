@@ -100,6 +100,9 @@ type RebalanceOverview struct {
   LiveCostSat int64 `json:"live_cost_sat"`
   Effectiveness7d float64 `json:"effectiveness_7d"`
   ROI7d float64 `json:"roi_7d"`
+  PaybackRevenueSat int64 `json:"payback_revenue_sat"`
+  PaybackCostSat int64 `json:"payback_cost_sat"`
+  PaybackProgress float64 `json:"payback_progress"`
   EligibleSources int `json:"eligible_sources"`
   TargetsNeeding int `json:"targets_needing"`
 }
@@ -3996,6 +3999,9 @@ where type='rebalance' and occurred_at >= now() - interval '1 day'
 
   effectiveness := 0.0
   roi := 0.0
+  paybackRevenue := int64(0)
+  paybackCost := int64(0)
+  paybackProgress := 0.0
   var successCount int64
   var totalCount int64
   _ = s.db.QueryRow(ctx, `
@@ -4019,6 +4025,15 @@ where report_date >= current_date - interval '6 days'
 `).Scan(&revenue, &cost)
   if cost > 0 {
     roi = float64(revenue) / float64(cost)
+  }
+  _ = s.db.QueryRow(ctx, `
+select
+  coalesce(sum(paid_revenue_sats), 0),
+  coalesce(sum(paid_cost_sats), 0)
+from rebalance_channel_ledger
+`).Scan(&paybackRevenue, &paybackCost)
+  if paybackCost > 0 {
+    paybackProgress = float64(paybackRevenue) / float64(paybackCost)
   }
 
   eligibleSources := 0
@@ -4046,6 +4061,9 @@ where report_date >= current_date - interval '6 days'
     LiveCostSat: liveCost,
     Effectiveness7d: effectiveness,
     ROI7d: roi,
+    PaybackRevenueSat: paybackRevenue,
+    PaybackCostSat: paybackCost,
+    PaybackProgress: paybackProgress,
     LastScanStatus: lastScanStatus,
     LastScanDetail: lastScanDetail,
     LastScanTopScoreSat: lastScanTopScore,
