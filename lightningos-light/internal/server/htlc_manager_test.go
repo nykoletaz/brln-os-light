@@ -1,41 +1,58 @@
 package server
 
-import "testing"
+import (
+  "testing"
+
+  "lightningos-light/internal/lndclient"
+)
 
 func TestWithinMaxHTLCHysteresis(t *testing.T) {
   tests := []struct {
     name        string
     currentSat  int64
     targetSat   int64
-    capacitySat int64
+    effectiveCapacitySat int64
+    volatileBalance bool
     want        bool
   }{
     {
       name:        "small delta under threshold",
       currentSat:  981511,
       targetSat:   981557,
-      capacitySat: 1000000,
+      effectiveCapacitySat: 1000000,
+      volatileBalance: false,
       want:        true,
     },
     {
       name:        "large delta over threshold",
       currentSat:  981000,
       targetSat:   983000,
-      capacitySat: 1000000,
+      effectiveCapacitySat: 1000000,
+      volatileBalance: false,
       want:        false,
     },
     {
       name:        "tiny channel still uses base threshold",
       currentSat:  5000,
       targetSat:   5090,
-      capacitySat: 10000,
+      effectiveCapacitySat: 10000,
+      volatileBalance: false,
       want:        true,
     },
     {
-      name:        "tiny channel over base threshold",
+      name:        "tiny channel delta still below new relevance threshold",
       currentSat:  5000,
       targetSat:   5200,
-      capacitySat: 10000,
+      effectiveCapacitySat: 10000,
+      volatileBalance: false,
+      want:        true,
+    },
+    {
+      name:        "volatile balance increases threshold",
+      currentSat:  120000,
+      targetSat:   130500,
+      effectiveCapacitySat: 1000000,
+      volatileBalance: true,
       want:        false,
     },
   }
@@ -51,8 +68,8 @@ func TestWithinMaxHTLCHysteresis(t *testing.T) {
       if err != nil {
         t.Fatalf("satToMsat(targetSat) failed: %v", err)
       }
-      if got := withinMaxHTLCHysteresis(currentMsat, targetMsat, tc.capacitySat); got != tc.want {
-        t.Fatalf("withinMaxHTLCHysteresis(%d, %d, %d) = %v, want %v", currentMsat, targetMsat, tc.capacitySat, got, tc.want)
+      if got := withinMaxHTLCHysteresis(currentMsat, targetMsat, tc.effectiveCapacitySat, tc.volatileBalance); got != tc.want {
+        t.Fatalf("withinMaxHTLCHysteresis(%d, %d, %d, %v) = %v, want %v", currentMsat, targetMsat, tc.effectiveCapacitySat, tc.volatileBalance, got, tc.want)
       }
     })
   }
@@ -87,5 +104,51 @@ func TestValidateHTLCManagerConfigIntervalMinutes(t *testing.T) {
   cfg.IntervalMinutes = 0
   if err := validateHTLCManagerConfig(cfg); err == nil {
     t.Fatalf("expected validation error for zero minutes")
+  }
+}
+
+func TestComputeHTLCTargetsUsesLocalReserve(t *testing.T) {
+  cfg := HtlcManagerConfig{
+    MinHtlcSat: 1,
+    MaxLocalPct: 0,
+  }
+  ch := lndclient.ChannelInfo{
+    CapacitySat: 1_000_000,
+    LocalBalanceSat: 250_000,
+    LocalChanReserveSat: 50_000,
+  }
+
+  minMsat, maxMsat, err := computeHTLCTargets(ch, cfg)
+  if err != nil {
+    t.Fatalf("computeHTLCTargets failed: %v", err)
+  }
+  wantMin, _ := satToMsat(1)
+  wantMax, _ := satToMsat(200_000) // 250k local - 50k reserve
+  if minMsat != wantMin {
+    t.Fatalf("minMsat=%d want=%d", minMsat, wantMin)
+  }
+  if maxMsat != wantMax {
+    t.Fatalf("maxMsat=%d want=%d", maxMsat, wantMax)
+  }
+}
+
+func TestComputeHTLCTargetsClampsToEffectiveCapacity(t *testing.T) {
+  cfg := HtlcManagerConfig{
+    MinHtlcSat: 1,
+    MaxLocalPct: 50,
+  }
+  ch := lndclient.ChannelInfo{
+    CapacitySat: 1_000_000,
+    LocalBalanceSat: 990_000,
+    LocalChanReserveSat: 100_000,
+  }
+
+  _, maxMsat, err := computeHTLCTargets(ch, cfg)
+  if err != nil {
+    t.Fatalf("computeHTLCTargets failed: %v", err)
+  }
+  wantMax, _ := satToMsat(900_000) // effective capacity = 1M - 100k
+  if maxMsat != wantMax {
+    t.Fatalf("maxMsat=%d want=%d", maxMsat, wantMax)
   }
 }

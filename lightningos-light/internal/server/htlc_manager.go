@@ -23,8 +23,9 @@ const (
   htlcManagerDefaultIntervalMinutes = 240
   htlcManagerDefaultMinHTLCSat int64 = 1
   htlcManagerDefaultMaxLocalPct = 0
-  htlcManagerMaxHysteresisBaseSat int64 = 100
-  htlcManagerMaxHysteresisDivisor int64 = 1000 // 0.1% of channel capacity in sats
+  htlcManagerMaxHysteresisBaseSat int64 = 250
+  htlcManagerMaxHysteresisDivisor int64 = 400 // 0.25% of effective channel capacity in sats
+  htlcManagerVolatileHysteresisMultiplier int64 = 3
   htlcManagerMinIntervalMinutes = 1
   htlcManagerMaxIntervalMinutes = 48 * 60
   htlcManagerLogCapacity = 300
@@ -526,7 +527,9 @@ func (m *HtlcManager) tick(force bool) {
       continue
     }
 
-    if policy.MinHtlcMsat == targetMinMsat && withinMaxHTLCHysteresis(policy.MaxHtlcMsat, targetMaxMsat, ch.CapacitySat) {
+    effectiveCapSat := maxHTLCUpperBoundSat(ch)
+    volatileBalance := ch.PendingHtlcCount > 0 || ch.UnsettledBalanceSat > 0
+    if policy.MinHtlcMsat == targetMinMsat && withinMaxHTLCHysteresis(policy.MaxHtlcMsat, targetMaxMsat, effectiveCapSat, volatileBalance) {
       continue
     }
 
@@ -597,21 +600,19 @@ func computeHTLCTargets(ch lndclient.ChannelInfo, cfg HtlcManagerConfig) (uint64
   if err != nil {
     return 0, 0, err
   }
-  capMsat, err := satToMsat(ch.CapacitySat)
+  effectiveCapSat := maxHTLCUpperBoundSat(ch)
+  capMsat, err := satToMsat(effectiveCapSat)
   if err != nil {
     return 0, 0, fmt.Errorf("capacity conversion failed: %w", err)
   }
   if capMsat == 0 {
-    return 0, 0, errors.New("capacity unavailable")
+    return 0, 0, errors.New("effective capacity unavailable")
   }
   if minMsat > capMsat {
-    return 0, 0, fmt.Errorf("min_htlc (%d msat) above channel capacity (%d msat)", minMsat, capMsat)
+    return 0, 0, fmt.Errorf("min_htlc (%d msat) above effective channel capacity (%d msat)", minMsat, capMsat)
   }
 
-  localSat := ch.LocalBalanceSat
-  if localSat < 0 {
-    localSat = 0
-  }
+  localSat := spendableLocalSat(ch)
 
   extraSat := int64(math.Floor(float64(localSat) * float64(cfg.MaxLocalPct) / 100.0))
   if extraSat < 0 {
@@ -621,8 +622,8 @@ func computeHTLCTargets(ch lndclient.ChannelInfo, cfg HtlcManagerConfig) (uint64
   if rawMaxSat < 0 {
     rawMaxSat = 0
   }
-  if rawMaxSat > ch.CapacitySat {
-    rawMaxSat = ch.CapacitySat
+  if rawMaxSat > effectiveCapSat {
+    rawMaxSat = effectiveCapSat
   }
 
   maxMsat, err := satToMsat(rawMaxSat)
@@ -653,13 +654,20 @@ func minutesToHoursCeil(minutes int) int {
   return (minutes + 59) / 60
 }
 
-func withinMaxHTLCHysteresis(currentMaxMsat uint64, targetMaxMsat uint64, capacitySat int64) bool {
+func withinMaxHTLCHysteresis(currentMaxMsat uint64, targetMaxMsat uint64, effectiveCapacitySat int64, volatileBalance bool) bool {
   diff := absUint64Diff(currentMaxMsat, targetMaxMsat)
   thresholdSat := htlcManagerMaxHysteresisBaseSat
-  if capacitySat > 0 {
-    relSat := capacitySat / htlcManagerMaxHysteresisDivisor
+  if effectiveCapacitySat > 0 {
+    relSat := effectiveCapacitySat / htlcManagerMaxHysteresisDivisor
     if relSat > thresholdSat {
       thresholdSat = relSat
+    }
+  }
+  if volatileBalance && thresholdSat > 0 {
+    if thresholdSat > math.MaxInt64/htlcManagerVolatileHysteresisMultiplier {
+      thresholdSat = math.MaxInt64
+    } else {
+      thresholdSat *= htlcManagerVolatileHysteresisMultiplier
     }
   }
   thresholdMsat, err := satToMsat(thresholdSat)
@@ -674,6 +682,37 @@ func absUint64Diff(a uint64, b uint64) uint64 {
     return a - b
   }
   return b - a
+}
+
+func localReserveSat(ch lndclient.ChannelInfo) int64 {
+  reserveSat := ch.LocalChanReserveSat
+  if reserveSat < 0 {
+    reserveSat = 0
+  }
+  if reserveSat > ch.CapacitySat {
+    return ch.CapacitySat
+  }
+  return reserveSat
+}
+
+func maxHTLCUpperBoundSat(ch lndclient.ChannelInfo) int64 {
+  upper := ch.CapacitySat - localReserveSat(ch)
+  if upper < 0 {
+    return 0
+  }
+  return upper
+}
+
+func spendableLocalSat(ch lndclient.ChannelInfo) int64 {
+  local := ch.LocalBalanceSat - localReserveSat(ch)
+  if local < 0 {
+    return 0
+  }
+  upper := maxHTLCUpperBoundSat(ch)
+  if local > upper {
+    return upper
+  }
+  return local
 }
 
 func shortIdentifier(value string) string {

@@ -1095,6 +1095,12 @@ func (c *Client) ListChannels(ctx context.Context) ([]ChannelInfo, error) {
     var feeRatePpm *int64
     var inboundFeeRatePpm *int64
     localDisabled := isLocalChanDisabledFlags(ch.ChanStatusFlags)
+    localReserveSat := ch.LocalChanReserveSat
+    if localReserveSat <= 0 && ch.LocalConstraints != nil {
+      if reserve := int64(ch.LocalConstraints.GetChanReserveSat()); reserve > 0 {
+        localReserveSat = reserve
+      }
+    }
 
     if !ch.Private {
       if edge, err := client.GetChanInfo(ctx, &lnrpc.ChanInfoRequest{ChanId: ch.ChanId}); err == nil {
@@ -1132,6 +1138,9 @@ func (c *Client) ListChannels(ctx context.Context) ([]ChannelInfo, error) {
       CapacitySat: ch.Capacity,
       LocalBalanceSat: ch.LocalBalance,
       RemoteBalanceSat: ch.RemoteBalance,
+      LocalChanReserveSat: localReserveSat,
+      UnsettledBalanceSat: ch.UnsettledBalance,
+      PendingHtlcCount: len(ch.PendingHtlcs),
       BaseFeeMsat: baseFeeMsat,
       FeeRatePpm: feeRatePpm,
       InboundFeeRatePpm: inboundFeeRatePpm,
@@ -1715,6 +1724,9 @@ type ChannelInfo struct {
   CapacitySat int64 `json:"capacity_sat"`
   LocalBalanceSat int64 `json:"local_balance_sat"`
   RemoteBalanceSat int64 `json:"remote_balance_sat"`
+  LocalChanReserveSat int64 `json:"local_chan_reserve_sat,omitempty"`
+  UnsettledBalanceSat int64 `json:"unsettled_balance_sat,omitempty"`
+  PendingHtlcCount int `json:"pending_htlc_count,omitempty"`
   BaseFeeMsat *int64 `json:"base_fee_msat,omitempty"`
   FeeRatePpm *int64 `json:"fee_rate_ppm,omitempty"`
   InboundFeeRatePpm *int64 `json:"inbound_fee_rate_ppm,omitempty"`
