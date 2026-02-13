@@ -598,6 +598,14 @@ export default function LightningOps() {
         add('💎top-rev')
       } else if (tag === 'neg-margin') {
         add('⚠️neg-margin')
+      } else if (tag === 'htlc-policy-hot') {
+        add('🧾policy-hot')
+      } else if (tag === 'htlc-liquidity-hot') {
+        add('💧liq-hot')
+      } else if (tag === 'htlc-sample-low') {
+        add('📉htlc-low-sample')
+      } else if (tag === 'htlc-neutral-lock') {
+        add('🧯htlc-neutral')
       } else if (tag.startsWith('negm+')) {
         add(`💹${tag}`)
       } else if (tag === 'outrate-floor') {
