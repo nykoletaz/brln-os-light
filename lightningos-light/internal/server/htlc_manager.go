@@ -13,7 +13,6 @@ import (
   "time"
 
   "lightningos-light/internal/lndclient"
-  "lightningos-light/lnrpc"
   "lightningos-light/lnrpc/routerrpc"
 
   "github.com/jackc/pgx/v5"
