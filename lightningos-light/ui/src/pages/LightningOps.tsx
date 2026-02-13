@@ -606,6 +606,18 @@ export default function LightningOps() {
         add('📉htlc-low-sample')
       } else if (tag === 'htlc-neutral-lock') {
         add('🧯htlc-neutral')
+      } else if (tag.startsWith('htlc-liq+')) {
+        add('💧' + tag)
+      } else if (tag.startsWith('htlc-policy+')) {
+        add('🧾' + tag)
+      } else if (tag === 'htlc-liq-nodown') {
+        add('🛑liq-nodown')
+      } else if (tag === 'htlc-policy-nodown') {
+        add('🛑policy-nodown')
+      } else if (tag === 'htlc-neutral-nodown') {
+        add('🧯neutral-nodown')
+      } else if (tag === 'htlc-step-boost') {
+        add('⚡htlc-step')
       } else if (tag.startsWith('negm+')) {
         add(`💹${tag}`)
       } else if (tag === 'outrate-floor') {

@@ -234,6 +234,11 @@ type autofeeProfile struct {
   HTLCPolicyMinFails int
   HTLCLiquidityFailRate float64
   HTLCLiquidityMinFails int
+  HTLCLiquidityHotBump float64
+  HTLCLiquidityHotNoDownOutRatio float64
+  HTLCPolicyHotBump float64
+  HTLCPolicyHotNoDownMarginPpm int
+  HTLCHotStepCapBoost float64
 }
 
 type superSourceThresholds struct {
@@ -310,6 +315,11 @@ var autofeeProfiles = map[string]autofeeProfile{
     HTLCPolicyMinFails: 4,
     HTLCLiquidityFailRate: 0.30,
     HTLCLiquidityMinFails: 5,
+    HTLCLiquidityHotBump: 0.03,
+    HTLCLiquidityHotNoDownOutRatio: 0.08,
+    HTLCPolicyHotBump: 0.015,
+    HTLCPolicyHotNoDownMarginPpm: 0,
+    HTLCHotStepCapBoost: 0.01,
   },
   "moderate": {
     Name: "moderate",
@@ -375,6 +385,11 @@ var autofeeProfiles = map[string]autofeeProfile{
     HTLCPolicyMinFails: 3,
     HTLCLiquidityFailRate: 0.25,
     HTLCLiquidityMinFails: 4,
+    HTLCLiquidityHotBump: 0.05,
+    HTLCLiquidityHotNoDownOutRatio: 0.12,
+    HTLCPolicyHotBump: 0.025,
+    HTLCPolicyHotNoDownMarginPpm: 25,
+    HTLCHotStepCapBoost: 0.02,
   },
   "aggressive": {
     Name: "aggressive",
@@ -440,6 +455,11 @@ var autofeeProfiles = map[string]autofeeProfile{
     HTLCPolicyMinFails: 2,
     HTLCLiquidityFailRate: 0.20,
     HTLCLiquidityMinFails: 3,
+    HTLCLiquidityHotBump: 0.07,
+    HTLCLiquidityHotNoDownOutRatio: 0.18,
+    HTLCPolicyHotBump: 0.035,
+    HTLCPolicyHotNoDownMarginPpm: 50,
+    HTLCHotStepCapBoost: 0.03,
   },
 }
 
@@ -2415,6 +2435,9 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
 
   tags := []string{}
+  htlcSampleLow := false
+  htlcPolicyHot := false
+  htlcLiquidityHot := false
   if superSourceActive {
     tags = append(tags, "super-source")
     if superSourceLike {
@@ -2422,6 +2445,9 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
   if signal, ok := htlcSignals[ch.ChannelID]; ok && signal.Attempts60m > 0 {
+    htlcSampleLow = signal.SampleLow
+    htlcPolicyHot = signal.PolicyHot
+    htlcLiquidityHot = signal.LiquidityHot
     if signal.SampleLow {
       tags = append(tags, "htlc-sample-low")
     }
@@ -2534,6 +2560,43 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
 
+  htlcHotSignal := !htlcSampleLow && (htlcPolicyHot || htlcLiquidityHot)
+  if htlcHotSignal {
+    if htlcPolicyHot && htlcLiquidityHot {
+      if target < localPpm {
+        target = localPpm
+        tags = append(tags, "htlc-neutral-nodown")
+      }
+    } else {
+      if htlcLiquidityHot {
+        liqBump := e.profile.HTLCLiquidityHotBump
+        if liqBump > 0 {
+          target = int(math.Ceil(float64(target) * (1.0 + liqBump)))
+          tags = append(tags, fmt.Sprintf("htlc-liq+%d%%", int(math.Round(liqBump*100))))
+        }
+        liqNoDownOutRatio := e.profile.HTLCLiquidityHotNoDownOutRatio
+        if liqNoDownOutRatio <= 0 {
+          liqNoDownOutRatio = 0.10
+        }
+        if outRatio <= liqNoDownOutRatio && target < localPpm {
+          target = localPpm
+          tags = append(tags, "htlc-liq-nodown")
+        }
+      }
+      if htlcPolicyHot {
+        policyBump := e.profile.HTLCPolicyHotBump
+        if policyBump > 0 {
+          target = int(math.Ceil(float64(target) * (1.0 + policyBump)))
+          tags = append(tags, fmt.Sprintf("htlc-policy+%d%%", int(math.Round(policyBump*100))))
+        }
+        if marginPpm7d <= e.profile.HTLCPolicyHotNoDownMarginPpm && target < localPpm {
+          target = localPpm
+          tags = append(tags, "htlc-policy-nodown")
+        }
+      }
+    }
+  }
+
   capRefPpm := 0
   if perCost > 0 {
     capRefPpm = perCost
@@ -2602,6 +2665,10 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
   capFrac := e.profile.StepCap
   minStep := 5
+  if htlcHotSignal && target > localPpm && e.profile.HTLCHotStepCapBoost > 0 {
+    capFrac = math.Max(capFrac, e.profile.StepCap+e.profile.HTLCHotStepCapBoost)
+    tags = append(tags, "htlc-step-boost")
+  }
   if outRatio < 0.03 {
     capFrac = math.Max(capFrac, 0.10)
   } else if outRatio < 0.05 {
@@ -3547,6 +3614,18 @@ func formatAutofeeTags(d *decision) string {
       add("📉htlc-low-sample")
     case t == "htlc-neutral-lock":
       add("🧯htlc-neutral")
+    case strings.HasPrefix(t, "htlc-liq+"):
+      add("💧" + t)
+    case strings.HasPrefix(t, "htlc-policy+"):
+      add("🧾" + t)
+    case t == "htlc-liq-nodown":
+      add("🛑liq-nodown")
+    case t == "htlc-policy-nodown":
+      add("🛑policy-nodown")
+    case t == "htlc-neutral-nodown":
+      add("🧯neutral-nodown")
+    case t == "htlc-step-boost":
+      add("⚡htlc-step")
     case strings.HasPrefix(t, "negm+"):
       add("💹" + t)
     case t == "outrate-floor":
