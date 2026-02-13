@@ -101,7 +101,9 @@ type HtlcManagerLogEntry = {
 type HtlcManagerFailedEntry = {
   ts: string
   incoming_channel_id?: string
+  incoming_alias?: string
   outgoing_channel_id?: string
+  outgoing_alias?: string
   incoming_amt_msat?: number
   outgoing_amt_msat?: number
   potential_fee_msat?: number
@@ -426,6 +428,17 @@ export default function LightningOps() {
       return `${line.slice(0, idx + 1)} ${parsed.toLocaleString()}`
     })
   }, [autofeeResults])
+
+  const visibleHtlcManagerFailed = useMemo(() => {
+    return htlcManagerFailed.filter((entry) => {
+      if ((entry.event || '').toLowerCase() !== 'forward_fail') {
+        return true
+      }
+      const detail = (entry.failure_detail || '').trim()
+      const reason = (entry.failure_reason || '').trim()
+      return detail !== '' || reason !== ''
+    })
+  }, [htlcManagerFailed])
 
   const formatAutofeeReasonLabel = (reason?: string) => {
     const normalized = (reason || '').toLowerCase()
@@ -2741,7 +2754,7 @@ export default function LightningOps() {
             type="button"
             onClick={() => setHtlcManagerFailedOpen((open) => !open)}
           >
-            {htlcManagerFailedOpen ? t('common.hide') : t('lightningOps.htlcManagerFailedShow', { count: htlcManagerFailed.length })}
+            {htlcManagerFailedOpen ? t('common.hide') : t('lightningOps.htlcManagerFailedShow', { count: visibleHtlcManagerFailed.length })}
           </button>
         </div>
         {htlcManagerStatus && <p className="text-sm text-brass">{htlcManagerStatus}</p>}
@@ -2785,7 +2798,7 @@ export default function LightningOps() {
         )}
         {htlcManagerFailedOpen && (
           <div className="rounded-2xl border border-white/10 bg-ink/60 p-3">
-            {htlcManagerFailed.length ? (
+            {visibleHtlcManagerFailed.length ? (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[940px] text-xs text-fog/80">
                   <thead>
@@ -2801,11 +2814,17 @@ export default function LightningOps() {
                     </tr>
                   </thead>
                   <tbody>
-                    {htlcManagerFailed.map((entry, idx) => (
+                    {visibleHtlcManagerFailed.map((entry, idx) => (
                       <tr key={`${entry.ts}-${entry.incoming_channel_id}-${entry.outgoing_channel_id}-${idx}`} className="border-t border-white/5">
                         <td className="py-2 pr-3 whitespace-nowrap">{formatAmbossTime(entry.ts)}</td>
-                        <td className="py-2 pr-3 whitespace-nowrap">{entry.incoming_channel_id || '-'}</td>
-                        <td className="py-2 pr-3 whitespace-nowrap">{entry.outgoing_channel_id || '-'}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">
+                          <div className="text-fog">{entry.incoming_alias || '-'}</div>
+                          <div className="text-[11px] text-fog/50">{entry.incoming_channel_id || '-'}</div>
+                        </td>
+                        <td className="py-2 pr-3 whitespace-nowrap">
+                          <div className="text-fog">{entry.outgoing_alias || '-'}</div>
+                          <div className="text-[11px] text-fog/50">{entry.outgoing_channel_id || '-'}</div>
+                        </td>
                         <td className="py-2 pr-3 whitespace-nowrap">{formatSatFromMsat(entry.incoming_amt_msat)}</td>
                         <td className="py-2 pr-3 whitespace-nowrap">{formatSatFromMsat(entry.outgoing_amt_msat)}</td>
                         <td className="py-2 pr-3 whitespace-nowrap">{formatFeeMsat(entry.potential_fee_msat)}</td>

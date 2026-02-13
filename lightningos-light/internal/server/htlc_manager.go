@@ -83,7 +83,9 @@ type htlcManagerLogEntry struct {
 type htlcManagerFailedEntry struct {
   Timestamp string `json:"ts"`
   IncomingChannelID string `json:"incoming_channel_id"`
+  IncomingAlias string `json:"incoming_alias,omitempty"`
   OutgoingChannelID string `json:"outgoing_channel_id"`
+  OutgoingAlias string `json:"outgoing_alias,omitempty"`
   IncomingAmtMsat uint64 `json:"incoming_amt_msat,omitempty"`
   OutgoingAmtMsat uint64 `json:"outgoing_amt_msat,omitempty"`
   PotentialFeeMsat int64 `json:"potential_fee_msat,omitempty"`
@@ -1089,6 +1091,36 @@ func (s *Server) handleLNHTLCManagerFailed(w http.ResponseWriter, r *http.Reques
   }
   limit := parseHTLCManagerLogLimit(r.URL.Query().Get("limit"))
   entries := svc.Failed(limit)
+  if len(entries) > 0 && s.lnd != nil {
+    ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
+    channels, err := s.lnd.ListChannels(ctx)
+    cancel()
+    if err == nil {
+      aliasByChanID := make(map[string]string, len(channels))
+      for _, ch := range channels {
+        id := formatShortChanID(ch.ChannelID)
+        if id == "" {
+          continue
+        }
+        alias := strings.TrimSpace(ch.PeerAlias)
+        if alias == "" {
+          alias = shortIdentifier(ch.RemotePubkey)
+        }
+        if alias == "" {
+          continue
+        }
+        aliasByChanID[id] = alias
+      }
+      for i := range entries {
+        if entries[i].IncomingAlias == "" && entries[i].IncomingChannelID != "" {
+          entries[i].IncomingAlias = aliasByChanID[entries[i].IncomingChannelID]
+        }
+        if entries[i].OutgoingAlias == "" && entries[i].OutgoingChannelID != "" {
+          entries[i].OutgoingAlias = aliasByChanID[entries[i].OutgoingChannelID]
+        }
+      }
+    }
+  }
   writeJSON(w, http.StatusOK, map[string]any{
     "entries": entries,
   })
