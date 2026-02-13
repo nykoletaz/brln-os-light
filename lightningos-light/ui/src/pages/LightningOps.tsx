@@ -75,7 +75,8 @@ type ChanHealStatus = {
 type HtlcManagerStatus = {
   enabled: boolean
   status: string
-  interval_hours: number
+  interval_minutes?: number
+  interval_hours?: number
   min_htlc_sat: number
   max_local_pct: number
   last_attempt_at?: string
@@ -257,7 +258,7 @@ export default function LightningOps() {
   const [htlcManager, setHtlcManager] = useState<HtlcManagerStatus | null>(null)
   const [htlcManagerStatus, setHtlcManagerStatus] = useState('')
   const [htlcManagerBusy, setHtlcManagerBusy] = useState(false)
-  const [htlcManagerIntervalHours, setHtlcManagerIntervalHours] = useState('4')
+  const [htlcManagerIntervalMinutes, setHtlcManagerIntervalMinutes] = useState('240')
   const [htlcManagerMinSat, setHtlcManagerMinSat] = useState('1')
   const [htlcManagerMaxPct, setHtlcManagerMaxPct] = useState('0')
   const [htlcManagerLogs, setHtlcManagerLogs] = useState<HtlcManagerLogEntry[]>([])
@@ -993,8 +994,9 @@ export default function LightningOps() {
     if (htlcManagerResult.status === 'fulfilled') {
       const payload = htlcManagerResult.value as HtlcManagerStatus
       setHtlcManager(payload)
-      if (payload?.interval_hours) {
-        setHtlcManagerIntervalHours(String(payload.interval_hours))
+      const intervalMinutes = payload?.interval_minutes ?? ((payload?.interval_hours ?? 0) * 60)
+      if (intervalMinutes > 0) {
+        setHtlcManagerIntervalMinutes(String(intervalMinutes))
       }
       if (payload?.min_htlc_sat) {
         setHtlcManagerMinSat(String(payload.min_htlc_sat))
@@ -1143,8 +1145,9 @@ export default function LightningOps() {
           if (!mounted) return
           const payload = data as HtlcManagerStatus
           setHtlcManager(payload)
-          if (!htlcManagerFormDirtyRef.current && payload?.interval_hours) {
-            setHtlcManagerIntervalHours(String(payload.interval_hours))
+          const intervalMinutes = payload?.interval_minutes ?? ((payload?.interval_hours ?? 0) * 60)
+          if (!htlcManagerFormDirtyRef.current && intervalMinutes > 0) {
+            setHtlcManagerIntervalMinutes(String(intervalMinutes))
           }
           if (!htlcManagerFormDirtyRef.current && payload?.min_htlc_sat) {
             setHtlcManagerMinSat(String(payload.min_htlc_sat))
@@ -1571,10 +1574,10 @@ export default function LightningOps() {
 
   const handleSaveHtlcManager = async () => {
     if (htlcManagerBusy) return
-    const intervalHours = Number(htlcManagerIntervalHours || 0)
+    const intervalMinutes = Number(htlcManagerIntervalMinutes || 0)
     const minSat = Number(htlcManagerMinSat || 0)
     const maxPct = Number(htlcManagerMaxPct || 0)
-    if (!intervalHours || intervalHours < 1 || intervalHours > 48) {
+    if (!intervalMinutes || intervalMinutes < 1 || intervalMinutes > 2880) {
       setHtlcManagerStatus(t('lightningOps.htlcManagerIntervalInvalid'))
       return
     }
@@ -1590,7 +1593,7 @@ export default function LightningOps() {
     setHtlcManagerStatus(t('lightningOps.htlcManagerSaving'))
     try {
       const res = await updateLnHtlcManager({
-        interval_hours: intervalHours,
+        interval_minutes: intervalMinutes,
         min_htlc_sat: minSat,
         max_local_pct: maxPct
       })
@@ -2663,10 +2666,10 @@ export default function LightningOps() {
               className="input-field mt-2"
               type="number"
               min={1}
-              max={48}
-              value={htlcManagerIntervalHours}
+              max={2880}
+              value={htlcManagerIntervalMinutes}
               onChange={(e) => {
-                setHtlcManagerIntervalHours(e.target.value)
+                setHtlcManagerIntervalMinutes(e.target.value)
                 htlcManagerFormDirtyRef.current = true
               }}
             />

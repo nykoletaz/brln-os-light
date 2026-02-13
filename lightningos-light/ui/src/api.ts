@@ -122,6 +122,7 @@ export const updateLnChanHeal = (payload: { enabled?: boolean; interval_sec?: nu
 export const getLnHtlcManager = () => request('/api/lnops/channel/htlc-manager')
 export const updateLnHtlcManager = (payload: {
   enabled?: boolean
+  interval_minutes?: number
   interval_hours?: number
   min_htlc_sat?: number
   max_local_pct?: number

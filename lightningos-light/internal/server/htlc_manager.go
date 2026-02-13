@@ -20,11 +20,13 @@ import (
 
 const (
   htlcManagerConfigID = 1
-  htlcManagerDefaultIntervalHours = 4
+  htlcManagerDefaultIntervalMinutes = 240
   htlcManagerDefaultMinHTLCSat int64 = 1
   htlcManagerDefaultMaxLocalPct = 0
-  htlcManagerMinIntervalHours = 1
-  htlcManagerMaxIntervalHours = 48
+  htlcManagerMaxHysteresisBaseSat int64 = 100
+  htlcManagerMaxHysteresisDivisor int64 = 1000 // 0.1% of channel capacity in sats
+  htlcManagerMinIntervalMinutes = 1
+  htlcManagerMaxIntervalMinutes = 48 * 60
   htlcManagerLogCapacity = 300
   htlcManagerDefaultLogLimit = 100
   htlcManagerMaxLogLimit = 500
@@ -34,13 +36,14 @@ var errInvalidHTLCManagerConfig = errors.New("invalid htlc manager config")
 
 type HtlcManagerConfig struct {
   Enabled bool `json:"enabled"`
-  IntervalHours int `json:"interval_hours"`
+  IntervalMinutes int `json:"interval_minutes"`
   MinHtlcSat int64 `json:"min_htlc_sat"`
   MaxLocalPct int `json:"max_local_pct"`
 }
 
 type HtlcManagerConfigUpdate struct {
   Enabled *bool
+  IntervalMinutes *int
   IntervalHours *int
   MinHtlcSat *int64
   MaxLocalPct *int
@@ -50,6 +53,7 @@ type HtlcManagerConfigUpdate struct {
 type htlcManagerStatusPayload struct {
   Enabled bool `json:"enabled"`
   Status string `json:"status"`
+  IntervalMinutes int `json:"interval_minutes"`
   IntervalHours int `json:"interval_hours"`
   MinHtlcSat int64 `json:"min_htlc_sat"`
   MaxLocalPct int `json:"max_local_pct"`
@@ -108,18 +112,18 @@ func NewHtlcManager(db *pgxpool.Pool, lnd *lndclient.Client, logger *log.Logger)
 func defaultHTLCManagerConfig() HtlcManagerConfig {
   return HtlcManagerConfig{
     Enabled: false,
-    IntervalHours: htlcManagerDefaultIntervalHours,
+    IntervalMinutes: htlcManagerDefaultIntervalMinutes,
     MinHtlcSat: htlcManagerDefaultMinHTLCSat,
     MaxLocalPct: htlcManagerDefaultMaxLocalPct,
   }
 }
 
 func normalizeHTLCManagerConfig(cfg HtlcManagerConfig) HtlcManagerConfig {
-  if cfg.IntervalHours < htlcManagerMinIntervalHours {
-    cfg.IntervalHours = htlcManagerMinIntervalHours
+  if cfg.IntervalMinutes < htlcManagerMinIntervalMinutes {
+    cfg.IntervalMinutes = htlcManagerMinIntervalMinutes
   }
-  if cfg.IntervalHours > htlcManagerMaxIntervalHours {
-    cfg.IntervalHours = htlcManagerMaxIntervalHours
+  if cfg.IntervalMinutes > htlcManagerMaxIntervalMinutes {
+    cfg.IntervalMinutes = htlcManagerMaxIntervalMinutes
   }
   if cfg.MinHtlcSat < 1 {
     cfg.MinHtlcSat = 1
@@ -131,8 +135,8 @@ func normalizeHTLCManagerConfig(cfg HtlcManagerConfig) HtlcManagerConfig {
 }
 
 func validateHTLCManagerConfig(cfg HtlcManagerConfig) error {
-  if cfg.IntervalHours < htlcManagerMinIntervalHours || cfg.IntervalHours > htlcManagerMaxIntervalHours {
-    return fmt.Errorf("%w: interval_hours must be between %d and %d", errInvalidHTLCManagerConfig, htlcManagerMinIntervalHours, htlcManagerMaxIntervalHours)
+  if cfg.IntervalMinutes < htlcManagerMinIntervalMinutes || cfg.IntervalMinutes > htlcManagerMaxIntervalMinutes {
+    return fmt.Errorf("%w: interval_minutes must be between %d and %d", errInvalidHTLCManagerConfig, htlcManagerMinIntervalMinutes, htlcManagerMaxIntervalMinutes)
   }
   if cfg.MinHtlcSat < 1 {
     return fmt.Errorf("%w: min_htlc_sat must be at least 1", errInvalidHTLCManagerConfig)
@@ -153,10 +157,40 @@ create table if not exists htlc_manager_config (
   id integer primary key,
   enabled boolean not null default false,
   interval_hours integer not null default 4,
+  interval_minutes integer not null default 240,
   min_htlc_sat bigint not null default 1,
   max_local_pct integer not null default 0,
   updated_at timestamptz not null default now()
 );
+`); err != nil {
+    return err
+  }
+
+  if _, err := m.db.Exec(ctx, `
+alter table htlc_manager_config
+  add column if not exists interval_minutes integer;
+`); err != nil {
+    return err
+  }
+
+  if _, err := m.db.Exec(ctx, `
+alter table htlc_manager_config
+  alter column interval_minutes set default 240;
+`); err != nil {
+    return err
+  }
+
+  if _, err := m.db.Exec(ctx, `
+update htlc_manager_config
+set interval_minutes = greatest(interval_hours * 60, $1)
+where interval_minutes is null or interval_minutes <= 0
+`, htlcManagerMinIntervalMinutes); err != nil {
+    return err
+  }
+
+  if _, err := m.db.Exec(ctx, `
+alter table htlc_manager_config
+  alter column interval_minutes set not null;
 `); err != nil {
     return err
   }
@@ -176,12 +210,12 @@ func (m *HtlcManager) GetConfig(ctx context.Context) (HtlcManagerConfig, error) 
   }
 
   err := m.db.QueryRow(ctx, `
-select enabled, interval_hours, min_htlc_sat, max_local_pct
+select enabled, coalesce(interval_minutes, interval_hours * 60), min_htlc_sat, max_local_pct
 from htlc_manager_config
 where id = $1
 `, htlcManagerConfigID).Scan(
     &cfg.Enabled,
-    &cfg.IntervalHours,
+    &cfg.IntervalMinutes,
     &cfg.MinHtlcSat,
     &cfg.MaxLocalPct,
   )
@@ -199,15 +233,16 @@ func (m *HtlcManager) upsertConfig(ctx context.Context, cfg HtlcManagerConfig) e
     return errors.New("db unavailable")
   }
   _, err := m.db.Exec(ctx, `
-insert into htlc_manager_config (id, enabled, interval_hours, min_htlc_sat, max_local_pct, updated_at)
-values ($1, $2, $3, $4, $5, now())
+insert into htlc_manager_config (id, enabled, interval_hours, interval_minutes, min_htlc_sat, max_local_pct, updated_at)
+values ($1, $2, $3, $4, $5, $6, now())
 on conflict (id) do update set
   enabled = excluded.enabled,
   interval_hours = excluded.interval_hours,
+  interval_minutes = excluded.interval_minutes,
   min_htlc_sat = excluded.min_htlc_sat,
   max_local_pct = excluded.max_local_pct,
   updated_at = now()
-`, htlcManagerConfigID, cfg.Enabled, cfg.IntervalHours, cfg.MinHtlcSat, cfg.MaxLocalPct)
+`, htlcManagerConfigID, cfg.Enabled, minutesToHoursCeil(cfg.IntervalMinutes), cfg.IntervalMinutes, cfg.MinHtlcSat, cfg.MaxLocalPct)
   return err
 }
 
@@ -264,8 +299,10 @@ func (m *HtlcManager) UpdateConfig(ctx context.Context, update HtlcManagerConfig
   if update.Enabled != nil {
     current.Enabled = *update.Enabled
   }
-  if update.IntervalHours != nil {
-    current.IntervalHours = *update.IntervalHours
+  if update.IntervalMinutes != nil {
+    current.IntervalMinutes = *update.IntervalMinutes
+  } else if update.IntervalHours != nil {
+    current.IntervalMinutes = *update.IntervalHours * 60
   }
   if update.MinHtlcSat != nil {
     current.MinHtlcSat = *update.MinHtlcSat
@@ -313,7 +350,7 @@ func (m *HtlcManager) Snapshot() htlcManagerStatusPayload {
   status := "disabled"
   if cfg.Enabled {
     status = "checking"
-    interval := time.Duration(localMaxInt(cfg.IntervalHours, 1)) * time.Hour
+    interval := time.Duration(localMaxInt(cfg.IntervalMinutes, 1)) * time.Minute
     if inFlight {
       status = "checking"
     } else if lastError != "" && (lastOK.IsZero() || lastErrorAt.After(lastOK)) {
@@ -329,7 +366,8 @@ func (m *HtlcManager) Snapshot() htlcManagerStatusPayload {
   payload := htlcManagerStatusPayload{
     Enabled: cfg.Enabled,
     Status: status,
-    IntervalHours: cfg.IntervalHours,
+    IntervalMinutes: cfg.IntervalMinutes,
+    IntervalHours: minutesToHoursCeil(cfg.IntervalMinutes),
     MinHtlcSat: cfg.MinHtlcSat,
     MaxLocalPct: cfg.MaxLocalPct,
     LastChangedCount: lastChanged,
@@ -396,15 +434,15 @@ func (m *HtlcManager) trigger(force bool) {
 
 func (m *HtlcManager) currentInterval() time.Duration {
   m.mu.Lock()
-  interval := m.config.IntervalHours
+  interval := m.config.IntervalMinutes
   m.mu.Unlock()
-  if interval < htlcManagerMinIntervalHours {
-    interval = htlcManagerMinIntervalHours
+  if interval < htlcManagerMinIntervalMinutes {
+    interval = htlcManagerMinIntervalMinutes
   }
-  if interval > htlcManagerMaxIntervalHours {
-    interval = htlcManagerMaxIntervalHours
+  if interval > htlcManagerMaxIntervalMinutes {
+    interval = htlcManagerMaxIntervalMinutes
   }
-  return time.Duration(interval) * time.Hour
+  return time.Duration(interval) * time.Minute
 }
 
 func (m *HtlcManager) run() {
@@ -488,7 +526,7 @@ func (m *HtlcManager) tick(force bool) {
       continue
     }
 
-    if policy.MinHtlcMsat == targetMinMsat && policy.MaxHtlcMsat == targetMaxMsat {
+    if policy.MinHtlcMsat == targetMinMsat && withinMaxHTLCHysteresis(policy.MaxHtlcMsat, targetMaxMsat, ch.CapacitySat) {
       continue
     }
 
@@ -608,6 +646,36 @@ func satToMsat(sat int64) (uint64, error) {
   return uint64(sat) * 1000, nil
 }
 
+func minutesToHoursCeil(minutes int) int {
+  if minutes <= 0 {
+    return 0
+  }
+  return (minutes + 59) / 60
+}
+
+func withinMaxHTLCHysteresis(currentMaxMsat uint64, targetMaxMsat uint64, capacitySat int64) bool {
+  diff := absUint64Diff(currentMaxMsat, targetMaxMsat)
+  thresholdSat := htlcManagerMaxHysteresisBaseSat
+  if capacitySat > 0 {
+    relSat := capacitySat / htlcManagerMaxHysteresisDivisor
+    if relSat > thresholdSat {
+      thresholdSat = relSat
+    }
+  }
+  thresholdMsat, err := satToMsat(thresholdSat)
+  if err != nil {
+    return currentMaxMsat == targetMaxMsat
+  }
+  return diff <= thresholdMsat
+}
+
+func absUint64Diff(a uint64, b uint64) uint64 {
+  if a >= b {
+    return a - b
+  }
+  return b - a
+}
+
 func shortIdentifier(value string) string {
   trimmed := strings.TrimSpace(value)
   if trimmed == "" {
@@ -695,6 +763,7 @@ func (s *Server) handleLNHTLCManagerPost(w http.ResponseWriter, r *http.Request)
 
   var req struct {
     Enabled *bool `json:"enabled"`
+    IntervalMinutes *int `json:"interval_minutes"`
     IntervalHours *int `json:"interval_hours"`
     MinHtlcSat *int64 `json:"min_htlc_sat"`
     MaxLocalPct *int `json:"max_local_pct"`
@@ -709,6 +778,7 @@ func (s *Server) handleLNHTLCManagerPost(w http.ResponseWriter, r *http.Request)
   defer cancel()
   payload, err := svc.UpdateConfig(ctx, HtlcManagerConfigUpdate{
     Enabled: req.Enabled,
+    IntervalMinutes: req.IntervalMinutes,
     IntervalHours: req.IntervalHours,
     MinHtlcSat: req.MinHtlcSat,
     MaxLocalPct: req.MaxLocalPct,

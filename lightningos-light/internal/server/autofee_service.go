@@ -2707,6 +2707,15 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     tags = append(tags, "profit-protect-relax")
   }
 
+  // Final safety lock: never reduce below current ppm while margin is negative.
+  // This runs after all ceilings/floors/step caps to avoid late-stage overrides.
+  if marginPpm7d < 0 && finalPpm < localPpm {
+    finalPpm = localPpm
+    if !containsTag(tags, "no-down-neg-margin") {
+      tags = append(tags, "no-down-neg-margin")
+    }
+  }
+
   inboundDiscount := 0
   if e.cfg.InboundPassiveEnabled && classLabel == "sink" && outRatio <= 0.10 && fwdCount >= 5 && marginPpm7d >= 200 {
     anchor := int(math.Ceil(float64(baseCostPpm) * 1.002))
