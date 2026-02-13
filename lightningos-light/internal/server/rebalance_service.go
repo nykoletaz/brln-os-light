@@ -3937,7 +3937,11 @@ group by coalesce(rebal_target_chan_id, channel_id)
     if err := rows.Scan(&channelID, &feeMsat, &amountSat); err != nil {
       return costs, err
     }
-    if channelID <= 0 {
+    // channel_id is stored as bigint (signed). When the original chan_id is a
+    // uint64 with the high bit set, scanning into int64 yields a negative
+    // value, but uint64(channelID) still maps back to the original chan_id.
+    // Only zero is invalid here.
+    if channelID == 0 {
       continue
     }
     stat := rebalanceCost7dStat{

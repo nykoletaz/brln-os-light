@@ -255,6 +255,14 @@ UI parameters:
 - `Circuit breaker`: reduces steps if demand drops after recent increases.
 - `Extreme drain`: accelerates fee increases when a channel is chronically drained.
 - `Super source` + base fee: raises base fee when a channel is classified as super source.
+- `HTLC signal integration`: enables failed-HTLC feedback from HTLC Manager.
+- `HTLC mode`: `observe_only` (telemetry/tags only), `policy_only` (policy-side effects only), `full` (policy + liquidity effects, default).
+
+HTLC signal behavior:
+- Signal window is aligned to Autofee cadence: `max(run_interval, 60m)`.
+- Minimum sample/fail thresholds are scaled by the active HTLC window.
+- Summary line includes: `htlc_liq_hot`, `htlc_policy_hot`, `htlc_low_sample`, `htlc_window`.
+- Per-channel line includes counters when present: `htlc<window>m a=<attempts> p=<policy_fails> l=<liquidity_fails>`.
 
 Automatic calibration:
 - Each run computes a node classification and liquidity status to auto-scale thresholds.
@@ -278,47 +286,65 @@ Autofee Results lines:
 - Results filters: you can show the last N runs and optionally filter by a local time range.
 
 Tag glossary (Autofee Results):
-- `🧭discovery`: channel in discovery mode.
-- `🧨harddrop`: discovery harddrop triggered (no baseline + idle).
-- `🧭explorer`: explorer mode active.
-- `🧭skip-cooldown`: cooldown skipped on down move due to explorer.
-- `📈surge+X%`: surge bump applied.
-- `💎top-rev`: top revenue share bump applied.
-- `⚠️neg-margin`: negative margin protection bump.
-- `💹negm+X%`: negative margin surge (profit-protection uplift).
-- `🧱revfloor`: revenue floor applied.
-- `📊outrate-floor`: outrate floor applied.
-- `📌peg`: peg to observed outrate.
-- `📌peg-grace`: peg applied inside grace window.
-- `📌peg-demand`: peg applied due to strong demand vs seed.
-- `🧯cb`: circuit breaker reduced the step.
-- `⚡extreme`: extreme drain step cap/min-step boost applied.
-- `⚡turbo`: extreme drain turbo boost applied.
-- `⏳cooldown`: cooldown blocked an update.
-- `⏳profit-hold`: cooldown held a profitable down move.
-- `🧊hold-small`: change below min delta/percent.
-- `🟰same-ppm`: target equals current ppm.
-- `🚫down-low`: no down-move while deeply drained.
-- `🚫down-neg`: no down-move while margin is negative.
-- `🧱sink-floor`: extra floor margin applied to sink channels.
-- `📈trend-up` / `📉trend-down` / `➡️trend-flat`: expected direction of the next move.
-- `🔥super-source`: channel classified as super source.
-- `🔥super-source-like`: router-like super source.
-- `↘️inb-<n>`: inbound discount (passive rebalance).
-- `🌐seed-amboss`: Amboss seed used.
+- `sink`, `source`, `router`, `unknown`: class labels.
+- `discovery`: channel in discovery mode.
+- `discovery-hard`: discovery harddrop triggered (no baseline + idle).
+- `explorer`: explorer mode active.
+- `cooldown-skip`: cooldown skipped on a down move due to explorer.
+- `surge+X%`: surge bump applied.
+- `top-rev`: top-revenue-share bump applied.
+- `neg-margin`: negative-margin protection bump.
+- `negm+X%`: additional negative-margin uplift.
+- `revfloor`: revenue floor applied.
+- `outrate-floor`: outrate floor applied.
+- `peg`: peg to observed outrate.
+- `peg-grace`: peg applied inside grace window.
+- `peg-demand`: peg applied due to strong demand vs seed.
+- `circuit-breaker`: circuit breaker reduced the step.
+- `extreme-drain`: extreme-drain step boost path used.
+- `extreme-drain-turbo`: extra extreme-drain turbo uplift.
+- `cooldown`: cooldown blocked an update.
+- `cooldown-profit`: cooldown held a profitable down move.
+- `hold-small`: change below minimum delta/percent.
+- `same-ppm`: target equals current ppm.
+- `no-down-low`: down move blocked while deeply drained.
+- `no-down-neg-margin`: down move blocked while margin is negative.
+- `sink-floor`: extra floor margin applied to sink channels.
+- `trend-up`, `trend-down`, `trend-flat`: next-move directional hint.
+- `stepcap`: step cap applied.
+- `stepcap-lock`: step cap lock applied.
+- `floor-lock`: floor lock applied.
+- `global-neg-lock`: global negative-margin lock applied.
+- `lock-skip-no-chan-rebal`: lock skipped because there is no channel rebalance history.
+- `lock-skip-sink-profit`: lock skipped in sink profitability path.
+- `profit-protect-lock`: profit-protection lock applied.
+- `profit-protect-relax`: profit-protection relaxed.
+- `super-source`: channel classified as super source.
+- `super-source-like`: router-like super-source classification.
+- `inb-<n>`: inbound discount applied.
+- `htlc-policy-hot`: high policy-failure HTLC signal.
+- `htlc-liquidity-hot`: high liquidity-failure HTLC signal.
+- `htlc-sample-low`: HTLC sample too small for hot classification.
+- `htlc-neutral-lock`: both HTLC hot signals present and neutral lock path used.
+- `htlc-liq+X%`: liquidity-hot bump applied.
+- `htlc-policy+X%`: policy-hot bump applied.
+- `htlc-liq-nodown`: down move blocked by liquidity-hot signal.
+- `htlc-policy-nodown`: down move blocked by policy-hot signal.
+- `htlc-neutral-nodown`: down move blocked by combined HTLC lock.
+- `htlc-step-boost`: HTLC hot-signal step-cap boost.
+- `seed:amboss`: Amboss seed used.
 - `seed:amboss-missing`: Amboss token missing.
 - `seed:amboss-empty`: Amboss returned no data.
 - `seed:amboss-error`: Amboss fetch error.
-- `📐seed-med`: Amboss median blended in.
-- `📉seed-vol-<n>%`: volatility penalty applied.
-- `🔁seed-ratio×<f>`: out/in ratio adjustment applied.
-- `📊seed-outrate`: seed from recent outrate.
-- `💾seed-mem`: seed from memory.
-- `⚙️seed-default`: default seed fallback.
-- `🛡️seed-guard`: seed jump cap applied.
-- `🧢seed-p95`: seed capped at Amboss p95.
-- `🧱seed-cap`: absolute seed cap applied.
-
+- `seed:med`: Amboss median blended in.
+- `seed:vol-<n>%`: volatility penalty applied.
+- `seed:ratio<factor>`: out/in ratio adjustment applied.
+- `seed:outrate`: seed from recent outrate.
+- `seed:mem`: seed from memory.
+- `seed:default`: default seed fallback.
+- `seed:guard`: seed jump guard applied.
+- `seed:p95cap`: seed capped at Amboss p95.
+- `seed:absmax`: absolute seed cap applied.
 
 ## Web terminal (optional)
 LightningOS Light can expose a protected web terminal using GoTTY.
