@@ -2770,10 +2770,6 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
   roiEstimate := 0.0
   roiEstimateValid := false
   targetAmount := computeDeficitAmount(ch, target)
-  targetPolicy := lndclient.ChannelPolicySnapshot{
-    FeeRatePpm: outgoingFee,
-    BaseFeeMsat: outgoingBaseMsat,
-  }
   estCost := estimateHistoricalCost(targetAmount, cost7d.FeePpm)
   if estCost > 0 && revenue7dSat > 0 {
     roiEstimate = float64(revenue7dSat) / float64(estCost)
