@@ -144,6 +144,9 @@ type RebalanceChannel struct {
   PaybackProgress float64 `json:"payback_progress"`
   MaxSourceSat int64 `json:"max_source_sat"`
   Revenue7dSat int64 `json:"revenue_7d_sat"`
+  RebalanceCost7dSat int64 `json:"rebalance_cost_7d_sat"`
+  RebalanceCost7dPpm int64 `json:"rebalance_cost_7d_ppm"`
+  RebalanceAmount7dSat int64 `json:"rebalance_amount_7d_sat"`
   ROIEstimate float64 `json:"roi_estimate"`
   ROIEstimateValid bool `json:"roi_estimate_valid"`
   ExcludedAsSource bool `json:"excluded_as_source"`
@@ -211,6 +214,12 @@ type pairStat struct {
   LastFailAt time.Time
   SuccessAmountSat int64
   SuccessFeePpm int64
+}
+
+type rebalanceCost7dStat struct {
+  FeeSat int64
+  AmountSat int64
+  FeePpm int64
 }
 
 type manualRestartInfo struct {
@@ -535,6 +544,7 @@ func (s *RebalanceService) runManualRestartWatch() {
   ledger, _ := s.loadLedger(ctx)
   _ = s.applyForwardDeltas(ctx, ledger)
   revenueByChannel, _ := s.fetchChannelRevenue7d(ctx)
+  costByChannel, _ := s.fetchChannelRebalanceCost7d(ctx)
 
   channels, err := s.lnd.ListChannels(ctx)
   if err != nil {
@@ -549,7 +559,7 @@ func (s *RebalanceService) runManualRestartWatch() {
     if s.isChannelBusy(ch.ChannelID) {
       continue
     }
-    snapshot := s.buildChannelSnapshot(ctx, cfg, false, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], exclusions[ch.ChannelID])
+    snapshot := s.buildChannelSnapshot(ctx, cfg, false, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], costByChannel[ch.ChannelID], exclusions[ch.ChannelID])
     if !snapshot.EligibleAsTarget {
       continue
     }
@@ -616,6 +626,7 @@ func (s *RebalanceService) runAutoScan() {
   }()
 
   revenueByChannel, _ := s.fetchChannelRevenue7d(ctx)
+  costByChannel, _ := s.fetchChannelRebalanceCost7d(ctx)
   lastAutoByTarget := s.loadLastAutoEnqueueTimes(ctx)
   s.mu.Lock()
   for channelID, last := range s.lastAutoByTarget {
@@ -641,7 +652,7 @@ func (s *RebalanceService) runAutoScan() {
       targetPct = rebalanceDefaultTargetOutboundPct
     }
 
-    snapshot := s.buildChannelSnapshot(ctx, cfg, criticalActive, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], exclusions[ch.ChannelID])
+    snapshot := s.buildChannelSnapshot(ctx, cfg, criticalActive, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], costByChannel[ch.ChannelID], exclusions[ch.ChannelID])
     if snapshot.EligibleAsSource {
       eligibleSources++
       totalAvailable += snapshot.MaxSourceSat
@@ -649,11 +660,7 @@ func (s *RebalanceService) runAutoScan() {
 
     if setting.AutoEnabled && snapshot.EligibleAsTarget {
       targetAmount := snapshot.TargetAmountSat
-      targetPolicy := lndclient.ChannelPolicySnapshot{
-        FeeRatePpm: snapshot.OutgoingFeePpm,
-        BaseFeeMsat: snapshot.OutgoingBaseMsat,
-      }
-      estimatedCost := estimateMaxCost(targetAmount, targetPolicy, cfg)
+      estimatedCost := estimateHistoricalCost(targetAmount, snapshot.RebalanceCost7dPpm)
       expectedGain := estimateTargetGain(targetAmount, snapshot.Revenue7dSat, snapshot.LocalBalanceSat, snapshot.CapacitySat)
       expectedROI, roiValid := estimateTargetROI(expectedGain, estimatedCost, targetAmount, snapshot.OutgoingFeePpm, snapshot.PeerFeeRatePpm)
       if cfg.ROIMin > 0 && roiValid && expectedROI < cfg.ROIMin {
@@ -1018,12 +1025,13 @@ func (s *RebalanceService) runJob(jobID int64, targetChannelID uint64, amount in
   }
 
   revenueByChannel, _ := s.fetchChannelRevenue7d(ctx)
+  costByChannel, _ := s.fetchChannelRebalanceCost7d(ctx)
 
   targetFound := false
   channelSnapshots := []RebalanceChannel{}
   for _, ch := range channels {
     setting := settings[ch.ChannelID]
-    snapshot := s.buildChannelSnapshot(ctx, cfg, false, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], exclusions[ch.ChannelID])
+    snapshot := s.buildChannelSnapshot(ctx, cfg, false, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], costByChannel[ch.ChannelID], exclusions[ch.ChannelID])
     if ch.ChannelID == targetChannelID {
       targetFound = true
       snapshot.TargetOutboundPct = targetPct
@@ -2616,6 +2624,7 @@ func (s *RebalanceService) scheduleManualRestart(info manualRestartInfo) {
   exclusions, _ := s.loadExclusions(restartCtx)
   ledger, _ := s.loadLedger(restartCtx)
   revenueByChannel, _ := s.fetchChannelRevenue7d(restartCtx)
+  costByChannel, _ := s.fetchChannelRebalanceCost7d(restartCtx)
 
   channels, err := s.lnd.ListChannels(restartCtx)
   if err != nil {
@@ -2638,7 +2647,7 @@ func (s *RebalanceService) scheduleManualRestart(info manualRestartInfo) {
   if !setting.ManualRestartEnabled {
     return
   }
-  snapshot := s.buildChannelSnapshot(restartCtx, cfg, false, target, setting, ledger[target.ChannelID], revenueByChannel[target.ChannelID], exclusions[target.ChannelID])
+  snapshot := s.buildChannelSnapshot(restartCtx, cfg, false, target, setting, ledger[target.ChannelID], revenueByChannel[target.ChannelID], costByChannel[target.ChannelID], exclusions[target.ChannelID])
   deficit := computeDeficitAmount(target, snapshot.TargetOutboundPct)
   if deficit <= 0 {
     return
@@ -2671,7 +2680,7 @@ set status='cancelled', reason='cancelled', completed_at=now()
 where id=$1 and status in ('running','queued')`, jobID)
 }
 
-func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg RebalanceConfig, criticalActive bool, ch lndclient.ChannelInfo, setting channelSetting, ledger *channelLedger, revenue7dSat int64, excluded bool) RebalanceChannel {
+func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg RebalanceConfig, criticalActive bool, ch lndclient.ChannelInfo, setting channelSetting, ledger *channelLedger, revenue7dSat int64, cost7d rebalanceCost7dStat, excluded bool) RebalanceChannel {
   capacity := float64(ch.CapacitySat)
   localPct := 0.0
   remotePct := 0.0
@@ -2765,7 +2774,7 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
     FeeRatePpm: outgoingFee,
     BaseFeeMsat: outgoingBaseMsat,
   }
-  estCost := estimateMaxCost(targetAmount, targetPolicy, cfg)
+  estCost := estimateHistoricalCost(targetAmount, cost7d.FeePpm)
   if estCost > 0 && revenue7dSat > 0 {
     roiEstimate = float64(revenue7dSat) / float64(estCost)
     roiEstimateValid = true
@@ -2801,6 +2810,9 @@ func (s *RebalanceService) buildChannelSnapshot(ctx context.Context, cfg Rebalan
     PaybackProgress: paybackProgress,
     MaxSourceSat: maxSource,
     Revenue7dSat: revenue7dSat,
+    RebalanceCost7dSat: cost7d.FeeSat,
+    RebalanceCost7dPpm: cost7d.FeePpm,
+    RebalanceAmount7dSat: cost7d.AmountSat,
     ROIEstimate: roiEstimate,
     ROIEstimateValid: roiEstimateValid,
     ExcludedAsSource: excluded,
@@ -2949,6 +2961,17 @@ func estimateMaxCost(amountSat int64, targetPolicy lndclient.ChannelPolicySnapsh
   return msatToSatCeil(feeMsat)
 }
 
+func estimateHistoricalCost(amountSat int64, feePpm int64) int64 {
+  if amountSat <= 0 || feePpm <= 0 {
+    return 0
+  }
+  feeMsat := (amountSat * 1000 * feePpm) / 1_000_000
+  if feeMsat <= 0 {
+    return 0
+  }
+  return msatToSatCeil(feeMsat)
+}
+
 func estimateTargetGain(amountSat int64, revenue7dSat int64, localBalanceSat int64, capacitySat int64) int64 {
   if amountSat <= 0 || revenue7dSat <= 0 {
     return 0
@@ -3004,7 +3027,7 @@ func buildScanDetail(reasons map[string]int, remaining int64) string {
 }
 
 func estimateTargetROI(expectedGainSat int64, estimatedCostSat int64, amountSat int64, outgoingFeePpm int64, peerFeeRatePpm int64) (float64, bool) {
-  if estimatedCostSat > 0 {
+  if expectedGainSat > 0 && estimatedCostSat > 0 {
     return float64(expectedGainSat) / float64(estimatedCostSat), true
   }
   if amountSat > 0 && outgoingFeePpm > peerFeeRatePpm {
@@ -3892,6 +3915,45 @@ insert into rebalance_jobs (
   return jobID, err
 }
 
+func (s *RebalanceService) fetchChannelRebalanceCost7d(ctx context.Context) (map[uint64]rebalanceCost7dStat, error) {
+  costs := map[uint64]rebalanceCost7dStat{}
+  if s.db == nil {
+    return costs, nil
+  }
+  rows, err := s.db.Query(ctx, `
+select coalesce(rebal_target_chan_id, channel_id) as channel_id,
+  coalesce(sum(case when fee_msat > 0 then fee_msat else fee_sat * 1000 end), 0) as fee_msat,
+  coalesce(sum(amount_sat), 0) as amount_sat
+from notifications
+where type='rebalance'
+  and occurred_at >= now() - interval '7 days'
+  and coalesce(rebal_target_chan_id, channel_id) is not null
+group by coalesce(rebal_target_chan_id, channel_id)
+`)
+  if err != nil {
+    return costs, err
+  }
+  defer rows.Close()
+  for rows.Next() {
+    var channelID int64
+    var feeMsat int64
+    var amountSat int64
+    if err := rows.Scan(&channelID, &feeMsat, &amountSat); err != nil {
+      return costs, err
+    }
+    if channelID <= 0 {
+      continue
+    }
+    stat := rebalanceCost7dStat{
+      FeeSat: msatToSatCeil(feeMsat),
+      AmountSat: amountSat,
+      FeePpm: feeMsatToPpm(feeMsat, amountSat),
+    }
+    costs[uint64(channelID)] = stat
+  }
+  return costs, rows.Err()
+}
+
 func (s *RebalanceService) markJobRunning(jobID int64) {
   if s.db == nil || jobID <= 0 {
     return
@@ -4010,6 +4072,7 @@ func (s *RebalanceService) Channels(ctx context.Context) ([]RebalanceChannel, er
   _ = s.applyForwardDeltas(ctx, ledger)
 
   revenueByChannel, _ := s.fetchChannelRevenue7d(ctx)
+  costByChannel, _ := s.fetchChannelRebalanceCost7d(ctx)
   channels, err := s.lnd.ListChannels(ctx)
   if err != nil {
     return nil, err
@@ -4031,7 +4094,7 @@ func (s *RebalanceService) Channels(ctx context.Context) ([]RebalanceChannel, er
       seenPoints[point] = true
     }
     setting := settings[ch.ChannelID]
-    snapshot := s.buildChannelSnapshot(ctx, cfg, criticalActive, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], exclusions[ch.ChannelID])
+    snapshot := s.buildChannelSnapshot(ctx, cfg, criticalActive, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], costByChannel[ch.ChannelID], exclusions[ch.ChannelID])
     result = append(result, snapshot)
   }
   return result, nil
@@ -4051,6 +4114,7 @@ func (s *RebalanceService) computeEligibilityCounts(ctx context.Context, cfg Reb
     return 0, 0
   }
   revenueByChannel, _ := s.fetchChannelRevenue7d(ctx)
+  costByChannel, _ := s.fetchChannelRebalanceCost7d(ctx)
 
   s.mu.Lock()
   criticalActive := cfg.CriticalCycles > 0 && s.criticalMissCount >= cfg.CriticalCycles
@@ -4060,7 +4124,7 @@ func (s *RebalanceService) computeEligibilityCounts(ctx context.Context, cfg Reb
   targetsNeeding := 0
   for _, ch := range channels {
     setting := settings[ch.ChannelID]
-    snapshot := s.buildChannelSnapshot(ctx, cfg, criticalActive, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], exclusions[ch.ChannelID])
+    snapshot := s.buildChannelSnapshot(ctx, cfg, criticalActive, ch, setting, ledger[ch.ChannelID], revenueByChannel[ch.ChannelID], costByChannel[ch.ChannelID], exclusions[ch.ChannelID])
     if snapshot.EligibleAsSource {
       eligibleSources++
     }

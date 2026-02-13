@@ -106,6 +106,9 @@ type RebalanceChannel = {
   payback_progress: number
   max_source_sat: number
   revenue_7d_sat: number
+  rebalance_cost_7d_sat: number
+  rebalance_cost_7d_ppm: number
+  rebalance_amount_7d_sat: number
   roi_estimate: number
   roi_estimate_valid?: boolean
   excluded_as_source: boolean
@@ -225,38 +228,9 @@ export default function RebalanceCenter() {
       critical_cycles: cfg.critical_cycles
     })
   }
-  const calcMaxFeePpm = (
-    amountSat: number,
-    outgoingFee: number,
-    outgoingBaseMsat: number,
-    econRatio: number,
-    econRatioMaxPpm: number,
-    feeLimitPpm: number
-  ) => {
-    if (amountSat <= 0) return 0
-    if (feeLimitPpm > 0) return feeLimitPpm
-    if (econRatio <= 0) return 0
-    const amountMsat = amountSat * 1000
-    const basePlus = outgoingBaseMsat + amountMsat * outgoingFee
-    let feeMsat = Math.floor((basePlus * econRatio) / 1_000_000)
-    if (feeMsat <= 0) return 0
-    let ppm = Math.round((feeMsat * 1_000_000) / amountMsat)
-    if (econRatioMaxPpm > 0 && ppm > econRatioMaxPpm) {
-      ppm = econRatioMaxPpm
-    }
-    return ppm
-  }
-  const estimateMaxCost = (
-    amountSat: number,
-    outgoingFee: number,
-    outgoingBaseMsat: number,
-    econRatio: number,
-    econRatioMaxPpm: number,
-    feeLimitPpm: number
-  ) => {
-    const maxFee = calcMaxFeePpm(amountSat, outgoingFee, outgoingBaseMsat, econRatio, econRatioMaxPpm, feeLimitPpm)
-    if (maxFee <= 0 || amountSat <= 0) return 0
-    return Math.floor((amountSat * maxFee) / 1_000_000)
+  const estimateHistoricalCost = (amountSat: number, feePpm: number) => {
+    if (amountSat <= 0 || feePpm <= 0) return 0
+    return Math.ceil((amountSat * feePpm) / 1_000_000)
   }
   const estimateTargetGain = (amountSat: number, revenue7d: number, localBalance: number, capacity: number) => {
     if (amountSat <= 0 || revenue7d <= 0) return 0
@@ -265,19 +239,14 @@ export default function RebalanceCenter() {
     if (amountSat > denom) denom = amountSat
     return Math.round(revenue7d * (amountSat / denom))
   }
-  const computeChannelScore = (ch: RebalanceChannel, econRatio: number) => {
+  const computeChannelScore = (ch: RebalanceChannel) => {
     const expectedGain = estimateTargetGain(ch.target_amount_sat, ch.revenue_7d_sat, ch.local_balance_sat, ch.capacity_sat)
-    const estimatedCost = estimateMaxCost(
-      ch.target_amount_sat,
-      ch.outgoing_fee_ppm,
-      ch.outgoing_base_msat,
-      econRatio,
-      config?.econ_ratio_max_ppm ?? 0,
-      config?.fee_limit_ppm ?? 0
-    )
+    const estimatedCost = estimateHistoricalCost(ch.target_amount_sat, ch.rebalance_cost_7d_ppm)
+    const expectedRoiValid = expectedGain > 0 && estimatedCost > 0
     return {
       score: expectedGain - estimatedCost,
-      expectedRoi: estimatedCost > 0 ? expectedGain / estimatedCost : -1,
+      expectedRoi: expectedRoiValid ? expectedGain / estimatedCost : 0,
+      expectedRoiValid,
       expectedGain,
       estimatedCost
     }
@@ -288,8 +257,8 @@ export default function RebalanceCenter() {
       return active.sort((a, b) => a.local_pct - b.local_pct)
     }
     return active.sort((a, b) => {
-      const scoreA = computeChannelScore(a, config.econ_ratio)
-      const scoreB = computeChannelScore(b, config.econ_ratio)
+      const scoreA = computeChannelScore(a)
+      const scoreB = computeChannelScore(b)
       if (scoreA.score !== scoreB.score) {
         return scoreB.score - scoreA.score
       }
@@ -1276,15 +1245,9 @@ export default function RebalanceCenter() {
             </thead>
             <tbody>
               {sortedChannels.map((ch) => {
-                const scoreMeta = config ? computeChannelScore(ch, config.econ_ratio) : null
-                const expectedRoiValid = scoreMeta
-                  ? scoreMeta.estimatedCost > 0
-                    ? true
-                    : ch.target_amount_sat > 0 && ch.outgoing_fee_ppm > ch.peer_fee_rate_ppm
-                      ? false
-                      : true
-                  : true
-                const expectedRoi = scoreMeta ? (scoreMeta.estimatedCost > 0 ? scoreMeta.expectedRoi : 0) : 0
+                const scoreMeta = config ? computeChannelScore(ch) : null
+                const expectedRoiValid = scoreMeta ? scoreMeta.expectedRoiValid : true
+                const expectedRoi = scoreMeta ? scoreMeta.expectedRoi : 0
                 const meetsRoi =
                   !config || config.roi_min <= 0 || !expectedRoiValid || expectedRoi >= config.roi_min
                 const passesProfit = !scoreMeta || !(scoreMeta.expectedGain > 0 && scoreMeta.estimatedCost > 0 && scoreMeta.expectedGain < scoreMeta.estimatedCost)
@@ -1295,7 +1258,7 @@ export default function RebalanceCenter() {
                         score: formatSats(scoreMeta.score),
                         gain: formatSats(scoreMeta.expectedGain),
                         cost: formatSats(scoreMeta.estimatedCost),
-                        roi: scoreMeta.estimatedCost > 0 ? formatRoi(scoreMeta.expectedRoi) : t('rebalanceCenter.channels.scoreRoiNA')
+                        roi: scoreMeta.expectedRoiValid ? formatRoi(scoreMeta.expectedRoi) : t('rebalanceCenter.channels.scoreRoiNA')
                       })
                     : undefined
                 const highlight = isAutoTarget
