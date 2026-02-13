@@ -548,7 +548,12 @@ func NewAutofeeService(db *pgxpool.Pool, lnd *lndclient.Client, notifier *Notifi
 
 func (s *AutofeeService) lastRunFromLogs(ctx context.Context) (time.Time, bool) {
   var ts pgtype.Timestamptz
-  err := s.db.QueryRow(ctx, `select max(occurred_at) from autofee_logs where seq = 0`).Scan(&ts)
+  err := s.db.QueryRow(ctx, `
+select max(occurred_at)
+from autofee_logs
+where seq = 0
+  and coalesce(payload->>'dry_run', 'false') <> 'true'
+`).Scan(&ts)
   if err != nil || !ts.Valid {
     return time.Time{}, false
   }
@@ -1128,7 +1133,9 @@ func (s *AutofeeService) Run(ctx context.Context, dryRun bool, reason string) er
   defer func() {
     s.mu.Lock()
     s.running = false
-    s.lastRunAt = time.Now()
+    if !dryRun {
+      s.lastRunAt = time.Now()
+    }
     s.mu.Unlock()
   }()
 
