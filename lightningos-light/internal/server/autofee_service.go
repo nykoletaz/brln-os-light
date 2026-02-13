@@ -137,6 +137,10 @@ type autofeeLogItem struct {
   Inactive int `json:"inactive,omitempty"`
   InboundDisc int `json:"inbound_disc,omitempty"`
   SuperSource int `json:"super_source,omitempty"`
+  HTLCLiqHot int `json:"htlc_liq_hot,omitempty"`
+  HTLCPolicyHot int `json:"htlc_policy_hot,omitempty"`
+  HTLCSampleLow int `json:"htlc_sample_low,omitempty"`
+  HTLCWindowMin int `json:"htlc_window_min,omitempty"`
   Amboss int `json:"amboss,omitempty"`
   Missing int `json:"missing,omitempty"`
   Err int `json:"err,omitempty"`
@@ -168,6 +172,10 @@ type autofeeLogItem struct {
   DeltaPct float64 `json:"delta_pct,omitempty"`
   PredictionCode string `json:"prediction_code,omitempty"`
   PredictionCooldownHours int `json:"prediction_cooldown_hours,omitempty"`
+  HTLCAttempts int `json:"htlc_attempts,omitempty"`
+  HTLCPolicyFails int `json:"htlc_policy_fails,omitempty"`
+  HTLCLiquidityFails int `json:"htlc_liquidity_fails,omitempty"`
+  HTLCWindowMinChannel int `json:"htlc_window_min_channel,omitempty"`
 }
 
 type autofeeProfile struct {
@@ -1229,6 +1237,10 @@ type autofeeRunSummary struct {
   seedDefault int
   superSource int
   inboundDiscount int
+  htlcLiqHot int
+  htlcPolicyHot int
+  htlcSampleLow int
+  htlcWindowMin int
 }
 
 func (s *autofeeRunSummary) addTags(tags []string) {
@@ -1254,6 +1266,12 @@ func (s *autofeeRunSummary) addTags(tags []string) {
       s.skippedSmall++
     case "same-ppm":
       s.skippedSame++
+    case "htlc-liquidity-hot":
+      s.htlcLiqHot++
+    case "htlc-policy-hot":
+      s.htlcPolicyHot++
+    case "htlc-sample-low":
+      s.htlcSampleLow++
     }
   }
 }
@@ -1455,7 +1473,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   rebalGlobalPpm := ppmMsat(rebalGlobal.FeeMsat, rebalGlobal.AmtMsat)
   outPpmTotal := ppmMsat(totalOutFeeMsat, totalOutAmtMsat)
   negMarginGlobal := rebalGlobalPpm > 0 && outPpmTotal > 0 && outPpmTotal < rebalGlobalPpm
-  htlcSignals := e.buildHTLCFailureSignals(channels)
+  htlcSignals, htlcWindowMin := e.buildHTLCFailureSignals(channels)
   e.calibrateNode(channels, state, forwardStats)
 
   runID := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -1464,6 +1482,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     header = header + " (dry-run)"
   }
   summary := autofeeRunSummary{total: len(channels)}
+  summary.htlcWindowMin = htlcWindowMin
   changedLines := []autofeeLogEntry{}
   keptLines := []autofeeLogEntry{}
   skippedLines := []autofeeLogEntry{}
@@ -1549,10 +1568,11 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   }
 
   summaryText := fmt.Sprintf(
-    "📊 up %d | down %d | flat %d | cooldown %d | small %d | same %d | disabled %d | inactive %d | inb_disc %d | super_source %d",
+    "📊 up %d | down %d | flat %d | cooldown %d | small %d | same %d | disabled %d | inactive %d | inb_disc %d | super_source %d | htlc_liq_hot %d | htlc_policy_hot %d | htlc_low_sample %d | htlc_window %dm",
     summary.changedUp, summary.changedDown, summary.kept,
     summary.skippedCooldown, summary.skippedSmall, summary.skippedSame,
     summary.disabled, summary.inactive, summary.inboundDiscount, summary.superSource,
+    summary.htlcLiqHot, summary.htlcPolicyHot, summary.htlcSampleLow, summary.htlcWindowMin,
   )
   seedText := fmt.Sprintf(
     "🌱 seed amboss=%d missing=%d err=%d empty=%d outrate=%d mem=%d default=%d",
@@ -1577,6 +1597,10 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       Inactive: summary.inactive,
       InboundDisc: summary.inboundDiscount,
       SuperSource: summary.superSource,
+      HTLCLiqHot: summary.htlcLiqHot,
+      HTLCPolicyHot: summary.htlcPolicyHot,
+      HTLCSampleLow: summary.htlcSampleLow,
+      HTLCWindowMin: summary.htlcWindowMin,
     }},
     {Line: seedText, Payload: &autofeeLogItem{
       Kind: "seed",
@@ -1666,33 +1690,36 @@ type htlcFailureSignal struct {
   LiquidityFails60m int
   PolicyFailRate60m float64
   LiquidityFailRate60m float64
+  WindowMin int
   SampleLow bool
   PolicyHot bool
   LiquidityHot bool
 }
 
-func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo) map[uint64]htlcFailureSignal {
+func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo) (map[uint64]htlcFailureSignal, int) {
   signals := map[uint64]htlcFailureSignal{}
+  window := e.htlcSignalWindow()
+  windowMin := int(window / time.Minute)
   if e.svc.htlcFailedProvider == nil {
-    return signals
+    return signals, windowMin
   }
 
   entries := e.svc.htlcFailedProvider.Failed(htlcManagerMaxLogLimit)
   if len(entries) == 0 {
-    return signals
+    return signals, windowMin
   }
 
   attempts := map[uint64]int{}
   policyFails := map[uint64]int{}
   liquidityFails := map[uint64]int{}
-  cutoff60m := e.now.Add(-60 * time.Minute)
+  cutoff := e.now.Add(-window)
 
   for _, entry := range entries {
     ts, err := time.Parse(time.RFC3339, strings.TrimSpace(entry.Timestamp))
     if err != nil || ts.IsZero() {
       continue
     }
-    if ts.Before(cutoff60m) {
+    if ts.Before(cutoff) {
       continue
     }
     chanID, ok := parseShortChannelID(entry.OutgoingChannelID)
@@ -1738,12 +1765,27 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
       LiquidityFails60m: liqFails,
       PolicyFailRate60m: polRate,
       LiquidityFailRate60m: liqRate,
+      WindowMin: windowMin,
       SampleLow: sampleLow,
       PolicyHot: policyHot,
       LiquidityHot: liquidityHot,
     }
   }
-  return signals
+  return signals, windowMin
+}
+
+func (e *autofeeEngine) htlcSignalWindow() time.Duration {
+  secs := e.cfg.RunIntervalSec
+  if secs <= 0 {
+    secs = e.profile.RunIntervalSec
+  }
+  if secs <= 0 {
+    secs = 3600
+  }
+  if secs < 3600 {
+    secs = 3600
+  }
+  return time.Duration(secs) * time.Second
 }
 
 func parseShortChannelID(raw string) (uint64, bool) {
@@ -2086,6 +2128,10 @@ type decision struct {
   NegMarginGlobal bool
   PredictionCode string
   PredictionCooldownHours int
+  HTLCAttempts int
+  HTLCPolicyFails int
+  HTLCLiquidityFails int
+  HTLCWindowMin int
   Apply bool
   Error error
   State *autofeeChannelState
@@ -2177,6 +2223,10 @@ func formatAutofeeDecisionLine(d *decision, dryRun bool, isError bool) (string, 
     d.RevShare,
     tagLine,
   )
+  if dryRun && d.HTLCAttempts > 0 {
+    line = line + fmt.Sprintf(" | htlc%dm a=%d p=%d l=%d",
+      maxInt(1, d.HTLCWindowMin), d.HTLCAttempts, d.HTLCPolicyFails, d.HTLCLiquidityFails)
+  }
   return strings.TrimSpace(line), category
 }
 
@@ -2229,6 +2279,10 @@ func buildAutofeeChannelLogEntry(d *decision, category string, dryRun bool, err 
     DeltaPct: deltaPct,
     PredictionCode: d.PredictionCode,
     PredictionCooldownHours: d.PredictionCooldownHours,
+    HTLCAttempts: d.HTLCAttempts,
+    HTLCPolicyFails: d.HTLCPolicyFails,
+    HTLCLiquidityFails: d.HTLCLiquidityFails,
+    HTLCWindowMinChannel: d.HTLCWindowMin,
   }
   if err != nil {
     payload.Error = err.Error()
@@ -2438,6 +2492,10 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   htlcSampleLow := false
   htlcPolicyHot := false
   htlcLiquidityHot := false
+  htlcAttempts := 0
+  htlcPolicyFails := 0
+  htlcLiquidityFails := 0
+  htlcWindowMin := 0
   if superSourceActive {
     tags = append(tags, "super-source")
     if superSourceLike {
@@ -2448,6 +2506,10 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     htlcSampleLow = signal.SampleLow
     htlcPolicyHot = signal.PolicyHot
     htlcLiquidityHot = signal.LiquidityHot
+    htlcAttempts = signal.Attempts60m
+    htlcPolicyFails = signal.PolicyFails60m
+    htlcLiquidityFails = signal.LiquidityFails60m
+    htlcWindowMin = signal.WindowMin
     if signal.SampleLow {
       tags = append(tags, "htlc-sample-low")
     }
@@ -3108,6 +3170,10 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     NegMarginGlobal: negMarginGlobal,
     PredictionCode: predictionCode,
     PredictionCooldownHours: predictionCooldownHours,
+    HTLCAttempts: htlcAttempts,
+    HTLCPolicyFails: htlcPolicyFails,
+    HTLCLiquidityFails: htlcLiquidityFails,
+    HTLCWindowMin: htlcWindowMin,
     Apply: apply && finalPpm != localPpm,
     State: st,
   }

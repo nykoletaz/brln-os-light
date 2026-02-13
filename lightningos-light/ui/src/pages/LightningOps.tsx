@@ -196,6 +196,10 @@ type AutofeeResultItem = {
   inactive?: number
   inbound_disc?: number
   super_source?: number
+  htlc_liq_hot?: number
+  htlc_policy_hot?: number
+  htlc_sample_low?: number
+  htlc_window_min?: number
   amboss?: number
   missing?: number
   err?: number
@@ -236,6 +240,10 @@ type AutofeeResultItem = {
   delta_pct?: number
   prediction_code?: string
   prediction_cooldown_hours?: number
+  htlc_attempts?: number
+  htlc_policy_fails?: number
+  htlc_liquidity_fails?: number
+  htlc_window_min_channel?: number
 }
 
 export default function LightningOps() {
@@ -535,7 +543,11 @@ export default function LightningOps() {
       `${t('lightningOps.autofeeResultsDisabled')} ${item.disabled ?? 0}`,
       `${t('lightningOps.autofeeResultsInactive')} ${item.inactive ?? 0}`,
       `${t('lightningOps.autofeeResultsInboundDisc')} ${item.inbound_disc ?? 0}`,
-      `${t('lightningOps.autofeeResultsSuperSource')} ${item.super_source ?? 0}`
+      `${t('lightningOps.autofeeResultsSuperSource')} ${item.super_source ?? 0}`,
+      `htlc_liq_hot ${item.htlc_liq_hot ?? 0}`,
+      `htlc_policy_hot ${item.htlc_policy_hot ?? 0}`,
+      `htlc_low_sample ${item.htlc_sample_low ?? 0}`,
+      `htlc_window ${(item.htlc_window_min ?? 0)}m`
     ]
     return `📊 ${parts.join(' | ')}`
   }
@@ -791,9 +803,16 @@ export default function LightningOps() {
     const margin = item.margin ?? 0
     const revShare = typeof item.rev_share === 'number' ? item.rev_share : 0
     const tagLine = formatAutofeeTags(tags, item.inbound_discount, item.class_label) || '-'
+    const htlcAttempts = item.htlc_attempts ?? 0
+    const htlcPolicyFails = item.htlc_policy_fails ?? 0
+    const htlcLiquidityFails = item.htlc_liquidity_fails ?? 0
+    const htlcWindow = item.htlc_window_min_channel ?? item.htlc_window_min ?? 0
 
     const prediction = formatAutofeePrediction(item)
-    const baseLine = `${prefix} ${alias}: ${action}${deltaStr} | ${t('lightningOps.autofeeResultsLabelTarget')} ${item.target ?? 0} | ${t('lightningOps.autofeeResultsLabelOutRatio')} ${outRatio.toFixed(2)} | ${t('lightningOps.autofeeResultsLabelOutPpm7d')}≈${outPpm7d} | ${t('lightningOps.autofeeResultsLabelRebalPpm7d')}≈${rebalPpm7d} | ${t('lightningOps.autofeeResultsLabelSeed')}≈${seed} | ${t('lightningOps.autofeeResultsLabelFloor')}≥${floor}${floorSrc} | ${t('lightningOps.autofeeResultsLabelMargin')}≈${margin} | ${t('lightningOps.autofeeResultsLabelRevShare')}≈${revShare.toFixed(2)} | ${tagLine}`
+    let baseLine = `${prefix} ${alias}: ${action}${deltaStr} | ${t('lightningOps.autofeeResultsLabelTarget')} ${item.target ?? 0} | ${t('lightningOps.autofeeResultsLabelOutRatio')} ${outRatio.toFixed(2)} | ${t('lightningOps.autofeeResultsLabelOutPpm7d')}≈${outPpm7d} | ${t('lightningOps.autofeeResultsLabelRebalPpm7d')}≈${rebalPpm7d} | ${t('lightningOps.autofeeResultsLabelSeed')}≈${seed} | ${t('lightningOps.autofeeResultsLabelFloor')}≥${floor}${floorSrc} | ${t('lightningOps.autofeeResultsLabelMargin')}≈${margin} | ${t('lightningOps.autofeeResultsLabelRevShare')}≈${revShare.toFixed(2)} | ${tagLine}`
+    if (item.dry_run && htlcAttempts > 0) {
+      baseLine += ` | htlc${Math.max(1, htlcWindow)}m a=${htlcAttempts} p=${htlcPolicyFails} l=${htlcLiquidityFails}`
+    }
     return prediction ? `${baseLine} | ${prediction}` : baseLine
   }
 
