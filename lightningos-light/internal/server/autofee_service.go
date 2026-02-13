@@ -229,6 +229,11 @@ type autofeeProfile struct {
   SoftenMinOutRatio float64
   SoftenRequirePosChanMargin bool
   SoftenMaxDropToPegFrac float64
+  HTLCMinAttempts60m int
+  HTLCPolicyFailRate float64
+  HTLCPolicyMinFails int
+  HTLCLiquidityFailRate float64
+  HTLCLiquidityMinFails int
 }
 
 type superSourceThresholds struct {
@@ -300,6 +305,11 @@ var autofeeProfiles = map[string]autofeeProfile{
     SoftenMinOutRatio: 0.55,
     SoftenRequirePosChanMargin: true,
     SoftenMaxDropToPegFrac: 0.98,
+    HTLCMinAttempts60m: 20,
+    HTLCPolicyFailRate: 0.20,
+    HTLCPolicyMinFails: 4,
+    HTLCLiquidityFailRate: 0.30,
+    HTLCLiquidityMinFails: 5,
   },
   "moderate": {
     Name: "moderate",
@@ -360,6 +370,11 @@ var autofeeProfiles = map[string]autofeeProfile{
     SoftenMinOutRatio: 0.45,
     SoftenRequirePosChanMargin: true,
     SoftenMaxDropToPegFrac: 0.95,
+    HTLCMinAttempts60m: 12,
+    HTLCPolicyFailRate: 0.15,
+    HTLCPolicyMinFails: 3,
+    HTLCLiquidityFailRate: 0.25,
+    HTLCLiquidityMinFails: 4,
   },
   "aggressive": {
     Name: "aggressive",
@@ -420,6 +435,11 @@ var autofeeProfiles = map[string]autofeeProfile{
     SoftenMinOutRatio: 0.40,
     SoftenRequirePosChanMargin: false,
     SoftenMaxDropToPegFrac: 0.90,
+    HTLCMinAttempts60m: 8,
+    HTLCPolicyFailRate: 0.10,
+    HTLCPolicyMinFails: 2,
+    HTLCLiquidityFailRate: 0.20,
+    HTLCLiquidityMinFails: 3,
   },
 }
 
@@ -463,6 +483,7 @@ type AutofeeService struct {
   db *pgxpool.Pool
   lnd *lndclient.Client
   notifier *Notifier
+  htlcFailedProvider htlcFailedProvider
   logger loggerLike
 
   mu sync.Mutex
@@ -478,16 +499,21 @@ type loggerLike interface {
   Printf(format string, v ...any)
 }
 
+type htlcFailedProvider interface {
+  Failed(limit int) []htlcManagerFailedEntry
+}
+
 type autofeeLogEntry struct {
   Line string
   Payload *autofeeLogItem
 }
 
-func NewAutofeeService(db *pgxpool.Pool, lnd *lndclient.Client, notifier *Notifier, logger loggerLike) *AutofeeService {
+func NewAutofeeService(db *pgxpool.Pool, lnd *lndclient.Client, notifier *Notifier, htlcProvider htlcFailedProvider, logger loggerLike) *AutofeeService {
   return &AutofeeService{
     db: db,
     lnd: lnd,
     notifier: notifier,
+    htlcFailedProvider: htlcProvider,
     logger: logger,
   }
 }
@@ -1409,6 +1435,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   rebalGlobalPpm := ppmMsat(rebalGlobal.FeeMsat, rebalGlobal.AmtMsat)
   outPpmTotal := ppmMsat(totalOutFeeMsat, totalOutAmtMsat)
   negMarginGlobal := rebalGlobalPpm > 0 && outPpmTotal > 0 && outPpmTotal < rebalGlobalPpm
+  htlcSignals := e.buildHTLCFailureSignals(channels)
   e.calibrateNode(channels, state, forwardStats)
 
   runID := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -1437,7 +1464,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     }
 
     st := state[ch.ChannelID]
-    decision := e.evaluateChannel(ch, st, forwardStats, forwardStats1d, forwardStats7d, inboundStats, rebalStats, totalOutFeeMsat, rebalGlobalPpm, negMarginGlobal)
+    decision := e.evaluateChannel(ch, st, forwardStats, forwardStats1d, forwardStats7d, inboundStats, rebalStats, htlcSignals, totalOutFeeMsat, rebalGlobalPpm, negMarginGlobal)
     if decision == nil {
       continue
     }
@@ -1611,6 +1638,167 @@ type rebalStat struct {
 type rebalStats struct {
   ByChannel map[uint64]rebalStat
   Global rebalStat
+}
+
+type htlcFailureSignal struct {
+  Attempts60m int
+  PolicyFails60m int
+  LiquidityFails60m int
+  PolicyFailRate60m float64
+  LiquidityFailRate60m float64
+  SampleLow bool
+  PolicyHot bool
+  LiquidityHot bool
+}
+
+func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo) map[uint64]htlcFailureSignal {
+  signals := map[uint64]htlcFailureSignal{}
+  if e.svc.htlcFailedProvider == nil {
+    return signals
+  }
+
+  entries := e.svc.htlcFailedProvider.Failed(htlcManagerMaxLogLimit)
+  if len(entries) == 0 {
+    return signals
+  }
+
+  attempts := map[uint64]int{}
+  policyFails := map[uint64]int{}
+  liquidityFails := map[uint64]int{}
+  cutoff60m := e.now.Add(-60 * time.Minute)
+
+  for _, entry := range entries {
+    ts, err := time.Parse(time.RFC3339, strings.TrimSpace(entry.Timestamp))
+    if err != nil || ts.IsZero() {
+      continue
+    }
+    if ts.Before(cutoff60m) {
+      continue
+    }
+    chanID, ok := parseShortChannelID(entry.OutgoingChannelID)
+    if !ok || chanID == 0 {
+      continue
+    }
+    attempts[chanID]++
+    policy, liquidity := classifyHTLCFailure(entry)
+    if policy {
+      policyFails[chanID]++
+    }
+    if liquidity {
+      liquidityFails[chanID]++
+    }
+  }
+
+  minAttempts := e.profile.HTLCMinAttempts60m
+  if minAttempts <= 0 {
+    minAttempts = 12
+  }
+  for _, ch := range channels {
+    if ch.ChannelID == 0 {
+      continue
+    }
+    total := attempts[ch.ChannelID]
+    if total == 0 {
+      continue
+    }
+    polFails := policyFails[ch.ChannelID]
+    liqFails := liquidityFails[ch.ChannelID]
+    polRate := float64(polFails) / float64(total)
+    liqRate := float64(liqFails) / float64(total)
+    sampleLow := total < minAttempts
+    policyHot := !sampleLow &&
+      polFails >= maxInt(1, e.profile.HTLCPolicyMinFails) &&
+      polRate >= e.profile.HTLCPolicyFailRate
+    liquidityHot := !sampleLow &&
+      liqFails >= maxInt(1, e.profile.HTLCLiquidityMinFails) &&
+      liqRate >= e.profile.HTLCLiquidityFailRate
+    signals[ch.ChannelID] = htlcFailureSignal{
+      Attempts60m: total,
+      PolicyFails60m: polFails,
+      LiquidityFails60m: liqFails,
+      PolicyFailRate60m: polRate,
+      LiquidityFailRate60m: liqRate,
+      SampleLow: sampleLow,
+      PolicyHot: policyHot,
+      LiquidityHot: liquidityHot,
+    }
+  }
+  return signals
+}
+
+func parseShortChannelID(raw string) (uint64, bool) {
+  trimmed := strings.TrimSpace(raw)
+  if trimmed == "" {
+    return 0, false
+  }
+  if strings.Contains(trimmed, "x") {
+    parts := strings.Split(trimmed, "x")
+    if len(parts) != 3 {
+      return 0, false
+    }
+    block, err1 := strconv.ParseUint(strings.TrimSpace(parts[0]), 10, 64)
+    tx, err2 := strconv.ParseUint(strings.TrimSpace(parts[1]), 10, 64)
+    out, err3 := strconv.ParseUint(strings.TrimSpace(parts[2]), 10, 64)
+    if err1 != nil || err2 != nil || err3 != nil {
+      return 0, false
+    }
+    if tx > 0xFFFFFF || out > 0xFFFF {
+      return 0, false
+    }
+    return (block << 40) | (tx << 16) | out, true
+  }
+  chanID, err := strconv.ParseUint(trimmed, 10, 64)
+  if err != nil || chanID == 0 {
+    return 0, false
+  }
+  return chanID, true
+}
+
+func classifyHTLCFailure(entry htlcManagerFailedEntry) (bool, bool) {
+  blob := htlcFailureBlob(entry)
+  if blob == "" {
+    return false, false
+  }
+  policy := containsAnyFailureToken(blob, []string{
+    "FEE INSUFFICIENT",
+    "INCORRECT CLTV EXPIRY",
+  })
+  liquidity := containsAnyFailureToken(blob, []string{
+    "TEMPORARY CHANNEL FAILURE",
+    "CHANNEL DISABLED",
+    "UNKNOWN NEXT PEER",
+  })
+  return policy, liquidity
+}
+
+func htlcFailureBlob(entry htlcManagerFailedEntry) string {
+  parts := []string{
+    strings.TrimSpace(entry.FailureCode),
+    strings.TrimSpace(entry.FailureDetail),
+    strings.TrimSpace(entry.FailureReason),
+    strings.TrimSpace(entry.Event),
+  }
+  normalized := []string{}
+  for _, p := range parts {
+    if p == "" {
+      continue
+    }
+    token := strings.ToUpper(strings.ReplaceAll(strings.ReplaceAll(p, "_", " "), "-", " "))
+    normalized = append(normalized, token)
+  }
+  return strings.Join(normalized, " | ")
+}
+
+func containsAnyFailureToken(blob string, terms []string) bool {
+  for _, term := range terms {
+    if term == "" {
+      continue
+    }
+    if strings.Contains(blob, term) {
+      return true
+    }
+  }
+  return false
 }
 
 func (e *autofeeEngine) fetchForwardStats(ctx context.Context, lookback int) (map[uint64]forwardStat, error) {
@@ -2032,7 +2220,7 @@ func buildAutofeeChannelLogEntry(d *decision, category string, dryRun bool, err 
 
 func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeChannelState, forwardStats map[uint64]forwardStat,
   forwardStats1d map[uint64]forwardStat, forwardStats7d map[uint64]forwardStat, inboundStats map[uint64]inboundStat,
-  rebalStats rebalStats, totalOutFeeMsat int64, rebalGlobalPpm int, negMarginGlobal bool) *decision {
+  rebalStats rebalStats, htlcSignals map[uint64]htlcFailureSignal, totalOutFeeMsat int64, rebalGlobalPpm int, negMarginGlobal bool) *decision {
 
   localPpm := 0
   if ch.FeeRatePpm != nil {
@@ -2231,6 +2419,20 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     tags = append(tags, "super-source")
     if superSourceLike {
       tags = append(tags, "super-source-like")
+    }
+  }
+  if signal, ok := htlcSignals[ch.ChannelID]; ok && signal.Attempts60m > 0 {
+    if signal.SampleLow {
+      tags = append(tags, "htlc-sample-low")
+    }
+    if signal.PolicyHot {
+      tags = append(tags, "htlc-policy-hot")
+    }
+    if signal.LiquidityHot {
+      tags = append(tags, "htlc-liquidity-hot")
+    }
+    if signal.PolicyHot && signal.LiquidityHot {
+      tags = append(tags, "htlc-neutral-lock")
     }
   }
   if outRatio < 0.10 {
@@ -3337,6 +3539,14 @@ func formatAutofeeTags(d *decision) string {
       add("💎top-rev")
     case t == "neg-margin":
       add("⚠️neg-margin")
+    case t == "htlc-policy-hot":
+      add("🧾policy-hot")
+    case t == "htlc-liquidity-hot":
+      add("💧liq-hot")
+    case t == "htlc-sample-low":
+      add("📉htlc-low-sample")
+    case t == "htlc-neutral-lock":
+      add("🧯htlc-neutral")
     case strings.HasPrefix(t, "negm+"):
       add("💹" + t)
     case t == "outrate-floor":
