@@ -130,6 +130,8 @@ export const updateLnHtlcManager = (payload: {
 }) => request('/api/lnops/channel/htlc-manager', { method: 'POST', body: JSON.stringify(payload) })
 export const getLnHtlcManagerLogs = (limit = 100) =>
   request(`/api/lnops/channel/htlc-manager/logs?limit=${encodeURIComponent(String(limit))}`)
+export const getLnHtlcManagerFailed = (limit = 100) =>
+  request(`/api/lnops/channel/htlc-manager/failed?limit=${encodeURIComponent(String(limit))}`)
 export const getLnTorPeerChecker = () => request('/api/lnops/channel/tor-peers')
 export const updateLnTorPeerChecker = (payload: {
   enabled?: boolean

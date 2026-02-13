@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeResults, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnHtlcManager, getLnHtlcManagerLogs, getLnPeers, getLnTorPeerChecker, getLnTorPeerCheckerLogs, getMempoolFees, openChannel, runAutofee, signLnMessage, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus, updateLnHtlcManager, updateLnTorPeerChecker } from '../api'
+import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeResults, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnHtlcManager, getLnHtlcManagerFailed, getLnHtlcManagerLogs, getLnPeers, getLnTorPeerChecker, getLnTorPeerCheckerLogs, getMempoolFees, openChannel, runAutofee, signLnMessage, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus, updateLnHtlcManager, updateLnTorPeerChecker } from '../api'
 
 type Channel = {
   channel_point: string
@@ -96,6 +96,19 @@ type HtlcManagerLogEntry = {
   old_max_msat: number
   new_max_msat: number
   result: string
+}
+
+type HtlcManagerFailedEntry = {
+  ts: string
+  incoming_channel_id?: string
+  outgoing_channel_id?: string
+  incoming_amt_msat?: number
+  outgoing_amt_msat?: number
+  potential_fee_msat?: number
+  failure_code?: string
+  failure_detail?: string
+  failure_reason?: string
+  event?: string
 }
 
 type TorPeerCheckerStatus = {
@@ -263,6 +276,8 @@ export default function LightningOps() {
   const [htlcManagerMaxPct, setHtlcManagerMaxPct] = useState('0')
   const [htlcManagerLogs, setHtlcManagerLogs] = useState<HtlcManagerLogEntry[]>([])
   const [htlcManagerLogsOpen, setHtlcManagerLogsOpen] = useState(false)
+  const [htlcManagerFailed, setHtlcManagerFailed] = useState<HtlcManagerFailedEntry[]>([])
+  const [htlcManagerFailedOpen, setHtlcManagerFailedOpen] = useState(false)
   const [torPeerChecker, setTorPeerChecker] = useState<TorPeerCheckerStatus | null>(null)
   const [torPeerCheckerStatus, setTorPeerCheckerStatus] = useState('')
   const [torPeerCheckerBusy, setTorPeerCheckerBusy] = useState(false)
@@ -371,6 +386,16 @@ export default function LightningOps() {
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) return t('common.unknownTime')
     return date.toLocaleString()
+  }
+
+  const formatSatFromMsat = (value?: number) => {
+    if (!value || value <= 0) return '-'
+    return Math.round(value / 1000).toLocaleString()
+  }
+
+  const formatFeeMsat = (value?: number) => {
+    if (typeof value !== 'number' || value < 0) return '-'
+    return value.toLocaleString()
   }
 
   const autofeeProfileDefaults: Record<string, { interval: number; cooldownUp: number; cooldownDown: number }> = {
@@ -940,13 +965,14 @@ export default function LightningOps() {
     setHtlcManagerStatus(t('lightningOps.htlcManagerLoading'))
     setTorPeerCheckerStatus(t('lightningOps.torPeerLoading'))
     setAutofeeMessage(t('lightningOps.autofeeLoading'))
-    const [channelsResult, peersResult, ambossResult, chanHealResult, htlcManagerResult, htlcManagerLogsResult, torPeerCheckerResult, torPeerCheckerLogsResult, bitcoinLocalResult, autofeeConfigResult, autofeeStatusResult, autofeeChannelsResult, autofeeResultsResult] = await Promise.allSettled([
+    const [channelsResult, peersResult, ambossResult, chanHealResult, htlcManagerResult, htlcManagerLogsResult, htlcManagerFailedResult, torPeerCheckerResult, torPeerCheckerLogsResult, bitcoinLocalResult, autofeeConfigResult, autofeeStatusResult, autofeeChannelsResult, autofeeResultsResult] = await Promise.allSettled([
       getLnChannels(),
       getLnPeers(),
       getAmbossHealth(),
       getLnChanHeal(),
       getLnHtlcManager(),
       getLnHtlcManagerLogs(),
+      getLnHtlcManagerFailed(),
       getLnTorPeerChecker(),
       getLnTorPeerCheckerLogs(),
       getBitcoinLocalStatus(),
@@ -1013,6 +1039,12 @@ export default function LightningOps() {
       setHtlcManagerLogs(Array.isArray(entries) ? entries : [])
     } else if (htlcManagerResult.status === 'fulfilled') {
       setHtlcManagerLogs([])
+    }
+    if (htlcManagerFailedResult.status === 'fulfilled') {
+      const entries = (htlcManagerFailedResult.value as any)?.entries
+      setHtlcManagerFailed(Array.isArray(entries) ? entries : [])
+    } else if (htlcManagerResult.status === 'fulfilled') {
+      setHtlcManagerFailed([])
     }
     if (torPeerCheckerResult.status === 'fulfilled') {
       const payload = torPeerCheckerResult.value as TorPeerCheckerStatus
@@ -1170,6 +1202,16 @@ export default function LightningOps() {
         .catch(() => {
           if (!mounted) return
           setHtlcManagerLogs([])
+        })
+      getLnHtlcManagerFailed()
+        .then((data: any) => {
+          if (!mounted) return
+          const entries = data?.entries
+          setHtlcManagerFailed(Array.isArray(entries) ? entries : [])
+        })
+        .catch(() => {
+          if (!mounted) return
+          setHtlcManagerFailed([])
         })
     }
     const fetchTorPeerChecker = () => {
@@ -1614,9 +1656,14 @@ export default function LightningOps() {
     try {
       const res = await updateLnHtlcManager({ run_now: true })
       setHtlcManager(res as HtlcManagerStatus)
-      const logsRes = await getLnHtlcManagerLogs()
-      const entries = (logsRes as any)?.entries
-      setHtlcManagerLogs(Array.isArray(entries) ? entries : [])
+      const [logsRes, failedRes] = await Promise.all([
+        getLnHtlcManagerLogs(),
+        getLnHtlcManagerFailed()
+      ])
+      const logEntries = (logsRes as any)?.entries
+      const failedEntries = (failedRes as any)?.entries
+      setHtlcManagerLogs(Array.isArray(logEntries) ? logEntries : [])
+      setHtlcManagerFailed(Array.isArray(failedEntries) ? failedEntries : [])
       setHtlcManagerStatus(t('lightningOps.htlcManagerRunDone'))
     } catch (err: any) {
       setHtlcManagerStatus(err?.message || t('lightningOps.htlcManagerRunFailed'))
@@ -2689,6 +2736,13 @@ export default function LightningOps() {
           >
             {htlcManagerLogsOpen ? t('common.hide') : t('lightningOps.htlcManagerLogsShow', { count: htlcManagerLogs.length })}
           </button>
+          <button
+            className="btn-secondary text-xs px-3 py-2"
+            type="button"
+            onClick={() => setHtlcManagerFailedOpen((open) => !open)}
+          >
+            {htlcManagerFailedOpen ? t('common.hide') : t('lightningOps.htlcManagerFailedShow', { count: htlcManagerFailed.length })}
+          </button>
         </div>
         {htlcManagerStatus && <p className="text-sm text-brass">{htlcManagerStatus}</p>}
         <div className="grid gap-3 text-xs text-fog/70 lg:grid-cols-3">
@@ -2726,6 +2780,49 @@ export default function LightningOps() {
               </div>
             ) : (
               <p className="text-xs text-fog/50">{t('lightningOps.htlcManagerLogsEmpty')}</p>
+            )}
+          </div>
+        )}
+        {htlcManagerFailedOpen && (
+          <div className="rounded-2xl border border-white/10 bg-ink/60 p-3">
+            {htlcManagerFailed.length ? (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[940px] text-xs text-fog/80">
+                  <thead>
+                    <tr className="text-left text-fog/60">
+                      <th className="py-2 pr-3">{t('lightningOps.htlcManagerFailedTs')}</th>
+                      <th className="py-2 pr-3">{t('lightningOps.htlcManagerFailedChanIn')}</th>
+                      <th className="py-2 pr-3">{t('lightningOps.htlcManagerFailedChanOut')}</th>
+                      <th className="py-2 pr-3">{t('lightningOps.htlcManagerFailedInAmt')}</th>
+                      <th className="py-2 pr-3">{t('lightningOps.htlcManagerFailedOutAmt')}</th>
+                      <th className="py-2 pr-3">{t('lightningOps.htlcManagerFailedPotentialFee')}</th>
+                      <th className="py-2 pr-3">{t('lightningOps.htlcManagerFailedCode')}</th>
+                      <th className="py-2">{t('lightningOps.htlcManagerFailedDetail')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {htlcManagerFailed.map((entry, idx) => (
+                      <tr key={`${entry.ts}-${entry.incoming_channel_id}-${entry.outgoing_channel_id}-${idx}`} className="border-t border-white/5">
+                        <td className="py-2 pr-3 whitespace-nowrap">{formatAmbossTime(entry.ts)}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{entry.incoming_channel_id || '-'}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{entry.outgoing_channel_id || '-'}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{formatSatFromMsat(entry.incoming_amt_msat)}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{formatSatFromMsat(entry.outgoing_amt_msat)}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">{formatFeeMsat(entry.potential_fee_msat)}</td>
+                        <td className="py-2 pr-3 whitespace-nowrap">
+                          {(entry.failure_code || '-')}
+                          {entry.event ? <span className="ml-1 text-fog/50">({entry.event})</span> : null}
+                        </td>
+                        <td className="py-2">
+                          {entry.failure_detail || entry.failure_reason || '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="text-xs text-fog/50">{t('lightningOps.htlcManagerFailedEmpty')}</p>
             )}
           </div>
         )}

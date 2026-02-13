@@ -13,6 +13,8 @@ import (
   "time"
 
   "lightningos-light/internal/lndclient"
+  "lightningos-light/lnrpc"
+  "lightningos-light/lnrpc/routerrpc"
 
   "github.com/jackc/pgx/v5"
   "github.com/jackc/pgx/v5/pgxpool"
@@ -29,8 +31,10 @@ const (
   htlcManagerMinIntervalMinutes = 1
   htlcManagerMaxIntervalMinutes = 48 * 60
   htlcManagerLogCapacity = 300
+  htlcManagerFailedCapacity = 500
   htlcManagerDefaultLogLimit = 100
   htlcManagerMaxLogLimit = 500
+  htlcManagerFailedStreamRetry = 5 * time.Second
 )
 
 var errInvalidHTLCManagerConfig = errors.New("invalid htlc manager config")
@@ -77,6 +81,19 @@ type htlcManagerLogEntry struct {
   Result string `json:"result"`
 }
 
+type htlcManagerFailedEntry struct {
+  Timestamp string `json:"ts"`
+  IncomingChannelID string `json:"incoming_channel_id"`
+  OutgoingChannelID string `json:"outgoing_channel_id"`
+  IncomingAmtMsat uint64 `json:"incoming_amt_msat,omitempty"`
+  OutgoingAmtMsat uint64 `json:"outgoing_amt_msat,omitempty"`
+  PotentialFeeMsat int64 `json:"potential_fee_msat,omitempty"`
+  FailureCode string `json:"failure_code,omitempty"`
+  FailureDetail string `json:"failure_detail,omitempty"`
+  FailureReason string `json:"failure_reason,omitempty"`
+  Event string `json:"event"`
+}
+
 type htlcManagerTrigger struct {
   force bool
 }
@@ -99,6 +116,7 @@ type HtlcManager struct {
   wake chan htlcManagerTrigger
   intervalUpdated chan struct{}
   logs []htlcManagerLogEntry
+  failed []htlcManagerFailedEntry
 }
 
 func NewHtlcManager(db *pgxpool.Pool, lnd *lndclient.Client, logger *log.Logger) *HtlcManager {
@@ -264,6 +282,7 @@ func (m *HtlcManager) Start() {
   }
 
   go m.run()
+  go m.runFailedHTLCStream()
 }
 
 func (m *HtlcManager) Stop() {
@@ -420,6 +439,38 @@ func (m *HtlcManager) appendLog(entry htlcManagerLogEntry) {
   m.logs = append(m.logs, entry)
 }
 
+func (m *HtlcManager) Failed(limit int) []htlcManagerFailedEntry {
+  if limit <= 0 {
+    limit = htlcManagerDefaultLogLimit
+  }
+  if limit > htlcManagerMaxLogLimit {
+    limit = htlcManagerMaxLogLimit
+  }
+
+  m.mu.Lock()
+  defer m.mu.Unlock()
+
+  if len(m.failed) == 0 {
+    return []htlcManagerFailedEntry{}
+  }
+  out := make([]htlcManagerFailedEntry, 0, localMinInt(limit, len(m.failed)))
+  for i := len(m.failed) - 1; i >= 0 && len(out) < limit; i-- {
+    out = append(out, m.failed[i])
+  }
+  return out
+}
+
+func (m *HtlcManager) appendFailed(entry htlcManagerFailedEntry) {
+  m.mu.Lock()
+  defer m.mu.Unlock()
+  if len(m.failed) >= htlcManagerFailedCapacity {
+    copy(m.failed, m.failed[1:])
+    m.failed[len(m.failed)-1] = entry
+    return
+  }
+  m.failed = append(m.failed, entry)
+}
+
 func (m *HtlcManager) trigger(force bool) {
   m.mu.Lock()
   wake := m.wake
@@ -469,6 +520,158 @@ func (m *HtlcManager) run() {
       return
     }
   }
+}
+
+func (m *HtlcManager) runFailedHTLCStream() {
+  for {
+    if m.shouldStop() {
+      return
+    }
+
+    dialCtx, dialCancel := context.WithTimeout(context.Background(), lndRPCTimeout)
+    conn, err := m.lnd.DialLightning(dialCtx)
+    dialCancel()
+    if err != nil {
+      if m.logger != nil {
+        m.logger.Printf("htlc-manager: failed htlc stream dial failed: %v", err)
+      }
+      if !m.waitOrStop(htlcManagerFailedStreamRetry) {
+        return
+      }
+      continue
+    }
+
+    routerClient := routerrpc.NewRouterClient(conn)
+    streamCtx, streamCancel := context.WithCancel(context.Background())
+    done := make(chan struct{})
+    go func() {
+      select {
+      case <-m.stop:
+        streamCancel()
+      case <-done:
+      }
+    }()
+
+    stream, err := routerClient.SubscribeHtlcEvents(streamCtx, &routerrpc.SubscribeHtlcEventsRequest{})
+    if err != nil {
+      close(done)
+      streamCancel()
+      _ = conn.Close()
+      if m.logger != nil {
+        m.logger.Printf("htlc-manager: failed htlc stream subscribe failed: %v", err)
+      }
+      if !m.waitOrStop(htlcManagerFailedStreamRetry) {
+        return
+      }
+      continue
+    }
+
+    for {
+      evt, recvErr := stream.Recv()
+      if recvErr != nil {
+        if m.shouldStop() || isContextCanceledError(recvErr) {
+          close(done)
+          streamCancel()
+          _ = conn.Close()
+          return
+        }
+        if m.logger != nil {
+          m.logger.Printf("htlc-manager: failed htlc stream recv failed: %v", recvErr)
+        }
+        break
+      }
+      m.captureFailedHTLC(evt)
+    }
+
+    close(done)
+    streamCancel()
+    _ = conn.Close()
+    if !m.waitOrStop(htlcManagerFailedStreamRetry) {
+      return
+    }
+  }
+}
+
+func (m *HtlcManager) shouldStop() bool {
+  m.mu.Lock()
+  stop := m.stop
+  m.mu.Unlock()
+  if stop == nil {
+    return true
+  }
+  select {
+  case <-stop:
+    return true
+  default:
+    return false
+  }
+}
+
+func (m *HtlcManager) waitOrStop(d time.Duration) bool {
+  m.mu.Lock()
+  stop := m.stop
+  m.mu.Unlock()
+  if stop == nil {
+    return false
+  }
+  timer := time.NewTimer(d)
+  defer timer.Stop()
+  select {
+  case <-timer.C:
+    return true
+  case <-stop:
+    return false
+  }
+}
+
+func (m *HtlcManager) captureFailedHTLC(evt *routerrpc.HtlcEvent) {
+  if evt == nil {
+    return
+  }
+  linkFail := evt.GetLinkFailEvent()
+  forwardFail := evt.GetForwardFailEvent()
+  if linkFail == nil && forwardFail == nil {
+    return
+  }
+
+  ts := time.Now().UTC()
+  if tsNs := evt.GetTimestampNs(); tsNs > 0 {
+    sec := int64(tsNs / uint64(time.Second))
+    nsec := int64(tsNs % uint64(time.Second))
+    parsed := time.Unix(sec, nsec).UTC()
+    if !parsed.IsZero() {
+      ts = parsed
+    }
+  }
+
+  entry := htlcManagerFailedEntry{
+    Timestamp: ts.Format(time.RFC3339),
+    IncomingChannelID: formatShortChanID(evt.GetIncomingChannelId()),
+    OutgoingChannelID: formatShortChanID(evt.GetOutgoingChannelId()),
+  }
+
+  if linkFail != nil {
+    info := linkFail.GetInfo()
+    if info != nil {
+      entry.IncomingAmtMsat = info.GetIncomingAmtMsat()
+      entry.OutgoingAmtMsat = info.GetOutgoingAmtMsat()
+      if entry.IncomingAmtMsat > entry.OutgoingAmtMsat {
+        diff := entry.IncomingAmtMsat - entry.OutgoingAmtMsat
+        if diff <= uint64(math.MaxInt64) {
+          entry.PotentialFeeMsat = int64(diff)
+        }
+      }
+    }
+    entry.FailureCode = normalizeFailureLabel(linkFail.GetWireFailure().String())
+    entry.FailureDetail = normalizeFailureLabel(linkFail.GetFailureDetail().String())
+    entry.FailureReason = strings.TrimSpace(linkFail.GetFailureString())
+    entry.Event = "link_fail"
+  } else {
+    entry.Event = "forward_fail"
+    entry.FailureCode = "FORWARD_FAIL"
+  }
+
+  m.appendFailed(entry)
 }
 
 func (m *HtlcManager) tick(force bool) {
@@ -726,6 +929,32 @@ func shortIdentifier(value string) string {
   return fmt.Sprintf("%s...%s", trimmed[:8], trimmed[len(trimmed)-8:])
 }
 
+func formatShortChanID(chanID uint64) string {
+  if chanID == 0 {
+    return ""
+  }
+  block := chanID >> 40
+  tx := (chanID >> 16) & 0xFFFFFF
+  out := chanID & 0xFFFF
+  return fmt.Sprintf("%dx%dx%d", block, tx, out)
+}
+
+func normalizeFailureLabel(raw string) string {
+  trimmed := strings.TrimSpace(raw)
+  if trimmed == "" {
+    return ""
+  }
+  return strings.ReplaceAll(trimmed, "_", " ")
+}
+
+func isContextCanceledError(err error) bool {
+  if err == nil {
+    return false
+  }
+  msg := strings.ToLower(strings.TrimSpace(err.Error()))
+  return strings.Contains(msg, "context canceled") || strings.Contains(msg, "context cancelled")
+}
+
 func (m *HtlcManager) recordFailure(err error, changed int) {
   msg := strings.TrimSpace(err.Error())
   if msg == "" {
@@ -845,6 +1074,22 @@ func (s *Server) handleLNHTLCManagerLogs(w http.ResponseWriter, r *http.Request)
   }
   limit := parseHTLCManagerLogLimit(r.URL.Query().Get("limit"))
   entries := svc.Logs(limit)
+  writeJSON(w, http.StatusOK, map[string]any{
+    "entries": entries,
+  })
+}
+
+func (s *Server) handleLNHTLCManagerFailed(w http.ResponseWriter, r *http.Request) {
+  svc, errMsg := s.htlcManagerService()
+  if svc == nil {
+    if errMsg == "" {
+      errMsg = "htlc manager unavailable"
+    }
+    writeError(w, http.StatusServiceUnavailable, errMsg)
+    return
+  }
+  limit := parseHTLCManagerLogLimit(r.URL.Query().Get("limit"))
+  entries := svc.Failed(limit)
   writeJSON(w, http.StatusOK, map[string]any{
     "entries": entries,
   })
