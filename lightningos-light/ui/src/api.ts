@@ -156,6 +156,11 @@ export const updateAutofeeConfig = (payload: {
   explorer_enabled?: boolean
   super_source_enabled?: boolean
   super_source_base_fee_msat?: number
+  revfloor_enabled?: boolean
+  circuit_breaker_enabled?: boolean
+  extreme_drain_enabled?: boolean
+  htlc_signal_enabled?: boolean
+  htlc_mode?: string
   min_ppm?: number
   max_ppm?: number
 }) => request('/api/lnops/autofee/config', { method: 'POST', body: JSON.stringify(payload) })

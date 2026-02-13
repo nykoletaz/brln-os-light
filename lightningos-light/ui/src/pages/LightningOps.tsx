@@ -164,6 +164,8 @@ type BitcoinLocalStatus = {
   revfloor_enabled: boolean
   circuit_breaker_enabled: boolean
   extreme_drain_enabled: boolean
+  htlc_signal_enabled: boolean
+  htlc_mode: string
   min_ppm: number
   max_ppm: number
 }
@@ -325,6 +327,8 @@ export default function LightningOps() {
   const [autofeeRevfloor, setAutofeeRevfloor] = useState(true)
   const [autofeeCircuitBreaker, setAutofeeCircuitBreaker] = useState(true)
   const [autofeeExtremeDrain, setAutofeeExtremeDrain] = useState(true)
+  const [autofeeHtlcSignalEnabled, setAutofeeHtlcSignalEnabled] = useState(true)
+  const [autofeeHtlcMode, setAutofeeHtlcMode] = useState('full')
   const [autofeeOpen, setAutofeeOpen] = useState(false)
   const [autofeeResultsOpen, setAutofeeResultsOpen] = useState(false)
   const [autofeeResults, setAutofeeResults] = useState<string[]>([])
@@ -1138,6 +1142,12 @@ export default function LightningOps() {
       setAutofeeRevfloor(cfg.revfloor_enabled !== false)
       setAutofeeCircuitBreaker(cfg.circuit_breaker_enabled !== false)
       setAutofeeExtremeDrain(cfg.extreme_drain_enabled !== false)
+      setAutofeeHtlcSignalEnabled(cfg.htlc_signal_enabled !== false)
+      {
+        const mode = (cfg.htlc_mode || 'full').toLowerCase().trim()
+        const normalizedMode = mode === 'observe_only' || mode === 'policy_only' || mode === 'full' ? mode : 'full'
+        setAutofeeHtlcMode(normalizedMode)
+      }
       setAutofeeMessage('')
     } else {
       const message = (autofeeConfigResult.reason as any)?.message || t('lightningOps.autofeeConfigUnavailable')
@@ -1528,7 +1538,9 @@ export default function LightningOps() {
         super_source_base_fee_msat: superSourceBaseFee,
         revfloor_enabled: autofeeRevfloor,
         circuit_breaker_enabled: autofeeCircuitBreaker,
-        extreme_drain_enabled: autofeeExtremeDrain
+        extreme_drain_enabled: autofeeExtremeDrain,
+        htlc_signal_enabled: autofeeHtlcSignalEnabled,
+        htlc_mode: autofeeHtlcMode
       }
       if (autofeeAmbossToken.trim()) {
         payload.amboss_token = autofeeAmbossToken.trim()
@@ -2066,6 +2078,18 @@ export default function LightningOps() {
               <label className="flex items-center gap-2 text-sm text-fog/70">
                 <input type="checkbox" checked={autofeeExtremeDrain} onChange={(e) => setAutofeeExtremeDrain(e.target.checked)} />
                 {t('lightningOps.autofeeExtremeDrain')}
+              </label>
+              <label className="flex items-center gap-2 text-sm text-fog/70">
+                <input type="checkbox" checked={autofeeHtlcSignalEnabled} onChange={(e) => setAutofeeHtlcSignalEnabled(e.target.checked)} />
+                {t('lightningOps.autofeeHtlcSignalEnabled')}
+              </label>
+              <label className="text-sm text-fog/70">
+                {t('lightningOps.autofeeHtlcMode')}
+                <select className="input-field mt-2" value={autofeeHtlcMode} onChange={(e) => setAutofeeHtlcMode(e.target.value)} disabled={!autofeeHtlcSignalEnabled}>
+                  <option value="observe_only">{t('lightningOps.autofeeHtlcModeObserveOnly')}</option>
+                  <option value="policy_only">{t('lightningOps.autofeeHtlcModePolicyOnly')}</option>
+                  <option value="full">{t('lightningOps.autofeeHtlcModeFull')}</option>
+                </select>
               </label>
               <label className="flex items-center gap-2 text-sm text-fog/70">
                 <input type="checkbox" checked={autofeeSuperSource} onChange={(e) => setAutofeeSuperSource(e.target.checked)} />

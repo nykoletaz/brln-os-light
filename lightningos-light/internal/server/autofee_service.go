@@ -31,6 +31,13 @@ const (
 
 const superSourceBaseFeeMsatDefault = 1000
 const rebalCostModeDefault = "blend"
+const htlcModeDefault = "full"
+
+const (
+  htlcModeObserveOnly = "observe_only"
+  htlcModePolicyOnly = "policy_only"
+  htlcModeFull = "full"
+)
 
 const (
   defaultLowOutProtectThresh = 0.10
@@ -61,6 +68,16 @@ func normalizeRebalCostMode(value string) string {
   }
 }
 
+func normalizeHTLCMode(value string) string {
+  mode := strings.ToLower(strings.TrimSpace(value))
+  switch mode {
+  case htlcModeObserveOnly, htlcModePolicyOnly, htlcModeFull:
+    return mode
+  default:
+    return htlcModeDefault
+  }
+}
+
 type AutofeeConfig struct {
   Enabled bool `json:"enabled"`
   Profile string `json:"profile"`
@@ -79,6 +96,8 @@ type AutofeeConfig struct {
   RevfloorEnabled bool `json:"revfloor_enabled"`
   CircuitBreakerEnabled bool `json:"circuit_breaker_enabled"`
   ExtremeDrainEnabled bool `json:"extreme_drain_enabled"`
+  HTLCSignalEnabled bool `json:"htlc_signal_enabled"`
+  HTLCMode string `json:"htlc_mode"`
   MinPpm int `json:"min_ppm"`
   MaxPpm int `json:"max_ppm"`
 }
@@ -101,6 +120,8 @@ type AutofeeConfigUpdate struct {
   RevfloorEnabled *bool `json:"revfloor_enabled,omitempty"`
   CircuitBreakerEnabled *bool `json:"circuit_breaker_enabled,omitempty"`
   ExtremeDrainEnabled *bool `json:"extreme_drain_enabled,omitempty"`
+  HTLCSignalEnabled *bool `json:"htlc_signal_enabled,omitempty"`
+  HTLCMode *string `json:"htlc_mode,omitempty"`
   MinPpm *int `json:"min_ppm,omitempty"`
   MaxPpm *int `json:"max_ppm,omitempty"`
 }
@@ -584,6 +605,8 @@ create table if not exists autofee_config (
   revfloor_enabled boolean not null default true,
   circuit_breaker_enabled boolean not null default true,
   extreme_drain_enabled boolean not null default true,
+  htlc_signal_enabled boolean not null default true,
+  htlc_mode text not null default 'full',
   min_ppm integer not null default 10,
   max_ppm integer not null default 2000,
   created_at timestamptz not null default now(),
@@ -638,6 +661,8 @@ alter table autofee_config add column if not exists super_source_base_fee_msat i
 alter table autofee_config add column if not exists revfloor_enabled boolean not null default true;
 alter table autofee_config add column if not exists circuit_breaker_enabled boolean not null default true;
 alter table autofee_config add column if not exists extreme_drain_enabled boolean not null default true;
+alter table autofee_config add column if not exists htlc_signal_enabled boolean not null default true;
+alter table autofee_config add column if not exists htlc_mode text not null default 'full';
 alter table autofee_config add column if not exists rebal_cost_mode text not null default 'blend';
 alter table autofee_state add column if not exists ss_active boolean;
 alter table autofee_state add column if not exists ss_ok_since timestamptz;
@@ -677,6 +702,8 @@ func (s *AutofeeService) defaultConfig() AutofeeConfig {
     RevfloorEnabled: true,
     CircuitBreakerEnabled: true,
     ExtremeDrainEnabled: true,
+    HTLCSignalEnabled: true,
+    HTLCMode: htlcModeDefault,
     MinPpm: 10,
     MaxPpm: 2000,
   }
@@ -692,7 +719,8 @@ func (s *AutofeeService) GetConfig(ctx context.Context) (AutofeeConfig, error) {
   err := s.db.QueryRow(ctx, `
 select enabled, profile, lookback_days, run_interval_sec, cooldown_up_sec, cooldown_down_sec,
   rebal_cost_mode, amboss_enabled, amboss_token, inbound_passive_enabled, discovery_enabled, explorer_enabled,
-  super_source_enabled, super_source_base_fee_msat, revfloor_enabled, circuit_breaker_enabled, extreme_drain_enabled, min_ppm, max_ppm
+  super_source_enabled, super_source_base_fee_msat, revfloor_enabled, circuit_breaker_enabled, extreme_drain_enabled,
+  htlc_signal_enabled, htlc_mode, min_ppm, max_ppm
 from autofee_config where id=$1
 `, autofeeConfigID).Scan(
     &cfg.Enabled,
@@ -712,6 +740,8 @@ from autofee_config where id=$1
     &cfg.RevfloorEnabled,
     &cfg.CircuitBreakerEnabled,
     &cfg.ExtremeDrainEnabled,
+    &cfg.HTLCSignalEnabled,
+    &cfg.HTLCMode,
     &cfg.MinPpm,
     &cfg.MaxPpm,
   )
@@ -726,6 +756,7 @@ from autofee_config where id=$1
     cfg.Profile = "moderate"
   }
   cfg.RebalCostMode = normalizeRebalCostMode(cfg.RebalCostMode)
+  cfg.HTLCMode = normalizeHTLCMode(cfg.HTLCMode)
   if cfg.LookbackDays < autofeeMinLookbackDays {
     cfg.LookbackDays = autofeeMinLookbackDays
   }
@@ -799,6 +830,12 @@ func (s *AutofeeService) UpdateConfig(ctx context.Context, req AutofeeConfigUpda
   if req.ExtremeDrainEnabled != nil {
     current.ExtremeDrainEnabled = *req.ExtremeDrainEnabled
   }
+  if req.HTLCSignalEnabled != nil {
+    current.HTLCSignalEnabled = *req.HTLCSignalEnabled
+  }
+  if req.HTLCMode != nil {
+    current.HTLCMode = normalizeHTLCMode(*req.HTLCMode)
+  }
   if req.MinPpm != nil {
     current.MinPpm = *req.MinPpm
   }
@@ -822,6 +859,7 @@ func (s *AutofeeService) UpdateConfig(ctx context.Context, req AutofeeConfigUpda
     current.SuperSourceBaseFeeMsat = 0
   }
   current.RebalCostMode = normalizeRebalCostMode(current.RebalCostMode)
+  current.HTLCMode = normalizeHTLCMode(current.HTLCMode)
 
   if current.RunIntervalSec < 3600 {
     current.RunIntervalSec = 3600
@@ -866,8 +904,10 @@ set enabled=$2,
   revfloor_enabled=$16,
   circuit_breaker_enabled=$17,
   extreme_drain_enabled=$18,
-  min_ppm=$19,
-  max_ppm=$20,
+  htlc_signal_enabled=$19,
+  htlc_mode=$20,
+  min_ppm=$21,
+  max_ppm=$22,
   updated_at=now()
 where id=$1
 `, autofeeConfigID,
@@ -888,6 +928,8 @@ where id=$1
     current.RevfloorEnabled,
     current.CircuitBreakerEnabled,
     current.ExtremeDrainEnabled,
+    current.HTLCSignalEnabled,
+    current.HTLCMode,
     current.MinPpm,
     current.MaxPpm,
   )
@@ -1707,6 +1749,9 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
   signals := map[uint64]htlcFailureSignal{}
   window := e.htlcSignalWindow()
   windowMin := int(window / time.Minute)
+  if !e.cfg.HTLCSignalEnabled {
+    return signals, windowMin
+  }
   if e.svc.htlcFailedProvider == nil {
     return signals, windowMin
   }
@@ -1743,10 +1788,9 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
     }
   }
 
-  minAttempts := e.profile.HTLCMinAttempts60m
-  if minAttempts <= 0 {
-    minAttempts = 12
-  }
+  minAttempts := scaleHTLCThresholdByWindow(e.profile.HTLCMinAttempts60m, windowMin, 12)
+  minPolicyFails := scaleHTLCThresholdByWindow(e.profile.HTLCPolicyMinFails, windowMin, 3)
+  minLiquidityFails := scaleHTLCThresholdByWindow(e.profile.HTLCLiquidityMinFails, windowMin, 4)
   for _, ch := range channels {
     if ch.ChannelID == 0 {
       continue
@@ -1761,10 +1805,10 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
     liqRate := float64(liqFails) / float64(total)
     sampleLow := total < minAttempts
     policyHot := !sampleLow &&
-      polFails >= maxInt(1, e.profile.HTLCPolicyMinFails) &&
+      polFails >= minPolicyFails &&
       polRate >= e.profile.HTLCPolicyFailRate
     liquidityHot := !sampleLow &&
-      liqFails >= maxInt(1, e.profile.HTLCLiquidityMinFails) &&
+      liqFails >= minLiquidityFails &&
       liqRate >= e.profile.HTLCLiquidityFailRate
     signals[ch.ChannelID] = htlcFailureSignal{
       Attempts60m: total,
@@ -1793,6 +1837,24 @@ func (e *autofeeEngine) htlcSignalWindow() time.Duration {
     secs = 3600
   }
   return time.Duration(secs) * time.Second
+}
+
+func scaleHTLCThresholdByWindow(base int, windowMin int, fallback int) int {
+  if base <= 0 {
+    base = fallback
+  }
+  if base <= 0 {
+    return 1
+  }
+  if windowMin < 60 {
+    windowMin = 60
+  }
+  factor := float64(windowMin) / 60.0
+  scaled := int(math.Ceil(float64(base) * factor))
+  if scaled < base {
+    scaled = base
+  }
+  return maxInt(1, scaled)
 }
 
 func parseShortChannelID(raw string) (uint64, bool) {
@@ -2629,15 +2691,18 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
 
-  htlcHotSignal := !htlcSampleLow && (htlcPolicyHot || htlcLiquidityHot)
+  htlcMode := normalizeHTLCMode(e.cfg.HTLCMode)
+  applyHTLCPolicyHot := e.cfg.HTLCSignalEnabled && (htlcMode == htlcModePolicyOnly || htlcMode == htlcModeFull)
+  applyHTLCLiquidityHot := e.cfg.HTLCSignalEnabled && htlcMode == htlcModeFull
+  htlcHotSignal := !htlcSampleLow && ((applyHTLCPolicyHot && htlcPolicyHot) || (applyHTLCLiquidityHot && htlcLiquidityHot))
   if htlcHotSignal {
-    if htlcPolicyHot && htlcLiquidityHot {
+    if applyHTLCPolicyHot && htlcPolicyHot && applyHTLCLiquidityHot && htlcLiquidityHot {
       if target < localPpm {
         target = localPpm
         tags = append(tags, "htlc-neutral-nodown")
       }
     } else {
-      if htlcLiquidityHot {
+      if applyHTLCLiquidityHot && htlcLiquidityHot {
         liqBump := e.profile.HTLCLiquidityHotBump
         if liqBump > 0 {
           target = int(math.Ceil(float64(target) * (1.0 + liqBump)))
@@ -2652,7 +2717,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
           tags = append(tags, "htlc-liq-nodown")
         }
       }
-      if htlcPolicyHot {
+      if applyHTLCPolicyHot && htlcPolicyHot {
         policyBump := e.profile.HTLCPolicyHotBump
         if policyBump > 0 {
           target = int(math.Ceil(float64(target) * (1.0 + policyBump)))
