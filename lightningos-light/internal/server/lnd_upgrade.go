@@ -385,8 +385,7 @@ func ensureLndUpgradeScript(ctx context.Context) error {
   if strings.TrimSpace(embeddedUpgradeScript) == "" {
     return errors.New("embedded upgrade script is empty")
   }
-  existing, err := os.ReadFile(lndUpgradeScriptPath)
-  if err == nil && string(existing) == embeddedUpgradeScript {
+  if info, err := os.Stat(lndUpgradeScriptPath); err == nil && !info.IsDir() {
     return nil
   }
 
