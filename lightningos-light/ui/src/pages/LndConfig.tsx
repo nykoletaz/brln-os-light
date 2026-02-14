@@ -91,6 +91,11 @@ export default function LndConfig() {
     const loadLogs = async () => {
       setUpgradeLogsStatus(t('lndUpgrade.loadingLogs'))
       try {
+        if (!upgradeStartedVersion && !upgrade?.running && !upgradeLocked) {
+          setUpgradeLogs([])
+          setUpgradeLogsStatus('')
+          return
+        }
         const res = await getLogs('lnd-upgrade', 200)
         if (!mounted) return
         const lines: string[] = Array.isArray(res?.lines) ? res.lines : []
@@ -248,6 +253,7 @@ export default function LndConfig() {
       setUpgradeRcConfirm(true)
       return
     }
+    setUpgradeStartedVersion(upgrade.latest_version)
     setUpgradeBusy(true)
     setUpgradeError(null)
     setUpgradeComplete(false)
@@ -257,7 +263,6 @@ export default function LndConfig() {
         target_version: upgrade.latest_version,
         download_url: upgrade.latest_url
       })
-      setUpgradeStartedVersion(upgrade.latest_version)
       setUpgradeMessage(t('lndUpgrade.started'))
       setUpgradeModalOpen(true)
       setUpgradeLocked(true)
