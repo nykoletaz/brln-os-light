@@ -1163,7 +1163,7 @@ func (n *Notifier) runTransactions() {
       if direction == "in" && status == "CONFIRMED" {
         txid := strings.TrimSpace(tx.TxHash)
         if txid != "" {
-          n.triggerTelegramBackup("onchain_receive_confirmed", txid)
+          n.triggerTelegramBackup("onchain_receive_confirmed", txid, "")
         }
       }
 
@@ -1257,7 +1257,11 @@ func (n *Notifier) runPendingChannels() {
       if channelPoint == "" && strings.TrimSpace(item.ClosingTxid) != "" {
         channelPoint = strings.TrimSpace(item.ClosingTxid)
       }
-      n.triggerTelegramBackup(reason, channelPoint)
+      peerAlias := strings.TrimSpace(item.PeerAlias)
+      if peerAlias == "" && strings.TrimSpace(item.RemotePubkey) != "" {
+        peerAlias = n.lookupNodeAlias(item.RemotePubkey)
+      }
+      n.triggerTelegramBackup(reason, channelPoint, peerAlias)
       if isClosing {
         n.notifyPendingChannelClosing(item, channelPoint)
       }
