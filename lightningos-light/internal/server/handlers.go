@@ -1236,6 +1236,7 @@ func parsePeerAddress(address string) (string, string, error) {
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
   service := r.URL.Query().Get("service")
   linesRaw := r.URL.Query().Get("lines")
+  sinceRaw := strings.TrimSpace(r.URL.Query().Get("since"))
 
   lines := 200
   if linesRaw != "" {
@@ -1264,7 +1265,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  out, err := system.JournalTail(ctx, service, lines)
+  out, err := system.JournalTailSince(ctx, service, lines, sinceRaw)
   if err != nil {
     writeError(w, http.StatusInternalServerError, fmt.Sprintf("log read failed: %v", err))
     return

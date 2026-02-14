@@ -389,16 +389,24 @@ func ensureLndUpgradeScript(ctx context.Context) error {
   if err == nil && string(existing) == embeddedUpgradeScript {
     return nil
   }
-  marker := "__LIGHTNINGOS_UPGRADE_LND__"
-  installCmd := fmt.Sprintf(
-    "mkdir -p %s && cat > %s <<'%s'\n%s\n%s\nchmod 0755 %s",
-    filepath.Dir(lndUpgradeScriptPath),
-    lndUpgradeScriptPath,
-    marker,
-    embeddedUpgradeScript,
-    marker,
-    lndUpgradeScriptPath,
-  )
+
+  tmpFile, err := os.CreateTemp("", "lightningos-upgrade-lnd-*.sh")
+  if err != nil {
+    return err
+  }
+  tmpPath := tmpFile.Name()
+  if _, err := tmpFile.WriteString(embeddedUpgradeScript); err != nil {
+    _ = tmpFile.Close()
+    _ = os.Remove(tmpPath)
+    return err
+  }
+  if err := tmpFile.Close(); err != nil {
+    _ = os.Remove(tmpPath)
+    return err
+  }
+  defer os.Remove(tmpPath)
+
+  installCmd := fmt.Sprintf("mkdir -p %s && install -m 0755 %s %s", filepath.Dir(lndUpgradeScriptPath), tmpPath, lndUpgradeScriptPath)
   if _, err := runSystemd(ctx, "/bin/sh", "-c", installCmd); err != nil {
     return fmt.Errorf("systemd-run failed (check sudoers for lightningos): %w", err)
   }

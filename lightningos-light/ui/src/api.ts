@@ -85,8 +85,8 @@ export const restartService = (payload: { service: string }) =>
 export const runSystemAction = (payload: { action: 'reboot' | 'shutdown' }) =>
   request('/api/actions/system', { method: 'POST', body: JSON.stringify(payload) })
 
-export const getLogs = (service: string, lines: number) =>
-  request(`/api/logs?service=${service}&lines=${lines}`)
+export const getLogs = (service: string, lines: number, since?: string) =>
+  request(`/api/logs${buildQuery({ service, lines, since })}`)
 
 export const updateLndConfig = (payload: {
   alias: string

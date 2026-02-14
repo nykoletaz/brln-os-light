@@ -38,6 +38,7 @@ export default function LndConfig() {
   const [upgradeLocked, setUpgradeLocked] = useState(false)
   const [upgradeRcConfirm, setUpgradeRcConfirm] = useState(false)
   const [upgradeStartedVersion, setUpgradeStartedVersion] = useState('')
+  const [upgradeLogSince, setUpgradeLogSince] = useState('')
 
   const findLastMatchIndex = (lines: string[], pattern: string) => {
     for (let i = lines.length - 1; i >= 0; i -= 1) {
@@ -105,7 +106,7 @@ export default function LndConfig() {
           setUpgradeLogsStatus('')
           return
         }
-        const res = await getLogs('lnd-upgrade', 200)
+        const res = await getLogs('lnd-upgrade', 200, upgradeLogSince || undefined)
         if (!mounted) return
         const lines: string[] = Array.isArray(res?.lines) ? res.lines : []
         const startMarker = '==> Starting LND upgrade to v'
@@ -186,7 +187,7 @@ export default function LndConfig() {
       mounted = false
       clearInterval(timer)
     }
-  }, [upgradeModalOpen, t, upgrade?.running, upgradeLocked, upgradeStartedVersion])
+  }, [upgradeModalOpen, t, upgrade?.running, upgradeLocked, upgradeStartedVersion, upgradeLogSince])
 
   const isHexColor = (value: string) => /^#[0-9a-fA-F]{6}$/.test(value.trim())
 
@@ -258,6 +259,7 @@ export default function LndConfig() {
     setUpgradeLocked(Boolean(upgrade?.running))
     setUpgradeRcConfirm(false)
     setUpgradeStartedVersion('')
+    setUpgradeLogSince('')
   }
 
   const closeUpgradeModal = () => {
@@ -272,7 +274,9 @@ export default function LndConfig() {
       setUpgradeRcConfirm(true)
       return
     }
+    const sinceNow = new Date().toISOString()
     setUpgradeStartedVersion(upgrade.latest_version)
+    setUpgradeLogSince(sinceNow)
     setUpgradeBusy(true)
     setUpgradeError(null)
     setUpgradeComplete(false)
