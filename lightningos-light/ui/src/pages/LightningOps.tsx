@@ -202,6 +202,12 @@ type AutofeeResultItem = {
   htlc_policy_hot?: number
   htlc_sample_low?: number
   htlc_window_min?: number
+  htlc_min_attempts?: number
+  htlc_min_policy_fails?: number
+  htlc_min_liquidity_fails?: number
+  htlc_node_factor?: number
+  htlc_liquidity_factor?: number
+  htlc_threshold_factor?: number
   amboss?: number
   missing?: number
   err?: number
@@ -515,7 +521,7 @@ export default function LightningOps() {
     const liqClass = formatAutofeeLiquidityClass(item.liquidity_class)
     const revfloorThr = item.revfloor_baseline ?? 0
     const revfloorMin = item.revfloor_min_abs ?? 0
-    return t('lightningOps.autofeeResultsCalib', {
+    let line = t('lightningOps.autofeeResultsCalib', {
       node: nodeClass,
       channels,
       cap,
@@ -526,6 +532,14 @@ export default function LightningOps() {
       revfloorThr,
       revfloorMin
     })
+    if (
+      typeof item.htlc_node_factor === 'number' &&
+      typeof item.htlc_liquidity_factor === 'number' &&
+      typeof item.htlc_threshold_factor === 'number'
+    ) {
+      line += ` | htlc_k node=${item.htlc_node_factor.toFixed(2)} liq=${item.htlc_liquidity_factor.toFixed(2)} total=${item.htlc_threshold_factor.toFixed(2)}`
+    }
+    return line
   }
 
   const formatAutofeeHeader = (item: AutofeeResultItem) => {
@@ -553,6 +567,15 @@ export default function LightningOps() {
       `htlc_low_sample ${item.htlc_sample_low ?? 0}`,
       `htlc_window ${(item.htlc_window_min ?? 0)}m`
     ]
+    if (
+      typeof item.htlc_min_attempts === 'number' &&
+      typeof item.htlc_min_policy_fails === 'number' &&
+      typeof item.htlc_min_liquidity_fails === 'number'
+    ) {
+      parts.push(
+        `htlc_min a>=${item.htlc_min_attempts} p>=${item.htlc_min_policy_fails} l>=${item.htlc_min_liquidity_fails}`
+      )
+    }
     return `📊 ${parts.join(' | ')}`
   }
 
