@@ -157,6 +157,7 @@ func (s *Server) handleLNDUpgradeStart(w http.ResponseWriter, r *http.Request) {
     "--unit", lndUpgradeUnitName,
     "--collect",
     "--quiet",
+    "--",
     lndUpgradeScriptPath,
     "--version", version,
     "--url", downloadURL,

@@ -80,7 +80,7 @@ require_root
 
 VERSION="${VERSION#v}"
 if [[ -z "$VERSION" ]]; then
-  die "Missing --version. Example: --version 0.20.1-beta.rc1"
+  die "Missing --version. Args: $*. Example: --version 0.20.1-beta.rc1"
 fi
 
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([\-\.][0-9A-Za-z\.-]+)?$ ]]; then
