@@ -37,6 +37,16 @@ export default function LndConfig() {
   const [upgradeComplete, setUpgradeComplete] = useState(false)
   const [upgradeLocked, setUpgradeLocked] = useState(false)
   const [upgradeRcConfirm, setUpgradeRcConfirm] = useState(false)
+  const [upgradeStartedVersion, setUpgradeStartedVersion] = useState('')
+
+  const findLastMatchIndex = (lines: string[], pattern: string) => {
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      if (lines[i].includes(pattern)) {
+        return i
+      }
+    }
+    return -1
+  }
 
   const loadLocalStatus = () => {
     getBitcoinLocalStatus()
@@ -84,18 +94,42 @@ export default function LndConfig() {
         const res = await getLogs('lnd-upgrade', 200)
         if (!mounted) return
         const lines: string[] = Array.isArray(res?.lines) ? res.lines : []
-        setUpgradeLogs(lines)
-        const completed = lines.some((line: string) => line.includes('Upgrade complete.'))
-        const errorLine = [...lines].reverse().find((line: string) =>
-          line.includes('[ERROR]') || line.includes('Upgrade failed')
-        )
-        if (completed) {
-          setUpgradeComplete(true)
-          setUpgradeLocked(false)
+        const startMarker = '==> Starting LND upgrade to v'
+        const expectedStartMarker = upgradeStartedVersion
+          ? `${startMarker}${upgradeStartedVersion}`
+          : ''
+
+        let runLines = lines
+        let hasRunSegment = false
+        if (expectedStartMarker) {
+          const expectedIndex = findLastMatchIndex(lines, expectedStartMarker)
+          if (expectedIndex !== -1) {
+            runLines = lines.slice(expectedIndex)
+            hasRunSegment = true
+          }
+        } else if (upgrade?.running || upgradeLocked) {
+          const genericIndex = findLastMatchIndex(lines, startMarker)
+          if (genericIndex !== -1) {
+            runLines = lines.slice(genericIndex)
+            hasRunSegment = true
+          }
         }
-        if (errorLine) {
-          setUpgradeError(errorLine)
-          setUpgradeLocked(false)
+
+        setUpgradeLogs(expectedStartMarker && !hasRunSegment ? [] : runLines)
+
+        if (hasRunSegment) {
+          const completed = runLines.some((line: string) => line.includes('Upgrade complete.'))
+          const errorLine = [...runLines].reverse().find((line: string) =>
+            line.includes('[ERROR]') || line.includes('Upgrade failed')
+          )
+          if (completed) {
+            setUpgradeComplete(true)
+            setUpgradeLocked(false)
+          }
+          if (errorLine) {
+            setUpgradeError(errorLine)
+            setUpgradeLocked(false)
+          }
         }
         setUpgradeLogsStatus('')
       } catch (err) {
@@ -128,7 +162,7 @@ export default function LndConfig() {
       mounted = false
       clearInterval(timer)
     }
-  }, [upgradeModalOpen, t, upgradeLocked])
+  }, [upgradeModalOpen, t, upgrade?.running, upgradeLocked, upgradeStartedVersion])
 
   const isHexColor = (value: string) => /^#[0-9a-fA-F]{6}$/.test(value.trim())
 
@@ -199,6 +233,7 @@ export default function LndConfig() {
     setUpgradeComplete(false)
     setUpgradeLocked(Boolean(upgrade?.running))
     setUpgradeRcConfirm(false)
+    setUpgradeStartedVersion('')
   }
 
   const closeUpgradeModal = () => {
@@ -222,6 +257,7 @@ export default function LndConfig() {
         target_version: upgrade.latest_version,
         download_url: upgrade.latest_url
       })
+      setUpgradeStartedVersion(upgrade.latest_version)
       setUpgradeMessage(t('lndUpgrade.started'))
       setUpgradeModalOpen(true)
       setUpgradeLocked(true)
