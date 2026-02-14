@@ -154,11 +154,10 @@ func (s *Server) handleLNDUpgradeStart(w http.ResponseWriter, r *http.Request) {
   }
 
   args := []string{
-    "--uid=0",
-    "--gid=0",
     "--unit", lndUpgradeUnitName,
     "--collect",
     "--quiet",
+    "--",
     lndUpgradeScriptPath,
     "--version", version,
     "--url", downloadURL,
