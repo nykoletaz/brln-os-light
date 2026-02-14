@@ -160,7 +160,9 @@ func (s *Server) handleAutofeeRun(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+  // Manual non-dry runs can touch many channels and exceed short HTTP deadlines.
+  // Keep request cancellation semantics, but allow enough time for the full batch.
+  ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
   defer cancel()
 
   if err := svc.Run(ctx, req.DryRun, "manual"); err != nil {
