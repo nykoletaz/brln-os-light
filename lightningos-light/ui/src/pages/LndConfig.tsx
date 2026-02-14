@@ -172,6 +172,9 @@ export default function LndConfig() {
           } else if (upgradeLocked) {
             setUpgradeLocked(false)
           }
+          if (upgradeStartedVersion && !data?.running && !upgradeError && !data?.update_available) {
+            setUpgradeComplete(true)
+          }
         }
       } catch {
         // ignore status refresh errors during modal
@@ -187,7 +190,7 @@ export default function LndConfig() {
       mounted = false
       clearInterval(timer)
     }
-  }, [upgradeModalOpen, t, upgrade?.running, upgradeLocked, upgradeStartedVersion, upgradeLogSince])
+  }, [upgradeModalOpen, t, upgrade?.running, upgradeLocked, upgradeStartedVersion, upgradeLogSince, upgradeError])
 
   const isHexColor = (value: string) => /^#[0-9a-fA-F]{6}$/.test(value.trim())
 
@@ -251,15 +254,17 @@ export default function LndConfig() {
   }
 
   const openUpgradeModal = () => {
+    const nowSince = new Date().toISOString()
     setUpgradeModalOpen(true)
     setUpgradeLogs([])
     setUpgradeLogsStatus('')
+    setUpgradeMessage('')
     setUpgradeError(null)
     setUpgradeComplete(false)
     setUpgradeLocked(Boolean(upgrade?.running))
     setUpgradeRcConfirm(false)
     setUpgradeStartedVersion('')
-    setUpgradeLogSince('')
+    setUpgradeLogSince(nowSince)
   }
 
   const closeUpgradeModal = () => {
@@ -268,7 +273,7 @@ export default function LndConfig() {
     setUpgradeRcConfirm(false)
   }
 
-  const showConfirmUpgrade = !upgradeComplete
+  const showConfirmUpgrade = Boolean(upgrade?.update_available) && !upgradeComplete
 
   const startUpgrade = async () => {
     if (!upgrade?.latest_version || upgradeBusy) return
