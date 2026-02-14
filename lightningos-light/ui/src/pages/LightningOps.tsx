@@ -2531,9 +2531,11 @@ export default function LightningOps() {
                 const classLabel = formatChannelClassLabel(ch.class_label)
                 const isInlineFeeEditing = inlineFeeChannelPoint === ch.channel_point
                 const inlineBusy = inlineFeeLoading || inlineFeeSaving
-                const channelCapacity = ch.capacity_sat > 0 ? ch.capacity_sat : (ch.local_balance_sat + ch.remote_balance_sat)
-                const localPctRaw = channelCapacity > 0 ? (ch.local_balance_sat / channelCapacity) * 100 : 0
-                const remotePctRaw = channelCapacity > 0 ? (ch.remote_balance_sat / channelCapacity) * 100 : 0
+                const visualTotal = (ch.local_balance_sat + ch.remote_balance_sat) > 0
+                  ? (ch.local_balance_sat + ch.remote_balance_sat)
+                  : (ch.capacity_sat > 0 ? ch.capacity_sat : 0)
+                const localPctRaw = visualTotal > 0 ? (ch.local_balance_sat / visualTotal) * 100 : 0
+                const remotePctRaw = visualTotal > 0 ? (ch.remote_balance_sat / visualTotal) * 100 : 0
                 const localPct = Math.max(0, Math.min(100, localPctRaw))
                 const remotePct = Math.max(0, Math.min(100, remotePctRaw))
                 const localPctLabel = `${localPct.toFixed(0)}%`
@@ -2598,11 +2600,11 @@ export default function LightningOps() {
                             style={{ width: `${localPct}%` }}
                           />
                           <div
-                            className="absolute inset-y-0 right-0 bg-ember/60"
+                            className="absolute inset-y-0 right-0 bg-white/35"
                             style={{ width: `${remotePct}%` }}
                           />
                         </div>
-                        <span className="w-12 text-left text-ember">{remotePctLabel}</span>
+                        <span className="w-12 text-left text-fog/70">{remotePctLabel}</span>
                       </div>
                     </div>
                     <div className="mt-3 grid gap-3 lg:grid-cols-6 text-xs text-fog/70">
