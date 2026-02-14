@@ -2624,26 +2624,6 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   if sinkMinMargin <= 0 {
     sinkMinMargin = defaultSinkMinMargin
   }
-  minSoftCeiling := e.profile.MinSoftCeiling
-  if minSoftCeiling <= 0 {
-    minSoftCeiling = defaultMinSoftCeiling
-  }
-  seedCeilingMult := e.profile.SeedCeilingMult
-  if seedCeilingMult <= 0 {
-    seedCeilingMult = defaultSeedCeilingMult
-  }
-  seedFloorMult := e.profile.SeedFloorMult
-  if seedFloorMult <= 0 {
-    seedFloorMult = defaultSeedFloorMult
-  }
-  seedP95Boost := e.profile.SeedP95Boost
-  if seedP95Boost <= 0 {
-    seedP95Boost = defaultSeedP95Boost
-  }
-  sourceSeedTargetFrac := e.profile.SourceSeedTargetFrac
-  if sourceSeedTargetFrac <= 0 {
-    sourceSeedTargetFrac = defaultSourceSeedTargetFrac
-  }
   profitProtectOutRatio := e.profile.ProfitProtectOutRatio
   if profitProtectOutRatio <= 0 {
     profitProtectOutRatio = defaultProfitProtectOutRatio
@@ -3139,60 +3119,8 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     floorSrc = "super-source"
   }
 
+  // Seed is a reference for target construction, not a hard fee ceiling.
   finalCandidate := clampInt(maxInt(rawStep, floor), e.cfg.MinPpm, e.cfg.MaxPpm)
-  if strings.EqualFold(classLabel, "source") && finalCandidate < localPpm {
-    pref := clampInt(int(math.Round(seed*sourceSeedTargetFrac)), e.cfg.MinPpm, e.cfg.MaxPpm)
-    if pref < finalCandidate {
-      finalCandidate = pref
-    }
-  }
-
-  seedP95Val := seedP95
-  if seedP95Val <= 0 {
-    seedP95Val = seed
-  }
-  baseCeiling := int(math.Round(seed * seedCeilingMult))
-  seedFloor := int(math.Round(seed * seedFloorMult))
-  p95Floor := int(math.Round(seedP95Val * seedP95Boost))
-  localMax := maxInt(minSoftCeiling, maxInt(baseCeiling, maxInt(seedFloor, p95Floor)))
-  localMax = minInt(localMax, e.cfg.MaxPpm)
-  if localMax < e.cfg.MinPpm {
-    localMax = e.cfg.MinPpm
-  }
-
-  if strings.EqualFold(classLabel, "sink") && outRatio < lowOutProtectThresh && marginPpm7d >= sinkMinMargin {
-    localMax = e.cfg.MaxPpm
-  } else {
-    demandException := (outPpm7d > 0 && fwdCount >= 4 && seed > 0 && float64(outPpm7d) >= seed*outratePegSeedMult) ||
-      (outRatio < lowOutProtectThresh)
-    if demandException {
-      capBase := int(math.Round(seed * outratePegSeedMult))
-      if outPpm7d > capBase {
-        capBase = outPpm7d
-      }
-      if capBase > localMax {
-        localMax = capBase
-      }
-      if localMax > e.cfg.MaxPpm {
-        localMax = e.cfg.MaxPpm
-      }
-    }
-  }
-
-  if strings.EqualFold(classLabel, "source") {
-    srcCap := int(math.Round(seed * 1.10))
-    if outPpm7d > 0 {
-      srcCap = minInt(srcCap, int(math.Round(float64(outPpm7d)*1.10)))
-    }
-    srcCap = clampInt(srcCap, e.cfg.MinPpm, e.cfg.MaxPpm)
-    if srcCap < localMax {
-      localMax = srcCap
-    }
-  }
-
-  if finalCandidate > localMax {
-    finalCandidate = localMax
-  }
 
   stepMinFinal := minStepDown
   if finalCandidate > localPpm {
