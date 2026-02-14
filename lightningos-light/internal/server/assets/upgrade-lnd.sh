@@ -51,6 +51,7 @@ parse_commit_from_output() {
 
 VERSION=""
 URL=""
+VALIDATE_ONLY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -68,6 +69,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --url=*)
       URL="${1#*=}"
+      shift
+      ;;
+    --validate-only)
+      VALIDATE_ONLY=1
       shift
       ;;
     *)
@@ -89,6 +94,11 @@ fi
 
 if [[ -z "$URL" ]]; then
   URL="https://github.com/lightningnetwork/lnd/releases/download/v${VERSION}/lnd-linux-amd64-v${VERSION}.tar.gz"
+fi
+
+if [[ "$VALIDATE_ONLY" -eq 1 ]]; then
+  print_ok "LND upgrade arguments validated."
+  exit 0
 fi
 
 print_step "Starting LND upgrade to v${VERSION}"

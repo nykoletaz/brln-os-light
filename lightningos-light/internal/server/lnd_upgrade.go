@@ -153,10 +153,23 @@ func (s *Server) handleLNDUpgradeStart(w http.ResponseWriter, r *http.Request) {
     return
   }
 
+  if out, err := system.RunCommandWithSudo(ctx, lndUpgradeScriptPath, "--validate-only", "--version", version, "--url", downloadURL); err != nil {
+    message := strings.TrimSpace(out)
+    if message == "" {
+      message = err.Error()
+    }
+    writeError(w, http.StatusInternalServerError, fmt.Sprintf("upgrade preflight failed: %s", message))
+    return
+  }
+
   args := []string{
     "--unit", lndUpgradeUnitName,
     "--collect",
     "--quiet",
+    "--property=User=root",
+    "--property=Group=root",
+    "--property=StandardOutput=journal",
+    "--property=StandardError=journal",
     "--",
     lndUpgradeScriptPath,
     "--version", version,
