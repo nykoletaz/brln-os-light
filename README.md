@@ -260,7 +260,7 @@ UI parameters:
 
 HTLC signal behavior:
 - Signal window is aligned to Autofee cadence: `max(run_interval, 60m)`.
-- Minimum sample/fail thresholds are scaled by the active HTLC window.
+- Minimum sample/fail thresholds are scaled by the active HTLC window and calibrated by node size + liquidity class.
 - Summary line includes: `htlc_liq_hot`, `htlc_policy_hot`, `htlc_low_sample`, `htlc_window`.
 - Per-channel line includes counters when present: `htlc<window>m a=<attempts> p=<policy_fails> l=<liquidity_fails>`.
 

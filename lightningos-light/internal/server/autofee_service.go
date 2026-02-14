@@ -162,6 +162,12 @@ type autofeeLogItem struct {
   HTLCPolicyHot int `json:"htlc_policy_hot,omitempty"`
   HTLCSampleLow int `json:"htlc_sample_low,omitempty"`
   HTLCWindowMin int `json:"htlc_window_min,omitempty"`
+  HTLCMinAttempts int `json:"htlc_min_attempts,omitempty"`
+  HTLCMinPolicyFails int `json:"htlc_min_policy_fails,omitempty"`
+  HTLCMinLiquidityFails int `json:"htlc_min_liquidity_fails,omitempty"`
+  HTLCNodeFactor float64 `json:"htlc_node_factor,omitempty"`
+  HTLCLiquidityFactor float64 `json:"htlc_liquidity_factor,omitempty"`
+  HTLCThresholdFactor float64 `json:"htlc_threshold_factor,omitempty"`
   Amboss int `json:"amboss,omitempty"`
   Missing int `json:"missing,omitempty"`
   Err int `json:"err,omitempty"`
@@ -1261,6 +1267,13 @@ type autofeeCalibration struct {
   AvgCapacitySat int64
   LocalCapacitySat int64
   LocalRatio float64
+  HTLCNodeFactor float64
+  HTLCLiquidityFactor float64
+  HTLCThresholdFactor float64
+  HTLCMinAttempts int
+  HTLCMinPolicyFails int
+  HTLCMinLiquidityFails int
+  HTLCWindowMin int
 }
 
 type autofeeRunSummary struct {
@@ -1290,6 +1303,12 @@ type autofeeRunSummary struct {
   htlcPolicyHot int
   htlcSampleLow int
   htlcWindowMin int
+  htlcMinAttempts int
+  htlcMinPolicyFails int
+  htlcMinLiquidityFails int
+  htlcNodeFactor float64
+  htlcLiquidityFactor float64
+  htlcThresholdFactor float64
 }
 
 func (s *autofeeRunSummary) addTags(tags []string) {
@@ -1522,8 +1541,8 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   rebalGlobalPpm := ppmMsat(rebalGlobal.FeeMsat, rebalGlobal.AmtMsat)
   outPpmTotal := ppmMsat(totalOutFeeMsat, totalOutAmtMsat)
   negMarginGlobal := rebalGlobalPpm > 0 && outPpmTotal > 0 && outPpmTotal < rebalGlobalPpm
-  htlcSignals, htlcWindowMin := e.buildHTLCFailureSignals(channels)
   e.calibrateNode(channels, state, forwardStats)
+  htlcSignals, htlcMeta := e.buildHTLCFailureSignals(channels)
 
   runID := fmt.Sprintf("%d", time.Now().UnixNano())
   header := fmt.Sprintf("⚡ Autofee %s | %s", strings.ToUpper(reason), e.now.UTC().Format(time.RFC3339))
@@ -1531,7 +1550,13 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     header = header + " (dry-run)"
   }
   summary := autofeeRunSummary{total: len(channels)}
-  summary.htlcWindowMin = htlcWindowMin
+  summary.htlcWindowMin = htlcMeta.WindowMin
+  summary.htlcMinAttempts = htlcMeta.MinAttempts
+  summary.htlcMinPolicyFails = htlcMeta.MinPolicyFails
+  summary.htlcMinLiquidityFails = htlcMeta.MinLiquidityFails
+  summary.htlcNodeFactor = htlcMeta.NodeFactor
+  summary.htlcLiquidityFactor = htlcMeta.LiquidityFactor
+  summary.htlcThresholdFactor = htlcMeta.ThresholdFactor
   changedLines := []autofeeLogEntry{}
   keptLines := []autofeeLogEntry{}
   skippedLines := []autofeeLogEntry{}
@@ -1617,11 +1642,12 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   }
 
   summaryText := fmt.Sprintf(
-    "📊 up %d | down %d | flat %d | cooldown %d | small %d | same %d | disabled %d | inactive %d | inb_disc %d | super_source %d | htlc_liq_hot %d | htlc_policy_hot %d | htlc_low_sample %d | htlc_window %dm",
+    "📊 up %d | down %d | flat %d | cooldown %d | small %d | same %d | disabled %d | inactive %d | inb_disc %d | super_source %d | htlc_liq_hot %d | htlc_policy_hot %d | htlc_low_sample %d | htlc_window %dm | htlc_min a>=%d p>=%d l>=%d",
     summary.changedUp, summary.changedDown, summary.kept,
     summary.skippedCooldown, summary.skippedSmall, summary.skippedSame,
     summary.disabled, summary.inactive, summary.inboundDiscount, summary.superSource,
     summary.htlcLiqHot, summary.htlcPolicyHot, summary.htlcSampleLow, summary.htlcWindowMin,
+    summary.htlcMinAttempts, summary.htlcMinPolicyFails, summary.htlcMinLiquidityFails,
   )
   seedText := fmt.Sprintf(
     "🌱 seed amboss=%d missing=%d err=%d empty=%d outrate=%d mem=%d default=%d",
@@ -1650,6 +1676,12 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       HTLCPolicyHot: summary.htlcPolicyHot,
       HTLCSampleLow: summary.htlcSampleLow,
       HTLCWindowMin: summary.htlcWindowMin,
+      HTLCMinAttempts: summary.htlcMinAttempts,
+      HTLCMinPolicyFails: summary.htlcMinPolicyFails,
+      HTLCMinLiquidityFails: summary.htlcMinLiquidityFails,
+      HTLCNodeFactor: summary.htlcNodeFactor,
+      HTLCLiquidityFactor: summary.htlcLiquidityFactor,
+      HTLCThresholdFactor: summary.htlcThresholdFactor,
     }},
     {Line: seedText, Payload: &autofeeLogItem{
       Kind: "seed",
@@ -1663,9 +1695,10 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       CooldownIgnored: e.ignoreCooldown,
     }},
   }
-  calibLine := fmt.Sprintf("⚙️ calib node=%s channels=%d cap=%d avg=%d local=%d (%.0f%%) revfloor_thr=%d revfloor_min=%d liq=%s",
+  calibLine := fmt.Sprintf("⚙️ calib node=%s channels=%d cap=%d avg=%d local=%d (%.0f%%) revfloor_thr=%d revfloor_min=%d liq=%s | htlc_k node=%.2f liq=%.2f total=%.2f",
     e.calib.NodeClass, e.calib.ChannelCount, e.calib.TotalCapacitySat, e.calib.AvgCapacitySat,
     e.calib.LocalCapacitySat, e.calib.LocalRatio*100, e.calib.RevfloorBaseline, e.calib.RevfloorMinAbs, e.calib.LiquidityClass,
+    e.calib.HTLCNodeFactor, e.calib.HTLCLiquidityFactor, e.calib.HTLCThresholdFactor,
   )
   entries = append(entries, autofeeLogEntry{
     Line: calibLine,
@@ -1680,6 +1713,13 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       LocalRatio: e.calib.LocalRatio,
       RevfloorBaseline: e.calib.RevfloorBaseline,
       RevfloorMinAbs: e.calib.RevfloorMinAbs,
+      HTLCWindowMin: e.calib.HTLCWindowMin,
+      HTLCMinAttempts: e.calib.HTLCMinAttempts,
+      HTLCMinPolicyFails: e.calib.HTLCMinPolicyFails,
+      HTLCMinLiquidityFails: e.calib.HTLCMinLiquidityFails,
+      HTLCNodeFactor: e.calib.HTLCNodeFactor,
+      HTLCLiquidityFactor: e.calib.HTLCLiquidityFactor,
+      HTLCThresholdFactor: e.calib.HTLCThresholdFactor,
     },
   })
 
@@ -1745,20 +1785,53 @@ type htlcFailureSignal struct {
   LiquidityHot bool
 }
 
-func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo) (map[uint64]htlcFailureSignal, int) {
+type htlcSignalMeta struct {
+  WindowMin int
+  MinAttempts int
+  MinPolicyFails int
+  MinLiquidityFails int
+  NodeFactor float64
+  LiquidityFactor float64
+  ThresholdFactor float64
+}
+
+func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo) (map[uint64]htlcFailureSignal, htlcSignalMeta) {
   signals := map[uint64]htlcFailureSignal{}
   window := e.htlcSignalWindow()
   windowMin := int(window / time.Minute)
+  nodeFactor, liquidityFactor, thresholdFactor := e.htlcThresholdFactors()
+  minAttempts := scaleHTLCThresholdByWindow(e.profile.HTLCMinAttempts60m, windowMin, 12)
+  minPolicyFails := scaleHTLCThresholdByWindow(e.profile.HTLCPolicyMinFails, windowMin, 3)
+  minLiquidityFails := scaleHTLCThresholdByWindow(e.profile.HTLCLiquidityMinFails, windowMin, 4)
+  minAttempts = applyHTLCThresholdFactor(minAttempts, thresholdFactor)
+  minPolicyFails = applyHTLCThresholdFactor(minPolicyFails, thresholdFactor)
+  minLiquidityFails = applyHTLCThresholdFactor(minLiquidityFails, thresholdFactor)
+  meta := htlcSignalMeta{
+    WindowMin: windowMin,
+    MinAttempts: minAttempts,
+    MinPolicyFails: minPolicyFails,
+    MinLiquidityFails: minLiquidityFails,
+    NodeFactor: nodeFactor,
+    LiquidityFactor: liquidityFactor,
+    ThresholdFactor: thresholdFactor,
+  }
+  e.calib.HTLCWindowMin = meta.WindowMin
+  e.calib.HTLCMinAttempts = meta.MinAttempts
+  e.calib.HTLCMinPolicyFails = meta.MinPolicyFails
+  e.calib.HTLCMinLiquidityFails = meta.MinLiquidityFails
+  e.calib.HTLCNodeFactor = meta.NodeFactor
+  e.calib.HTLCLiquidityFactor = meta.LiquidityFactor
+  e.calib.HTLCThresholdFactor = meta.ThresholdFactor
   if !e.cfg.HTLCSignalEnabled {
-    return signals, windowMin
+    return signals, meta
   }
   if e.svc.htlcFailedProvider == nil {
-    return signals, windowMin
+    return signals, meta
   }
 
   entries := e.svc.htlcFailedProvider.Failed(htlcManagerMaxLogLimit)
   if len(entries) == 0 {
-    return signals, windowMin
+    return signals, meta
   }
 
   attempts := map[uint64]int{}
@@ -1788,9 +1861,6 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
     }
   }
 
-  minAttempts := scaleHTLCThresholdByWindow(e.profile.HTLCMinAttempts60m, windowMin, 12)
-  minPolicyFails := scaleHTLCThresholdByWindow(e.profile.HTLCPolicyMinFails, windowMin, 3)
-  minLiquidityFails := scaleHTLCThresholdByWindow(e.profile.HTLCLiquidityMinFails, windowMin, 4)
   for _, ch := range channels {
     if ch.ChannelID == 0 {
       continue
@@ -1822,7 +1892,7 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
       LiquidityHot: liquidityHot,
     }
   }
-  return signals, windowMin
+  return signals, meta
 }
 
 func (e *autofeeEngine) htlcSignalWindow() time.Duration {
@@ -1839,6 +1909,39 @@ func (e *autofeeEngine) htlcSignalWindow() time.Duration {
   return time.Duration(secs) * time.Second
 }
 
+func (e *autofeeEngine) htlcThresholdFactors() (float64, float64, float64) {
+  nodeFactor := 1.0
+  switch strings.ToLower(strings.TrimSpace(e.calib.NodeClass)) {
+  case "small":
+    nodeFactor = 0.70
+  case "medium":
+    nodeFactor = 0.85
+  case "large":
+    nodeFactor = 1.00
+  case "xl":
+    nodeFactor = 1.20
+  }
+
+  liquidityFactor := 1.0
+  switch strings.ToLower(strings.TrimSpace(e.calib.LiquidityClass)) {
+  case "drained":
+    liquidityFactor = 0.85
+  case "balanced":
+    liquidityFactor = 1.00
+  case "full":
+    liquidityFactor = 1.10
+  }
+
+  thresholdFactor := nodeFactor * liquidityFactor
+  if thresholdFactor < 0.60 {
+    thresholdFactor = 0.60
+  }
+  if thresholdFactor > 1.40 {
+    thresholdFactor = 1.40
+  }
+  return nodeFactor, liquidityFactor, thresholdFactor
+}
+
 func scaleHTLCThresholdByWindow(base int, windowMin int, fallback int) int {
   if base <= 0 {
     base = fallback
@@ -1849,11 +1952,24 @@ func scaleHTLCThresholdByWindow(base int, windowMin int, fallback int) int {
   if windowMin < 60 {
     windowMin = 60
   }
-  factor := float64(windowMin) / 60.0
+  // Use sublinear growth so long windows do not over-penalize lower-volume nodes.
+  // 60m -> 1.00x, 180m -> 1.73x, 240m -> 2.00x.
+  factor := math.Sqrt(float64(windowMin) / 60.0)
   scaled := int(math.Ceil(float64(base) * factor))
   if scaled < base {
     scaled = base
   }
+  return maxInt(1, scaled)
+}
+
+func applyHTLCThresholdFactor(base int, factor float64) int {
+  if base <= 0 {
+    base = 1
+  }
+  if factor <= 0 {
+    return base
+  }
+  scaled := int(math.Ceil(float64(base) * factor))
   return maxInt(1, scaled)
 }
 
