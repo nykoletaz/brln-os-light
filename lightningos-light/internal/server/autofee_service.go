@@ -545,6 +545,7 @@ type AutofeeService struct {
   started bool
   running bool
   stop chan struct{}
+  wake chan struct{}
   lastRunAt time.Time
   nextRunAt time.Time
   lastError string
@@ -953,6 +954,7 @@ set last_rebal_cost_ppm = null,
     }
   }
   current.AmbossTokenSet = strings.TrimSpace(ambossToken) != ""
+  s.nudgeScheduler()
   return current, nil
 }
 
@@ -1091,6 +1093,7 @@ func (s *AutofeeService) Start() {
   }
   s.started = true
   s.stop = make(chan struct{})
+  s.wake = make(chan struct{}, 1)
   s.mu.Unlock()
 
   go s.loop()
@@ -1103,6 +1106,20 @@ func (s *AutofeeService) Stop() {
     s.stop = nil
   }
   s.mu.Unlock()
+}
+
+func (s *AutofeeService) nudgeScheduler() {
+  s.mu.Lock()
+  wake := s.wake
+  started := s.started
+  s.mu.Unlock()
+  if !started || wake == nil {
+    return
+  }
+  select {
+  case wake <- struct{}{}:
+  default:
+  }
 }
 
 func (s *AutofeeService) loop() {
@@ -1154,8 +1171,21 @@ func (s *AutofeeService) loop() {
     timer := time.NewTimer(time.Until(next))
     select {
     case <-s.stop:
-      timer.Stop()
+      if !timer.Stop() {
+        select {
+        case <-timer.C:
+        default:
+        }
+      }
       return
+    case <-s.wake:
+      if !timer.Stop() {
+        select {
+        case <-timer.C:
+        default:
+        }
+      }
+      continue
     case <-timer.C:
       _ = s.Run(context.Background(), false, "scheduled")
     }
@@ -1185,6 +1215,9 @@ func (s *AutofeeService) Run(ctx context.Context, dryRun bool, reason string) er
       s.lastRunAt = time.Now()
     }
     s.mu.Unlock()
+    if !dryRun {
+      s.nudgeScheduler()
+    }
   }()
 
   cfg, err := s.GetConfig(ctx)
