@@ -137,8 +137,7 @@ func (s *Server) handleLNDUpgradeStart(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  upgradeScriptPath, err := ensureLndUpgradeScript(ctx)
-  if err != nil {
+  if err := ensureLndUpgradeScript(ctx); err != nil {
     if s.logger != nil {
       s.logger.Printf("failed to install lnd upgrade script: %v", err)
     }
@@ -158,8 +157,7 @@ func (s *Server) handleLNDUpgradeStart(w http.ResponseWriter, r *http.Request) {
     "--unit", lndUpgradeUnitName,
     "--collect",
     "--quiet",
-    "/bin/bash",
-    upgradeScriptPath,
+    lndUpgradeScriptPath,
     "--version", version,
     "--url", downloadURL,
   }
@@ -383,51 +381,28 @@ func atoi(value string) (int, error) {
   return strconv.Atoi(value)
 }
 
-func ensureLndUpgradeScript(ctx context.Context) (string, error) {
+func ensureLndUpgradeScript(ctx context.Context) error {
   if strings.TrimSpace(embeddedUpgradeScript) == "" {
-    return "", errors.New("embedded upgrade script is empty")
+    return errors.New("embedded upgrade script is empty")
   }
   existing, err := os.ReadFile(lndUpgradeScriptPath)
   if err == nil && string(existing) == embeddedUpgradeScript {
-    return lndUpgradeScriptPath, nil
+    return nil
   }
-
-  tmpFile, err := os.CreateTemp("", "lightningos-upgrade-lnd-*.sh")
-  if err != nil {
-    return "", err
-  }
-  tmpPath := tmpFile.Name()
-  if _, err := tmpFile.WriteString(embeddedUpgradeScript); err != nil {
-    _ = tmpFile.Close()
-    _ = os.Remove(tmpPath)
-    return "", err
-  }
-  if err := tmpFile.Close(); err != nil {
-    _ = os.Remove(tmpPath)
-    return "", err
-  }
-  defer os.Remove(tmpPath)
-
-  installCmd := fmt.Sprintf("mkdir -p %s && install -m 0755 %s %s", filepath.Dir(lndUpgradeScriptPath), tmpPath, lndUpgradeScriptPath)
+  marker := "__LIGHTNINGOS_UPGRADE_LND__"
+  installCmd := fmt.Sprintf(
+    "mkdir -p %s && cat > %s <<'%s'\n%s\n%s\nchmod 0755 %s",
+    filepath.Dir(lndUpgradeScriptPath),
+    lndUpgradeScriptPath,
+    marker,
+    embeddedUpgradeScript,
+    marker,
+    lndUpgradeScriptPath,
+  )
   if _, err := runSystemd(ctx, "/bin/sh", "-c", installCmd); err != nil {
-    fallbackPath, fallbackErr := writeLndUpgradeTempScript()
-    if fallbackErr != nil {
-      return "", fmt.Errorf("systemd-run failed (check sudoers for lightningos): %w", err)
-    }
-    return fallbackPath, nil
+    return fmt.Errorf("systemd-run failed (check sudoers for lightningos): %w", err)
   }
-  return lndUpgradeScriptPath, nil
-}
-
-func writeLndUpgradeTempScript() (string, error) {
-  tmpPath := filepath.Join(os.TempDir(), "lightningos-upgrade-lnd-runtime.sh")
-  if err := os.WriteFile(tmpPath, []byte(embeddedUpgradeScript), 0700); err != nil {
-    return "", err
-  }
-  if err := os.Chmod(tmpPath, 0700); err != nil {
-    return "", err
-  }
-  return tmpPath, nil
+  return nil
 }
 
 func lndUpgradeRunning(ctx context.Context) bool {
