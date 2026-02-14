@@ -274,7 +274,8 @@ export default function LndConfig() {
       setUpgradeRcConfirm(true)
       return
     }
-    const sinceNow = new Date().toISOString()
+    // Small safety window avoids missing early log lines emitted in the same second.
+    const sinceNow = new Date(Date.now() - 15000).toISOString()
     setUpgradeStartedVersion(upgrade.latest_version)
     setUpgradeLogSince(sinceNow)
     setUpgradeBusy(true)
