@@ -268,6 +268,8 @@ export default function LndConfig() {
     setUpgradeRcConfirm(false)
   }
 
+  const showConfirmUpgrade = !upgradeComplete
+
   const startUpgrade = async () => {
     if (!upgrade?.latest_version || upgradeBusy) return
     if (isRcVersion(upgrade.latest_version) && !upgradeRcConfirm) {
@@ -601,18 +603,20 @@ export default function LndConfig() {
               >
                 {upgradeComplete || upgradeError ? t('common.close') : t('common.cancel')}
               </button>
-              <button
-                className={`btn-secondary text-amber-200 border-amber-400/30 ${upgradeBusy ? 'opacity-60 pointer-events-none' : ''}`}
-                onClick={startUpgrade}
-                type="button"
-                disabled={!upgrade?.update_available || upgrade?.running}
-              >
-                {upgradeBusy
-                  ? t('lndUpgrade.upgrading')
-                  : (isRcVersion(upgrade?.latest_version) && upgradeRcConfirm
-                    ? t('lndUpgrade.rcConfirmUpgrade')
-                    : t('lndUpgrade.confirmUpgrade'))}
-              </button>
+              {showConfirmUpgrade && (
+                <button
+                  className={`btn-secondary text-amber-200 border-amber-400/30 ${upgradeBusy ? 'opacity-60 pointer-events-none' : ''}`}
+                  onClick={startUpgrade}
+                  type="button"
+                  disabled={!upgrade?.update_available || upgrade?.running}
+                >
+                  {upgradeBusy
+                    ? t('lndUpgrade.upgrading')
+                    : (isRcVersion(upgrade?.latest_version) && upgradeRcConfirm
+                      ? t('lndUpgrade.rcConfirmUpgrade')
+                      : t('lndUpgrade.confirmUpgrade'))}
+                </button>
+              )}
             </div>
           </div>
         </div>
