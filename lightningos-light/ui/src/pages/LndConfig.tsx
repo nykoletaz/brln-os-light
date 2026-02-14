@@ -48,6 +48,15 @@ export default function LndConfig() {
     return -1
   }
 
+  const findLastPredicateIndex = (lines: string[], predicate: (line: string) => boolean) => {
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      if (predicate(lines[i])) {
+        return i
+      }
+    }
+    return -1
+  }
+
   const loadLocalStatus = () => {
     getBitcoinLocalStatus()
       .then((data: BitcoinLocalStatus) => {
@@ -100,6 +109,7 @@ export default function LndConfig() {
         if (!mounted) return
         const lines: string[] = Array.isArray(res?.lines) ? res.lines : []
         const startMarker = '==> Starting LND upgrade to v'
+        const systemdStartMarker = 'Started lightningos-lnd-upgrade.service'
         const expectedStartMarker = upgradeStartedVersion
           ? `${startMarker}${upgradeStartedVersion}`
           : ''
@@ -107,13 +117,22 @@ export default function LndConfig() {
         let runLines = lines
         let hasRunSegment = false
         if (expectedStartMarker) {
-          const expectedIndex = findLastMatchIndex(lines, expectedStartMarker)
+          const expectedScriptIndex = findLastMatchIndex(lines, expectedStartMarker)
+          const expectedSystemdIndex = findLastPredicateIndex(
+            lines,
+            (line: string) =>
+              line.includes(systemdStartMarker) &&
+              line.includes(`--version ${upgradeStartedVersion}`)
+          )
+          const expectedIndex = Math.max(expectedScriptIndex, expectedSystemdIndex)
           if (expectedIndex !== -1) {
             runLines = lines.slice(expectedIndex)
             hasRunSegment = true
           }
         } else if (upgrade?.running || upgradeLocked) {
-          const genericIndex = findLastMatchIndex(lines, startMarker)
+          const genericScriptIndex = findLastMatchIndex(lines, startMarker)
+          const genericSystemdIndex = findLastMatchIndex(lines, systemdStartMarker)
+          const genericIndex = Math.max(genericScriptIndex, genericSystemdIndex)
           if (genericIndex !== -1) {
             runLines = lines.slice(genericIndex)
             hasRunSegment = true
