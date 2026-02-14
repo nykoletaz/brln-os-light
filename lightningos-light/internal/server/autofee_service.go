@@ -2610,7 +2610,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     st.SuperSourceBadSince = badSince
   }
 
-  seed, seedP95, seedTags := e.seedForChannel(ch.RemotePubkey, st)
+  seed, _, seedTags := e.seedForChannel(ch.RemotePubkey, st)
   if seed <= 0 {
     seed = 200
   }
