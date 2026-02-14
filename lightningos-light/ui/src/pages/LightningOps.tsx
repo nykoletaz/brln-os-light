@@ -2020,7 +2020,7 @@ export default function LightningOps() {
       setInlineFeeStatus(t('lightningOps.setAtLeastOneFee'))
       return
     }
-    if (inRate >= 0) {
+    if (inRate > 0) {
       setInlineFeeStatus(t('lightningOps.inboundMustBeNegative'))
       return
     }
@@ -2671,7 +2671,7 @@ export default function LightningOps() {
                           <input
                             className="input-field"
                             type="number"
-                            max={-1}
+                            max={0}
                             placeholder={t('lightningOps.inboundFeeRate')}
                             value={inlineInboundFeeRatePpm}
                             onChange={(e) => setInlineInboundFeeRatePpm(e.target.value)}

@@ -1104,8 +1104,8 @@
     "toggleHtlcManager": "Alternar HTLC manager",
     "toggleTorPeerChecker": "Alternar check tor peers",
     "unknownPeer": "Peer desconhecido",
-    "inlineFeeEditHint": "Pressione Enter para atualizar este canal. In rate aceita apenas ppm negativo.",
-    "inboundMustBeNegative": "In rate deve ser um valor negativo em ppm.",
+    "inlineFeeEditHint": "Pressione Enter para atualizar este canal. In rate aceita ppm zero ou negativo.",
+    "inboundMustBeNegative": "In rate deve ser zero ou um valor negativo em ppm.",
     "updateFees": "Atualizar fees",
     "updatingFees": "Atualizando fees...",
     "useFastest": "Usar mais rápido"
