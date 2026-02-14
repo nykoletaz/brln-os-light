@@ -2531,6 +2531,13 @@ export default function LightningOps() {
                 const classLabel = formatChannelClassLabel(ch.class_label)
                 const isInlineFeeEditing = inlineFeeChannelPoint === ch.channel_point
                 const inlineBusy = inlineFeeLoading || inlineFeeSaving
+                const channelCapacity = ch.capacity_sat > 0 ? ch.capacity_sat : (ch.local_balance_sat + ch.remote_balance_sat)
+                const localPctRaw = channelCapacity > 0 ? (ch.local_balance_sat / channelCapacity) * 100 : 0
+                const remotePctRaw = channelCapacity > 0 ? (ch.remote_balance_sat / channelCapacity) * 100 : 0
+                const localPct = Math.max(0, Math.min(100, localPctRaw))
+                const remotePct = Math.max(0, Math.min(100, remotePctRaw))
+                const localPctLabel = `${localPct.toFixed(0)}%`
+                const remotePctLabel = `${remotePct.toFixed(0)}%`
                 const cardClass = localDisabled && ch.active
                   ? 'rounded-2xl border border-ember/40 bg-ember/10 p-4'
                   : 'rounded-2xl border border-white/10 bg-ink/60 p-4'
@@ -2578,9 +2585,27 @@ export default function LightningOps() {
                         </label>
                       </div>
                     </div>
-                    <div className="mt-3 grid gap-3 lg:grid-cols-8 text-xs text-fog/70">
-                      <div>{t('lightningOps.localLabel', { value: ch.local_balance_sat })}</div>
-                      <div>{t('lightningOps.remoteLabel', { value: ch.remote_balance_sat })}</div>
+                    <div className="mt-3 space-y-2">
+                      <div className="flex items-center justify-between gap-3 text-xs text-fog/70">
+                        <span>{t('lightningOps.localLabel', { value: ch.local_balance_sat })}</span>
+                        <span>{t('lightningOps.remoteLabel', { value: ch.remote_balance_sat })}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <span className="w-12 text-right text-glow">{localPctLabel}</span>
+                        <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-white/10">
+                          <div
+                            className="absolute inset-y-0 left-0 bg-glow/70"
+                            style={{ width: `${localPct}%` }}
+                          />
+                          <div
+                            className="absolute inset-y-0 right-0 bg-ember/60"
+                            style={{ width: `${remotePct}%` }}
+                          />
+                        </div>
+                        <span className="w-12 text-left text-ember">{remotePctLabel}</span>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-3 lg:grid-cols-6 text-xs text-fog/70">
                       <div>
                         {t('lightningOps.outRate')}:{' '}
                         <button
