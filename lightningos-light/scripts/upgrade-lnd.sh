@@ -2,10 +2,6 @@
 set -Eeuo pipefail
 set -o errtrace
 
-LOG_FILE="/var/log/lightningos-lnd-upgrade.log"
-mkdir -p /var/log
-exec > >(tee -a "$LOG_FILE") 2>&1
-
 print_step() {
   echo ""
   echo "==> $1"
@@ -29,6 +25,12 @@ require_root() {
     die "This script must run as root."
   fi
 }
+
+require_root
+
+LOG_FILE="/var/log/lightningos-lnd-upgrade.log"
+mkdir -p /var/log
+exec > >(tee -a "$LOG_FILE") 2>&1
 
 parse_version_from_output() {
   local output="$1"
@@ -75,8 +77,6 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
-
-require_root
 
 VERSION="${VERSION#v}"
 if [[ -z "$VERSION" ]]; then
