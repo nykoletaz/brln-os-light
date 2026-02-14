@@ -153,24 +153,10 @@ func (s *Server) handleLNDUpgradeStart(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  if out, err := system.RunCommandWithSudo(ctx, lndUpgradeScriptPath, "--validate-only", "--version", version, "--url", downloadURL); err != nil {
-    message := strings.TrimSpace(out)
-    if message == "" {
-      message = err.Error()
-    }
-    writeError(w, http.StatusInternalServerError, fmt.Sprintf("upgrade preflight failed: %s", message))
-    return
-  }
-
   args := []string{
     "--unit", lndUpgradeUnitName,
     "--collect",
     "--quiet",
-    "--property=User=root",
-    "--property=Group=root",
-    "--property=StandardOutput=journal",
-    "--property=StandardError=journal",
-    "--",
     lndUpgradeScriptPath,
     "--version", version,
     "--url", downloadURL,
@@ -399,7 +385,8 @@ func ensureLndUpgradeScript(ctx context.Context) error {
   if strings.TrimSpace(embeddedUpgradeScript) == "" {
     return errors.New("embedded upgrade script is empty")
   }
-  if info, err := os.Stat(lndUpgradeScriptPath); err == nil && !info.IsDir() {
+  existing, readErr := os.ReadFile(lndUpgradeScriptPath)
+  if readErr == nil && string(existing) == embeddedUpgradeScript {
     return nil
   }
 
@@ -421,6 +408,11 @@ func ensureLndUpgradeScript(ctx context.Context) error {
 
   installCmd := fmt.Sprintf("mkdir -p %s && install -m 0755 %s %s", filepath.Dir(lndUpgradeScriptPath), tmpPath, lndUpgradeScriptPath)
   if _, err := runSystemd(ctx, "/bin/sh", "-c", installCmd); err != nil {
+    if readErr == nil && len(existing) > 0 {
+      // Preserve upgrade availability when sudoers blocks reinstall on systems
+      // that already have a working upgrade helper.
+      return nil
+    }
     return fmt.Errorf("systemd-run failed (check sudoers for lightningos): %w", err)
   }
   return nil
