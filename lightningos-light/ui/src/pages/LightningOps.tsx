@@ -17,6 +17,8 @@ type Channel = {
   base_fee_msat?: number
   fee_rate_ppm?: number
   inbound_fee_rate_ppm?: number
+  peer_fee_rate_ppm?: number
+  peer_base_msat?: number
   class_label?: string
 }
 
@@ -266,8 +268,8 @@ export default function LightningOps() {
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [search, setSearch] = useState('')
   const [minCapacity, setMinCapacity] = useState('')
-  const [sortBy, setSortBy] = useState<'capacity' | 'local' | 'remote' | 'alias'>('capacity')
-  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc')
+  const [sortBy, setSortBy] = useState<'capacity' | 'local' | 'remote' | 'alias'>('local')
+  const [sortDir, setSortDir] = useState<'desc' | 'asc'>('asc')
   const [showPrivate, setShowPrivate] = useState(true)
 
   const [peerAddress, setPeerAddress] = useState('')
@@ -374,6 +376,15 @@ export default function LightningOps() {
   const [inboundFeeRatePpm, setInboundFeeRatePpm] = useState('')
   const [feeLoadStatus, setFeeLoadStatus] = useState('')
   const [feeLoading, setFeeLoading] = useState(false)
+  const [inlineFeeChannelPoint, setInlineFeeChannelPoint] = useState('')
+  const [inlineFeeRatePpm, setInlineFeeRatePpm] = useState('')
+  const [inlineBaseFeeMsat, setInlineBaseFeeMsat] = useState('')
+  const [inlineInboundFeeRatePpm, setInlineInboundFeeRatePpm] = useState('')
+  const [inlineInboundBaseMsat, setInlineInboundBaseMsat] = useState('0')
+  const [inlineTimeLockDelta, setInlineTimeLockDelta] = useState('0')
+  const [inlineFeeStatus, setInlineFeeStatus] = useState('')
+  const [inlineFeeLoading, setInlineFeeLoading] = useState(false)
+  const [inlineFeeSaving, setInlineFeeSaving] = useState(false)
   const chanHealLastAttemptRef = useRef('')
   const chanHealIntervalDirtyRef = useRef(false)
   const htlcManagerFormDirtyRef = useRef(false)
@@ -1921,39 +1932,134 @@ export default function LightningOps() {
     }
   }
 
+  const runFeeUpdate = async (payload: {
+    applyAll: boolean
+    channelPoint?: string
+    baseFeeMsat: number
+    feeRatePpm: number
+    timeLockDelta: number
+    inboundEnabled: boolean
+    inboundBaseMsat: number
+    inboundFeeRatePpm: number
+    setStatus: (value: string) => void
+  }) => {
+    payload.setStatus(t('lightningOps.updatingFees'))
+    if (!payload.applyAll && !payload.channelPoint) {
+      payload.setStatus(t('lightningOps.selectChannelOrAll'))
+      return false
+    }
+    const hasOutbound = payload.baseFeeMsat !== 0 || payload.feeRatePpm !== 0 || payload.timeLockDelta !== 0
+    const hasInbound = payload.inboundEnabled && (payload.inboundBaseMsat !== 0 || payload.inboundFeeRatePpm !== 0)
+    if (!hasOutbound && !hasInbound) {
+      payload.setStatus(t('lightningOps.setAtLeastOneFee'))
+      return false
+    }
+    try {
+      const res = await updateChannelFees({
+        apply_all: payload.applyAll,
+        channel_point: payload.applyAll ? undefined : payload.channelPoint,
+        base_fee_msat: payload.baseFeeMsat,
+        fee_rate_ppm: payload.feeRatePpm,
+        time_lock_delta: payload.timeLockDelta,
+        inbound_enabled: payload.inboundEnabled,
+        inbound_base_msat: payload.inboundBaseMsat,
+        inbound_fee_rate_ppm: payload.inboundFeeRatePpm
+      })
+      payload.setStatus(res?.warning || t('lightningOps.feesUpdated'))
+      load()
+      return true
+    } catch (err: any) {
+      payload.setStatus(err?.message || t('lightningOps.feeUpdateFailed'))
+      return false
+    }
+  }
+
+  const startInlineFeeEdit = async (ch: Channel) => {
+    setInlineFeeChannelPoint(ch.channel_point)
+    setInlineFeeRatePpm(String(ch.fee_rate_ppm ?? 0))
+    setInlineBaseFeeMsat(String(ch.base_fee_msat ?? 0))
+    setInlineInboundFeeRatePpm(String(ch.inbound_fee_rate_ppm ?? 0))
+    setInlineInboundBaseMsat('0')
+    setInlineTimeLockDelta('0')
+    setInlineFeeStatus('')
+    setInlineFeeLoading(true)
+    try {
+      const res = await getLnChannelFees(ch.channel_point)
+      setInlineFeeRatePpm(String(res?.fee_rate_ppm ?? ch.fee_rate_ppm ?? 0))
+      setInlineBaseFeeMsat(String(res?.base_fee_msat ?? ch.base_fee_msat ?? 0))
+      setInlineInboundFeeRatePpm(String(res?.inbound_fee_rate_ppm ?? ch.inbound_fee_rate_ppm ?? 0))
+      setInlineInboundBaseMsat(String(res?.inbound_base_msat ?? 0))
+      setInlineTimeLockDelta(String(res?.time_lock_delta ?? 0))
+    } catch (err: any) {
+      setInlineFeeStatus(err?.message || t('lightningOps.loadFeesFailed'))
+    } finally {
+      setInlineFeeLoading(false)
+    }
+  }
+
+  const cancelInlineFeeEdit = () => {
+    setInlineFeeChannelPoint('')
+    setInlineFeeStatus('')
+    setInlineFeeLoading(false)
+    setInlineFeeSaving(false)
+  }
+
+  const handleInlineFeeSave = async () => {
+    if (!inlineFeeChannelPoint || inlineFeeLoading || inlineFeeSaving) return
+    const outRate = Number(inlineFeeRatePpm)
+    const outBase = Number(inlineBaseFeeMsat)
+    const inRate = Number(inlineInboundFeeRatePpm)
+    const inBase = Number(inlineInboundBaseMsat || 0)
+    const delta = Number(inlineTimeLockDelta || 0)
+
+    if (!Number.isFinite(outRate) || !Number.isFinite(outBase) || !Number.isFinite(inRate) || !Number.isFinite(inBase) || !Number.isFinite(delta)) {
+      setInlineFeeStatus(t('lightningOps.setAtLeastOneFee'))
+      return
+    }
+    if (outRate < 0 || outBase < 0 || delta < 0 || inBase < 0) {
+      setInlineFeeStatus(t('lightningOps.setAtLeastOneFee'))
+      return
+    }
+    if (inRate >= 0) {
+      setInlineFeeStatus(t('lightningOps.inboundMustBeNegative'))
+      return
+    }
+
+    setInlineFeeSaving(true)
+    const ok = await runFeeUpdate({
+      applyAll: false,
+      channelPoint: inlineFeeChannelPoint,
+      baseFeeMsat: outBase,
+      feeRatePpm: outRate,
+      timeLockDelta: delta,
+      inboundEnabled: true,
+      inboundBaseMsat: inBase,
+      inboundFeeRatePpm: inRate,
+      setStatus: setInlineFeeStatus
+    })
+    setInlineFeeSaving(false)
+    if (ok) {
+      setInlineFeeChannelPoint('')
+    }
+  }
+
   const handleUpdateFees = async () => {
-    setFeeStatus(t('lightningOps.updatingFees'))
     const base = Number(baseFeeMsat || 0)
     const ppm = Number(feeRatePpm || 0)
     const delta = Number(timeLockDelta || 0)
     const inboundBase = Number(inboundBaseMsat || 0)
     const inboundRate = Number(inboundFeeRatePpm || 0)
-    if (!feeScopeAll && !feeChannelPoint) {
-      setFeeStatus(t('lightningOps.selectChannelOrAll'))
-      return
-    }
-    const hasOutbound = base !== 0 || ppm !== 0 || delta !== 0
-    const hasInbound = inboundEnabled && (inboundBase !== 0 || inboundRate !== 0)
-    if (!hasOutbound && !hasInbound) {
-      setFeeStatus(t('lightningOps.setAtLeastOneFee'))
-      return
-    }
-    try {
-      const res = await updateChannelFees({
-        apply_all: feeScopeAll,
-        channel_point: feeScopeAll ? undefined : feeChannelPoint,
-        base_fee_msat: base,
-        fee_rate_ppm: ppm,
-        time_lock_delta: delta,
-        inbound_enabled: inboundEnabled,
-        inbound_base_msat: inboundBase,
-        inbound_fee_rate_ppm: inboundRate
-      })
-      setFeeStatus(res?.warning || t('lightningOps.feesUpdated'))
-      load()
-    } catch (err: any) {
-      setFeeStatus(err?.message || t('lightningOps.feeUpdateFailed'))
-    }
+    await runFeeUpdate({
+      applyAll: feeScopeAll,
+      channelPoint: feeScopeAll ? undefined : feeChannelPoint,
+      baseFeeMsat: base,
+      feeRatePpm: ppm,
+      timeLockDelta: delta,
+      inboundEnabled: inboundEnabled,
+      inboundBaseMsat: inboundBase,
+      inboundFeeRatePpm: inboundRate,
+      setStatus: setFeeStatus
+    })
   }
 
   const channelOptions = useMemo(() => {
@@ -2423,6 +2529,8 @@ export default function LightningOps() {
                 const showToggle = ch.active
                 const autofeeChecked = autofeeSettings[ch.channel_id] ?? true
                 const classLabel = formatChannelClassLabel(ch.class_label)
+                const isInlineFeeEditing = inlineFeeChannelPoint === ch.channel_point
+                const inlineBusy = inlineFeeLoading || inlineFeeSaving
                 const cardClass = localDisabled && ch.active
                   ? 'rounded-2xl border border-ember/40 bg-ember/10 p-4'
                   : 'rounded-2xl border border-white/10 bg-ink/60 p-4'
@@ -2470,25 +2578,49 @@ export default function LightningOps() {
                         </label>
                       </div>
                     </div>
-                    <div className="mt-3 grid gap-3 lg:grid-cols-6 text-xs text-fog/70">
+                    <div className="mt-3 grid gap-3 lg:grid-cols-8 text-xs text-fog/70">
                       <div>{t('lightningOps.localLabel', { value: ch.local_balance_sat })}</div>
                       <div>{t('lightningOps.remoteLabel', { value: ch.remote_balance_sat })}</div>
                       <div>
                         {t('lightningOps.outRate')}:{' '}
-                        <span className="text-fog">
+                        <button
+                          type="button"
+                          className="text-fog hover:text-white hover:underline underline-offset-2"
+                          onClick={() => { void startInlineFeeEdit(ch) }}
+                        >
                           {typeof ch.fee_rate_ppm === 'number' ? `${ch.fee_rate_ppm} ppm` : '-'}
-                        </span>
+                        </button>
                       </div>
                       <div>
                         {t('lightningOps.outBase')}:{' '}
-                        <span className="text-fog">
+                        <button
+                          type="button"
+                          className="text-fog hover:text-white hover:underline underline-offset-2"
+                          onClick={() => { void startInlineFeeEdit(ch) }}
+                        >
                           {typeof ch.base_fee_msat === 'number' ? `${ch.base_fee_msat} msats` : '-'}
-                        </span>
+                        </button>
                       </div>
                       <div>
                         {t('lightningOps.inRate')}:{' '}
-                        <span className="text-fog">
+                        <button
+                          type="button"
+                          className="text-fog hover:text-white hover:underline underline-offset-2"
+                          onClick={() => { void startInlineFeeEdit(ch) }}
+                        >
                           {typeof ch.inbound_fee_rate_ppm === 'number' ? `${ch.inbound_fee_rate_ppm} ppm` : '-'}
+                        </button>
+                      </div>
+                      <div>
+                        {t('lightningOps.peerRate')}:{' '}
+                        <span className="text-fog">
+                          {typeof ch.peer_fee_rate_ppm === 'number' ? `${ch.peer_fee_rate_ppm} ppm` : '-'}
+                        </span>
+                      </div>
+                      <div>
+                        {t('lightningOps.peerBase')}:{' '}
+                        <span className="text-fog">
+                          {typeof ch.peer_base_msat === 'number' ? `${ch.peer_base_msat} msats` : '-'}
                         </span>
                       </div>
                       <div className="text-right">
@@ -2497,6 +2629,87 @@ export default function LightningOps() {
                         )}
                       </div>
                     </div>
+                    {isInlineFeeEditing && (
+                      <div className="mt-3 rounded-xl border border-white/10 bg-ink/70 p-3">
+                        <div className="grid gap-2 lg:grid-cols-3">
+                          <input
+                            className="input-field"
+                            type="number"
+                            min={0}
+                            placeholder={t('lightningOps.feeRatePpm')}
+                            value={inlineFeeRatePpm}
+                            onChange={(e) => setInlineFeeRatePpm(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                void handleInlineFeeSave()
+                              }
+                              if (e.key === 'Escape') {
+                                e.preventDefault()
+                                cancelInlineFeeEdit()
+                              }
+                            }}
+                          />
+                          <input
+                            className="input-field"
+                            type="number"
+                            min={0}
+                            placeholder={t('lightningOps.baseFeeMsats')}
+                            value={inlineBaseFeeMsat}
+                            onChange={(e) => setInlineBaseFeeMsat(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                void handleInlineFeeSave()
+                              }
+                              if (e.key === 'Escape') {
+                                e.preventDefault()
+                                cancelInlineFeeEdit()
+                              }
+                            }}
+                          />
+                          <input
+                            className="input-field"
+                            type="number"
+                            max={-1}
+                            placeholder={t('lightningOps.inboundFeeRate')}
+                            value={inlineInboundFeeRatePpm}
+                            onChange={(e) => setInlineInboundFeeRatePpm(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                void handleInlineFeeSave()
+                              }
+                              if (e.key === 'Escape') {
+                                e.preventDefault()
+                                cancelInlineFeeEdit()
+                              }
+                            }}
+                          />
+                        </div>
+                        <p className="mt-2 text-[11px] text-fog/60">{t('lightningOps.inlineFeeEditHint')}</p>
+                        {inlineFeeLoading && <p className="mt-2 text-xs text-fog/60">{t('lightningOps.loadingFees')}</p>}
+                        {inlineFeeStatus && <p className="mt-2 text-xs text-brass">{inlineFeeStatus}</p>}
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            className="btn-secondary text-xs px-3 py-2"
+                            type="button"
+                            onClick={() => { void handleInlineFeeSave() }}
+                            disabled={inlineBusy}
+                          >
+                            {inlineBusy ? t('lightningOps.updatingFees') : t('lightningOps.updateFees')}
+                          </button>
+                          <button
+                            className="btn-secondary text-xs px-3 py-2"
+                            type="button"
+                            onClick={cancelInlineFeeEdit}
+                            disabled={inlineBusy}
+                          >
+                            {t('common.cancel')}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div className="mt-2 text-xs text-fog/50">
                       {ch.private ? t('lightningOps.privateChannel') : t('lightningOps.publicChannel')}
                     </div>

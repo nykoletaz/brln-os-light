@@ -1094,6 +1094,8 @@ func (c *Client) ListChannels(ctx context.Context) ([]ChannelInfo, error) {
     var baseFeeMsat *int64
     var feeRatePpm *int64
     var inboundFeeRatePpm *int64
+    var peerFeeRatePpm *int64
+    var peerBaseMsat *int64
     localDisabled := isLocalChanDisabledFlags(ch.ChanStatusFlags)
     localReserveSat := ch.LocalChanReserveSat
     if localReserveSat <= 0 && ch.LocalConstraints != nil {
@@ -1102,27 +1104,34 @@ func (c *Client) ListChannels(ctx context.Context) ([]ChannelInfo, error) {
       }
     }
 
-    if !ch.Private {
-      if edge, err := client.GetChanInfo(ctx, &lnrpc.ChanInfoRequest{ChanId: ch.ChanId}); err == nil {
-        policy := edge.Node1Policy
-        if ch.RemotePubkey != "" {
-          if edge.Node1Pub == ch.RemotePubkey {
-            policy = edge.Node2Policy
-          } else if edge.Node2Pub == ch.RemotePubkey {
-            policy = edge.Node1Policy
-          }
+    if edge, err := client.GetChanInfo(ctx, &lnrpc.ChanInfoRequest{ChanId: ch.ChanId}); err == nil && edge != nil {
+      localPolicy := edge.Node1Policy
+      remotePolicy := edge.Node2Policy
+      if ch.RemotePubkey != "" {
+        if edge.Node1Pub == ch.RemotePubkey {
+          localPolicy = edge.Node2Policy
+          remotePolicy = edge.Node1Policy
+        } else if edge.Node2Pub == ch.RemotePubkey {
+          localPolicy = edge.Node1Policy
+          remotePolicy = edge.Node2Policy
         }
-        if policy != nil {
-          base := int64(policy.FeeBaseMsat)
-          rate := int64(policy.FeeRateMilliMsat)
-          inbound := int64(policy.InboundFeeRateMilliMsat)
-          baseFeeMsat = &base
-          feeRatePpm = &rate
-          inboundFeeRatePpm = &inbound
-          if policy.Disabled {
-            localDisabled = true
-          }
+      }
+      if localPolicy != nil {
+        base := int64(localPolicy.FeeBaseMsat)
+        rate := int64(localPolicy.FeeRateMilliMsat)
+        inbound := int64(localPolicy.InboundFeeRateMilliMsat)
+        baseFeeMsat = &base
+        feeRatePpm = &rate
+        inboundFeeRatePpm = &inbound
+        if localPolicy.Disabled {
+          localDisabled = true
         }
+      }
+      if remotePolicy != nil {
+        peerRate := int64(remotePolicy.FeeRateMilliMsat)
+        peerBase := int64(remotePolicy.FeeBaseMsat)
+        peerFeeRatePpm = &peerRate
+        peerBaseMsat = &peerBase
       }
     }
 
@@ -1144,6 +1153,8 @@ func (c *Client) ListChannels(ctx context.Context) ([]ChannelInfo, error) {
       BaseFeeMsat: baseFeeMsat,
       FeeRatePpm: feeRatePpm,
       InboundFeeRatePpm: inboundFeeRatePpm,
+      PeerFeeRatePpm: peerFeeRatePpm,
+      PeerBaseMsat: peerBaseMsat,
     })
   }
 
@@ -1730,6 +1741,8 @@ type ChannelInfo struct {
   BaseFeeMsat *int64 `json:"base_fee_msat,omitempty"`
   FeeRatePpm *int64 `json:"fee_rate_ppm,omitempty"`
   InboundFeeRatePpm *int64 `json:"inbound_fee_rate_ppm,omitempty"`
+  PeerFeeRatePpm *int64 `json:"peer_fee_rate_ppm,omitempty"`
+  PeerBaseMsat *int64 `json:"peer_base_msat,omitempty"`
   ClassLabel string `json:"class_label,omitempty"`
 }
 

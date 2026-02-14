@@ -1057,6 +1057,8 @@
     "openingChannel": "Opening channel...",
     "outBase": "Out base",
     "outRate": "Out rate",
+    "peerBase": "Peer base",
+    "peerRate": "Peer rate",
     "outbound": "Outbound",
     "peerAddressPlaceholder": "pubkey@host:port",
     "peerAddressRequired": "Peer address required.",
@@ -1102,6 +1104,8 @@
     "toggleHtlcManager": "Toggle HTLC manager",
     "toggleTorPeerChecker": "Toggle check tor peers",
     "unknownPeer": "Unknown peer",
+    "inlineFeeEditHint": "Press Enter to update this channel. In rate accepts only negative ppm.",
+    "inboundMustBeNegative": "In rate must be a negative ppm value.",
     "updateFees": "Update fees",
     "updatingFees": "Updating fees...",
     "useFastest": "Use fastest"
