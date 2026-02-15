@@ -16,10 +16,28 @@ LightningOS Light is a Full Lightning Node Daemon Installer, Lightning node mana
 - Lightning Ops: peers, channels, and fee updates
 - Keysend Chat: 1 sat per message + routing fees, unread indicators, 30-day retention
 - Real-time notifications (on-chain, Lightning, channels, forwards, rebalances)
-- Optional Telegram SCB backup on channel open/close
+- Telegram notifications: SCB backups, financial summaries, on-demand `/scb` and `/balances`
 - App Store: LNDg, Peerswap (psweb), Elements, Bitcoin Core
 - Bitcoin Local management (status + config) and logs viewer
 
+
+## Release notes
+### 0.2.3 Beta
+- Telegram notifications refactor: general rules card, SCB backup toggle, scheduled financial summaries, and on-demand `/scb` + `/balances` commands (auto-registered in the bot menu).
+- SCB backups include peer alias context in the Telegram caption.
+- Lightning Ops UI improvements: channel card refinements and channel balance bar.
+- Autofee HTLC Insights steps and calibration by node size/liquidity, plus scheduler/manual-run and ceiling fee/seed fixes.
+- Rebalance Center score fixes and improvements.
+- LND config upgrade fixes and PostgreSQL install fix.
+- Localization updates (UI Portuguese refinements).
+
+### 0.2.2 Beta
+- New HTLC Manager with hysteresis and minute-based runs, plus multiple improvements.
+- Rebalance Center enhancements: manual restart flows, pre-probe routing, watchdogs, ROI logic improvements, and details view.
+- Integrated Autofee: mirror brln-autofee, per-channel enablement, 0-fee support, rebalance cost fallback, results search, last-run persistence, tag trend, step-cap per channel, relax mode, and dry-run filtering.
+- Channel Auto Heal update and Tor peers checker.
+- Wallet activity cleanup fix (remove balances from wallet history).
+- LND upgrade fixes and health check follow-bitcoin toggle.
 
 ## Repository layout
 - `cmd/lightningos-manager`: Go backend (API + static UI)
@@ -135,11 +153,13 @@ Keysend chat is available in the UI and targets only online peers.
 - Messages are stored locally in `/var/lib/lightningos/chat/messages.jsonl` and retained for 30 days.
 - Unread peers are highlighted until their chat is opened.
 
-Optional Telegram SCB backup:
-- When configured, every channel open/close triggers `ExportAllChannelBackups` and sends the SCB to Telegram.
-- Configure in the UI: Notifications -> Telegram SCB backup.
+Telegram notifications:
+- Configure in the UI: Notifications -> Telegram.
+- SCB backup on channel open/close (toggle).
+- Scheduled financial summary (hourly to 12-hour intervals).
+- On-demand commands: `/scb` (backup) and `/balances` (summary).
 - Bot token comes from @BotFather and chat id from @userinfobot.
-- Direct chat only; leaving both fields empty disables Telegram backup.
+- Direct chat only; leaving both fields empty disables Telegram.
 
 Environment keys:
 - `NOTIFICATIONS_TG_BOT_TOKEN`
