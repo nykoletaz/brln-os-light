@@ -1,6 +1,7 @@
 package server
 
 import (
+  "bytes"
   "context"
   "encoding/json"
   "errors"
@@ -250,6 +251,9 @@ func (s *Server) handleTelegramNotificationsPost(w http.ResponseWriter, r *http.
       _ = setTelegramLastUpdateID(resetCtx, s.db, 0)
       resetCancel()
     }
+    if strings.TrimSpace(token) != "" {
+      go s.ensureTelegramBotCommands(token)
+    }
   }
 
   if req.ScbBackupEnabled != nil || req.SummaryEnabled != nil || req.SummaryIntervalMin != nil {
@@ -274,6 +278,10 @@ func (s *Server) startTelegramNotifications() {
   }
   go s.runTelegramCommandLoop()
   go s.runTelegramSummaryLoop()
+  cfg := readTelegramBackupConfig()
+  if strings.TrimSpace(cfg.BotToken) != "" {
+    go s.ensureTelegramBotCommands(cfg.BotToken)
+  }
 }
 
 func (s *Server) runTelegramSummaryLoop() {
@@ -393,6 +401,57 @@ func (s *Server) runTelegramCommandLoop() {
       updateCancel()
     }
   }
+}
+
+type telegramBotCommandsPayload struct {
+  Commands []telegramBotCommand `json:"commands"`
+}
+
+type telegramBotCommand struct {
+  Command string `json:"command"`
+  Description string `json:"description"`
+}
+
+func (s *Server) ensureTelegramBotCommands(token string) {
+  ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+  defer cancel()
+  if err := setTelegramBotCommands(ctx, token); err != nil {
+    if s != nil && s.logger != nil {
+      s.logger.Printf("notifications: failed to set telegram commands: %v", err)
+    }
+  }
+}
+
+func setTelegramBotCommands(ctx context.Context, token string) error {
+  if strings.TrimSpace(token) == "" {
+    return errors.New("telegram token missing")
+  }
+  payload := telegramBotCommandsPayload{
+    Commands: []telegramBotCommand{
+      {Command: "scb", Description: "backup SCB sob demanda"},
+      {Command: "balances", Description: "resumo financeiro sob demanda"},
+    },
+  }
+  body, err := json.Marshal(payload)
+  if err != nil {
+    return err
+  }
+  endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/setMyCommands", token)
+  req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+  if err != nil {
+    return err
+  }
+  req.Header.Set("Content-Type", "application/json")
+  resp, err := http.DefaultClient.Do(req)
+  if err != nil {
+    return err
+  }
+  defer resp.Body.Close()
+  respBody, _ := io.ReadAll(resp.Body)
+  if resp.StatusCode < 200 || resp.StatusCode > 299 {
+    return fmt.Errorf("telegram api status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+  }
+  return nil
 }
 
 type telegramUpdateResponse struct {
