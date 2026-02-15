@@ -428,8 +428,8 @@ func setTelegramBotCommands(ctx context.Context, token string) error {
   }
   payload := telegramBotCommandsPayload{
     Commands: []telegramBotCommand{
-      {Command: "scb", Description: "backup SCB sob demanda"},
-      {Command: "balances", Description: "resumo financeiro sob demanda"},
+      {Command: "scb", Description: "on-demand SCB backup"},
+      {Command: "balances", Description: "on-demand financial summary"},
     },
   }
   body, err := json.Marshal(payload)

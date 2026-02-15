@@ -490,7 +490,7 @@ export default function Notifications() {
                   <span className="block text-xs text-fog/60">{t('notifications.telegram.scbBackupHint')}</span>
                 </span>
               </label>
-              <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <label className="flex items-start gap-3 text-sm text-fog">
                   <input
                     type="checkbox"
@@ -509,13 +509,9 @@ export default function Notifications() {
                     <span className="block text-xs text-fog/60">{t('notifications.telegram.summaryHint')}</span>
                   </span>
                 </label>
-                <div className="flex items-start gap-2">
-                  <div className="text-right">
-                    <div className="text-xs text-fog/60">{t('notifications.telegram.summaryInterval')}</div>
-                    <div className="text-xs text-fog/50">{t('notifications.telegram.summaryIntervalHint')}</div>
-                  </div>
+                <div className="flex items-center gap-3">
                   <input
-                    className="input-field w-[120px] mt-0.5"
+                    className="input-field w-[96px]"
                     type="number"
                     min={60}
                     max={720}
@@ -524,6 +520,10 @@ export default function Notifications() {
                     onChange={(e) => setTelegramSummaryInterval(e.target.value)}
                     onKeyDown={handleTelegramKeyDown}
                   />
+                  <div className="text-xs text-fog/50 sm:whitespace-nowrap sm:min-w-[260px]">
+                    <span className="text-fog/60">{t('notifications.telegram.summaryInterval')}</span>
+                    <span className="ml-2">{t('notifications.telegram.summaryIntervalHint')}</span>
+                  </div>
                 </div>
               </div>
               <p className="text-xs text-fog/50">{t('notifications.telegram.commandsHint')}</p>
