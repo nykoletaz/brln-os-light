@@ -296,13 +296,22 @@ export default function Notifications() {
     }
   }
 
-  const handleSaveTelegram = async () => {
+  const handleSaveTelegram = async (overrides?: {
+    scbBackupEnabled?: boolean
+    summaryEnabled?: boolean
+    summaryInterval?: string
+  }) => {
     if (telegramSaving) return
     setTelegramSaving(true)
     setTelegramStatus(t('common.saving'))
     try {
-      const summaryIntervalValue = Number(telegramSummaryInterval || 0)
-      if (telegramSummaryEnabled) {
+      const nextScbEnabled = overrides?.scbBackupEnabled ?? telegramScbEnabled
+      const nextSummaryEnabled = overrides?.summaryEnabled ?? telegramSummaryEnabled
+      const nextSummaryInterval = overrides?.summaryInterval ?? telegramSummaryInterval
+      const prevIntervalValue = Number(telegramConfig?.summary_interval_min || 0)
+      const effectiveSummaryInterval = nextSummaryInterval || (prevIntervalValue ? String(prevIntervalValue) : '720')
+      const summaryIntervalValue = Number(effectiveSummaryInterval || 0)
+      if (nextSummaryEnabled) {
         if (!summaryIntervalValue || summaryIntervalValue < 60 || summaryIntervalValue > 720) {
           setTelegramStatus(t('notifications.telegram.summaryIntervalInvalid'))
           setTelegramSaving(false)
@@ -323,8 +332,8 @@ export default function Notifications() {
         summary_enabled?: boolean
         summary_interval_min?: number
       } = {
-        scb_backup_enabled: telegramScbEnabled,
-        summary_enabled: telegramSummaryEnabled,
+        scb_backup_enabled: nextScbEnabled,
+        summary_enabled: nextSummaryEnabled,
         summary_interval_min: summaryIntervalValue || undefined
       }
       if (clearTelegram) {
@@ -354,7 +363,17 @@ export default function Notifications() {
         if (nextEnabled && credentialsUpdated) {
           await triggerTelegramTest(t('notifications.telegram.savedSendingTest'), true)
         } else {
-          setTelegramStatus(t('notifications.telegram.saved'))
+          const prevScbEnabled = Boolean(telegramConfig?.scb_backup_enabled)
+          const prevSummaryEnabled = Boolean(telegramConfig?.summary_enabled)
+          const prevIntervalValue = Number(telegramConfig?.summary_interval_min || 0)
+          const scbChanged = prevScbEnabled !== nextScbEnabled
+          const summaryChanged = prevSummaryEnabled !== nextSummaryEnabled
+          const intervalChanged = summaryIntervalValue > 0 && prevIntervalValue !== summaryIntervalValue
+          if (intervalChanged && !scbChanged && !summaryChanged) {
+            setTelegramStatus(t('notifications.telegram.frequencySaved'))
+          } else {
+            setTelegramStatus(t('notifications.telegram.rulesSaved'))
+          }
         }
       }
     } catch (err: any) {
@@ -460,7 +479,11 @@ export default function Notifications() {
                 <input
                   type="checkbox"
                   checked={telegramScbEnabled}
-                  onChange={(e) => setTelegramScbEnabled(e.target.checked)}
+                  onChange={(e) => {
+                    const checked = e.target.checked
+                    setTelegramScbEnabled(checked)
+                    void handleSaveTelegram({ scbBackupEnabled: checked })
+                  }}
                 />
                 <span>
                   <span className="font-semibold">{t('notifications.telegram.scbBackupLabel')}</span>
@@ -472,7 +495,14 @@ export default function Notifications() {
                   <input
                     type="checkbox"
                     checked={telegramSummaryEnabled}
-                    onChange={(e) => setTelegramSummaryEnabled(e.target.checked)}
+                    onChange={(e) => {
+                      const checked = e.target.checked
+                      setTelegramSummaryEnabled(checked)
+                      void handleSaveTelegram({
+                        summaryEnabled: checked,
+                        summaryInterval: telegramSummaryInterval
+                      })
+                    }}
                   />
                   <span>
                     <span className="font-semibold">{t('notifications.telegram.summaryLabel')}</span>

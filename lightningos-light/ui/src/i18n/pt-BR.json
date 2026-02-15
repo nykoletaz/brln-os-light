@@ -441,6 +441,8 @@
       "summaryInterval": "Intervalo do resumo (minutos)",
       "summaryIntervalHint": "Mínimo 60, máximo 720 minutos.",
       "summaryIntervalInvalid": "O intervalo deve estar entre 60 e 720 minutos.",
+      "rulesSaved": "Regras salvas.",
+      "frequencySaved": "Frequência salva.",
       "commandsHint": "Comandos: /scb para backup sob demanda, /balances para resumo sob demanda."
     },
     "title": "Notificações",

@@ -441,6 +441,8 @@
       "summaryInterval": "Summary interval (minutes)",
       "summaryIntervalHint": "Minimum 60, maximum 720 minutes.",
       "summaryIntervalInvalid": "Summary interval must be between 60 and 720 minutes.",
+      "rulesSaved": "Notification rules saved.",
+      "frequencySaved": "Frequency saved.",
       "commandsHint": "Commands: /scb for an on-demand backup, /balances for on-demand summary."
     },
     "title": "Notifications",
