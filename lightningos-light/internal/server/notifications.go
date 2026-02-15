@@ -453,9 +453,16 @@ create index if not exists notifications_rebal_source_idx on notifications (reba
     summary_enabled boolean not null default false,
     summary_interval_min integer not null default 720,
     summary_last_sent_at timestamptz,
+    system_summary_enabled boolean not null default false,
+    system_summary_interval_min integer not null default 720,
+    system_summary_last_sent_at timestamptz,
     last_update_id bigint not null default 0,
     updated_at timestamptz not null default now()
   );
+
+  alter table telegram_notification_settings add column if not exists system_summary_enabled boolean not null default false;
+  alter table telegram_notification_settings add column if not exists system_summary_interval_min integer not null default 720;
+  alter table telegram_notification_settings add column if not exists system_summary_last_sent_at timestamptz;
 
   insert into telegram_notification_settings (id)
   values (1)

@@ -7,6 +7,7 @@ import (
   "errors"
   "fmt"
   "io"
+  "math"
   "net/http"
   "net/url"
   "strconv"
@@ -14,6 +15,7 @@ import (
   "time"
 
   "lightningos-light/internal/reports"
+  sysinfo "lightningos-light/internal/system"
 
   "github.com/jackc/pgx/v5/pgtype"
   "github.com/jackc/pgx/v5/pgxpool"
@@ -31,6 +33,9 @@ type telegramNotificationSettings struct {
   SummaryEnabled bool
   SummaryIntervalMin int
   SummaryLastSentAt *time.Time
+  SystemSummaryEnabled bool
+  SystemSummaryIntervalMin int
+  SystemSummaryLastSentAt *time.Time
   LastUpdateID int64
 }
 
@@ -38,6 +43,8 @@ type telegramNotificationUpdate struct {
   ScbBackupEnabled *bool
   SummaryEnabled *bool
   SummaryIntervalMin *int
+  SystemSummaryEnabled *bool
+  SystemSummaryIntervalMin *int
 }
 
 func defaultTelegramNotificationSettings() telegramNotificationSettings {
@@ -45,6 +52,8 @@ func defaultTelegramNotificationSettings() telegramNotificationSettings {
     ScbBackupEnabled: true,
     SummaryEnabled: false,
     SummaryIntervalMin: telegramSummaryIntervalDefault,
+    SystemSummaryEnabled: false,
+    SystemSummaryIntervalMin: telegramSummaryIntervalDefault,
   }
 }
 
@@ -68,8 +77,16 @@ func loadTelegramNotificationSettings(ctx context.Context, db *pgxpool.Pool) (te
   }
 
   var lastSent pgtype.Timestamptz
+  var systemLastSent pgtype.Timestamptz
   err := db.QueryRow(ctx, `
-select scb_backup_enabled, summary_enabled, summary_interval_min, summary_last_sent_at, last_update_id
+select scb_backup_enabled,
+  summary_enabled,
+  summary_interval_min,
+  summary_last_sent_at,
+  system_summary_enabled,
+  system_summary_interval_min,
+  system_summary_last_sent_at,
+  last_update_id
 from telegram_notification_settings
 where id=$1
 `, telegramSettingsID).Scan(
@@ -77,15 +94,23 @@ where id=$1
     &settings.SummaryEnabled,
     &settings.SummaryIntervalMin,
     &lastSent,
+    &settings.SystemSummaryEnabled,
+    &settings.SystemSummaryIntervalMin,
+    &systemLastSent,
     &settings.LastUpdateID,
   )
   if err != nil {
     return settings, err
   }
   settings.SummaryIntervalMin = normalizeTelegramSummaryInterval(settings.SummaryIntervalMin)
+  settings.SystemSummaryIntervalMin = normalizeTelegramSummaryInterval(settings.SystemSummaryIntervalMin)
   if lastSent.Valid {
     ts := lastSent.Time
     settings.SummaryLastSentAt = &ts
+  }
+  if systemLastSent.Valid {
+    ts := systemLastSent.Time
+    settings.SystemSummaryLastSentAt = &ts
   }
   return settings, nil
 }
@@ -97,13 +122,25 @@ func upsertTelegramNotificationSettings(ctx context.Context, db *pgxpool.Pool, s
   settings.SummaryIntervalMin = normalizeTelegramSummaryInterval(settings.SummaryIntervalMin)
   _, err := db.Exec(ctx, `
 insert into telegram_notification_settings (
-  id, scb_backup_enabled, summary_enabled, summary_interval_min, summary_last_sent_at, last_update_id, updated_at
-) values ($1,$2,$3,$4,$5,$6,now())
+  id,
+  scb_backup_enabled,
+  summary_enabled,
+  summary_interval_min,
+  summary_last_sent_at,
+  system_summary_enabled,
+  system_summary_interval_min,
+  system_summary_last_sent_at,
+  last_update_id,
+  updated_at
+) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
 on conflict (id) do update set
   scb_backup_enabled=excluded.scb_backup_enabled,
   summary_enabled=excluded.summary_enabled,
   summary_interval_min=excluded.summary_interval_min,
   summary_last_sent_at=excluded.summary_last_sent_at,
+  system_summary_enabled=excluded.system_summary_enabled,
+  system_summary_interval_min=excluded.system_summary_interval_min,
+  system_summary_last_sent_at=excluded.system_summary_last_sent_at,
   last_update_id=excluded.last_update_id,
   updated_at=now()
 `, telegramSettingsID,
@@ -111,6 +148,9 @@ on conflict (id) do update set
     settings.SummaryEnabled,
     settings.SummaryIntervalMin,
     settings.SummaryLastSentAt,
+    settings.SystemSummaryEnabled,
+    settings.SystemSummaryIntervalMin,
+    settings.SystemSummaryLastSentAt,
     settings.LastUpdateID,
   )
   return err
@@ -134,7 +174,18 @@ func updateTelegramNotificationSettings(ctx context.Context, db *pgxpool.Pool, u
     }
     settings.SummaryIntervalMin = value
   }
+  if update.SystemSummaryEnabled != nil {
+    settings.SystemSummaryEnabled = *update.SystemSummaryEnabled
+  }
+  if update.SystemSummaryIntervalMin != nil {
+    value := *update.SystemSummaryIntervalMin
+    if value < telegramSummaryIntervalMin || value > telegramSummaryIntervalMax {
+      return settings, fmt.Errorf("system_summary_interval_min must be between %d and %d", telegramSummaryIntervalMin, telegramSummaryIntervalMax)
+    }
+    settings.SystemSummaryIntervalMin = value
+  }
   settings.SummaryIntervalMin = normalizeTelegramSummaryInterval(settings.SummaryIntervalMin)
+  settings.SystemSummaryIntervalMin = normalizeTelegramSummaryInterval(settings.SystemSummaryIntervalMin)
   if err := upsertTelegramNotificationSettings(ctx, db, settings); err != nil {
     return settings, err
   }
@@ -148,6 +199,18 @@ func setTelegramSummaryLastSentAt(ctx context.Context, db *pgxpool.Pool, at time
   _, err := db.Exec(ctx, `
 update telegram_notification_settings
 set summary_last_sent_at=$1, updated_at=now()
+where id=$2
+`, at, telegramSettingsID)
+  return err
+}
+
+func setTelegramSystemSummaryLastSentAt(ctx context.Context, db *pgxpool.Pool, at time.Time) error {
+  if db == nil {
+    return errors.New("db unavailable")
+  }
+  _, err := db.Exec(ctx, `
+update telegram_notification_settings
+set system_summary_last_sent_at=$1, updated_at=now()
 where id=$2
 `, at, telegramSettingsID)
   return err
@@ -191,6 +254,8 @@ func (s *Server) handleTelegramNotificationsGet(w http.ResponseWriter, r *http.R
     "scb_backup_enabled": settings.ScbBackupEnabled,
     "summary_enabled": settings.SummaryEnabled,
     "summary_interval_min": settings.SummaryIntervalMin,
+    "system_summary_enabled": settings.SystemSummaryEnabled,
+    "system_summary_interval_min": settings.SystemSummaryIntervalMin,
   })
 }
 
@@ -210,6 +275,8 @@ func (s *Server) handleTelegramNotificationsPost(w http.ResponseWriter, r *http.
     ScbBackupEnabled *bool `json:"scb_backup_enabled"`
     SummaryEnabled *bool `json:"summary_enabled"`
     SummaryIntervalMin *int `json:"summary_interval_min"`
+    SystemSummaryEnabled *bool `json:"system_summary_enabled"`
+    SystemSummaryIntervalMin *int `json:"system_summary_interval_min"`
   }
   if err := readJSON(r, &req); err != nil {
     writeError(w, http.StatusBadRequest, "invalid json")
@@ -256,13 +323,15 @@ func (s *Server) handleTelegramNotificationsPost(w http.ResponseWriter, r *http.
     }
   }
 
-  if req.ScbBackupEnabled != nil || req.SummaryEnabled != nil || req.SummaryIntervalMin != nil {
+  if req.ScbBackupEnabled != nil || req.SummaryEnabled != nil || req.SummaryIntervalMin != nil || req.SystemSummaryEnabled != nil || req.SystemSummaryIntervalMin != nil {
     ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
     defer cancel()
     if _, err := updateTelegramNotificationSettings(ctx, s.db, telegramNotificationUpdate{
       ScbBackupEnabled: req.ScbBackupEnabled,
       SummaryEnabled: req.SummaryEnabled,
       SummaryIntervalMin: req.SummaryIntervalMin,
+      SystemSummaryEnabled: req.SystemSummaryEnabled,
+      SystemSummaryIntervalMin: req.SystemSummaryIntervalMin,
     }); err != nil {
       writeError(w, http.StatusBadRequest, err.Error())
       return
@@ -300,41 +369,69 @@ func (s *Server) runTelegramSummaryLoop() {
     ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
     settings, err := loadTelegramNotificationSettings(ctx, s.db)
     cancel()
-    if err != nil || !settings.SummaryEnabled {
-      continue
-    }
-
-    interval := time.Duration(normalizeTelegramSummaryInterval(settings.SummaryIntervalMin)) * time.Minute
-    if interval <= 0 {
-      interval = time.Duration(telegramSummaryIntervalDefault) * time.Minute
-    }
-    if settings.SummaryLastSentAt != nil && time.Since(*settings.SummaryLastSentAt) < interval {
-      continue
-    }
-
-    summaryCtx, summaryCancel := context.WithTimeout(context.Background(), 20*time.Second)
-    summary, err := s.buildTelegramBalanceSummary(summaryCtx)
-    summaryCancel()
     if err != nil {
-      if s.logger != nil {
-        s.logger.Printf("notifications: telegram summary build failed: %v", err)
-      }
       continue
     }
 
-    sendCtx, sendCancel := context.WithTimeout(context.Background(), 20*time.Second)
-    err = sendTelegramMessage(sendCtx, cfg.BotToken, cfg.ChatID, summary)
-    sendCancel()
-    if err != nil {
-      if s.logger != nil {
-        s.logger.Printf("notifications: telegram summary send failed: %v", err)
+    if settings.SummaryEnabled {
+      interval := time.Duration(normalizeTelegramSummaryInterval(settings.SummaryIntervalMin)) * time.Minute
+      if interval <= 0 {
+        interval = time.Duration(telegramSummaryIntervalDefault) * time.Minute
       }
-      continue
+      if settings.SummaryLastSentAt == nil || time.Since(*settings.SummaryLastSentAt) >= interval {
+        summaryCtx, summaryCancel := context.WithTimeout(context.Background(), 20*time.Second)
+        summary, summaryErr := s.buildTelegramBalanceSummary(summaryCtx)
+        summaryCancel()
+        if summaryErr != nil {
+          if s.logger != nil {
+            s.logger.Printf("notifications: telegram summary build failed: %v", summaryErr)
+          }
+        } else {
+          sendCtx, sendCancel := context.WithTimeout(context.Background(), 20*time.Second)
+          sendErr := sendTelegramMessage(sendCtx, cfg.BotToken, cfg.ChatID, summary)
+          sendCancel()
+          if sendErr != nil {
+            if s.logger != nil {
+              s.logger.Printf("notifications: telegram summary send failed: %v", sendErr)
+            }
+          } else {
+            updateCtx, updateCancel := context.WithTimeout(context.Background(), 3*time.Second)
+            _ = setTelegramSummaryLastSentAt(updateCtx, s.db, time.Now().UTC())
+            updateCancel()
+          }
+        }
+      }
     }
 
-    updateCtx, updateCancel := context.WithTimeout(context.Background(), 3*time.Second)
-    _ = setTelegramSummaryLastSentAt(updateCtx, s.db, time.Now().UTC())
-    updateCancel()
+    if settings.SystemSummaryEnabled {
+      interval := time.Duration(normalizeTelegramSummaryInterval(settings.SystemSummaryIntervalMin)) * time.Minute
+      if interval <= 0 {
+        interval = time.Duration(telegramSummaryIntervalDefault) * time.Minute
+      }
+      if settings.SystemSummaryLastSentAt == nil || time.Since(*settings.SystemSummaryLastSentAt) >= interval {
+        sysCtx, sysCancel := context.WithTimeout(context.Background(), 20*time.Second)
+        sysSummary, sysErr := s.buildTelegramSystemSummary(sysCtx)
+        sysCancel()
+        if sysErr != nil {
+          if s.logger != nil {
+            s.logger.Printf("notifications: telegram system summary build failed: %v", sysErr)
+          }
+        } else {
+          sendCtx, sendCancel := context.WithTimeout(context.Background(), 20*time.Second)
+          sendErr := sendTelegramMessage(sendCtx, cfg.BotToken, cfg.ChatID, sysSummary)
+          sendCancel()
+          if sendErr != nil {
+            if s.logger != nil {
+              s.logger.Printf("notifications: telegram system summary send failed: %v", sendErr)
+            }
+          } else {
+            updateCtx, updateCancel := context.WithTimeout(context.Background(), 3*time.Second)
+            _ = setTelegramSystemSummaryLastSentAt(updateCtx, s.db, time.Now().UTC())
+            updateCancel()
+          }
+        }
+      }
+    }
   }
 }
 
@@ -392,6 +489,8 @@ func (s *Server) runTelegramCommandLoop() {
         s.handleTelegramScbCommand(cfg)
       case "balances":
         s.handleTelegramBalancesCommand(cfg)
+      case "system":
+        s.handleTelegramSystemCommand(cfg)
       }
     }
 
@@ -430,6 +529,7 @@ func setTelegramBotCommands(ctx context.Context, token string) error {
     Commands: []telegramBotCommand{
       {Command: "scb", Description: "on-demand SCB backup"},
       {Command: "balances", Description: "on-demand financial summary"},
+      {Command: "system", Description: "on-demand system status"},
     },
   }
   body, err := json.Marshal(payload)
@@ -566,6 +666,26 @@ func (s *Server) handleTelegramBalancesCommand(cfg telegramBackupConfig) {
   }
 }
 
+func (s *Server) handleTelegramSystemCommand(cfg telegramBackupConfig) {
+  if s == nil {
+    return
+  }
+  ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+  defer cancel()
+  summary, err := s.buildTelegramSystemSummary(ctx)
+  if err != nil {
+    if s.logger != nil {
+      s.logger.Printf("notifications: telegram /system build failed: %v", err)
+    }
+    summary = "Unable to build system summary."
+  }
+  if err := sendTelegramMessage(ctx, cfg.BotToken, cfg.ChatID, summary); err != nil {
+    if s.logger != nil {
+      s.logger.Printf("notifications: telegram /system send failed: %v", err)
+    }
+  }
+}
+
 func (s *Server) buildTelegramBalanceSummary(ctx context.Context) (string, error) {
   if s == nil {
     return "", errors.New("server unavailable")
@@ -638,6 +758,98 @@ func (s *Server) buildTelegramBalanceSummary(ctx context.Context) (string, error
   return strings.Join(lines, "\n"), nil
 }
 
+func (s *Server) buildTelegramSystemSummary(ctx context.Context) (string, error) {
+  if s == nil {
+    return "", errors.New("server unavailable")
+  }
+
+  lines := []string{"LightningOS - System Status"}
+
+  alias := getNodeAlias(ctx, s.lnd)
+  if strings.TrimSpace(alias) != "" {
+    lines = append(lines, fmt.Sprintf("Node: %s", strings.TrimSpace(alias)))
+  }
+
+  sysCtx, sysCancel := context.WithTimeout(ctx, 6*time.Second)
+  stats, err := sysinfo.GetSystemStats(sysCtx)
+  sysCancel()
+  if err != nil {
+    lines = append(lines, "System: unavailable")
+  } else {
+    uptimeHours := int64(math.Round(float64(stats.UptimeSec) / 3600.0))
+    lines = append(lines, fmt.Sprintf("CPU load: %.2f | CPU: %.1f%%", stats.CPULoad1, stats.CPUPercent))
+    lines = append(lines, fmt.Sprintf("RAM: %s / %s MB", formatInt(stats.RAMUsedMB), formatInt(stats.RAMTotalMB)))
+    lines = append(lines, fmt.Sprintf("Uptime: %s hours", formatInt(uptimeHours)))
+    if stats.TemperatureC > 0 {
+      lines = append(lines, fmt.Sprintf("Temp: %.1f C", stats.TemperatureC))
+    } else {
+      lines = append(lines, "Temp: N/A")
+    }
+  }
+
+  diskCtx, diskCancel := context.WithTimeout(ctx, 8*time.Second)
+  disks, diskErr := sysinfo.ReadDiskSmart(diskCtx)
+  diskCancel()
+  if diskErr != nil {
+    lines = append(lines, "Disks: unavailable")
+    return strings.Join(lines, "\n"), nil
+  }
+  if len(disks) == 0 {
+    lines = append(lines, "Disks: none detected")
+    return strings.Join(lines, "\n"), nil
+  }
+
+  wearWarnThreshold := 75
+  tempWarnThreshold := 70.0
+  lines = append(lines, "Disks:")
+  for _, disk := range disks {
+    header := fmt.Sprintf("- %s (%s) SMART %s", strings.TrimSpace(disk.Device), strings.TrimSpace(disk.Type), strings.TrimSpace(disk.SmartStatus))
+    if header != "" {
+      lines = append(lines, header)
+    }
+    lines = append(lines, fmt.Sprintf("  Power on hours: %s", formatInt(disk.PowerOnHours)))
+    lines = append(lines, fmt.Sprintf("  Wear: %d%% | Days left: %s", disk.WearPercentUsed, formatInt(disk.DaysLeftEstimate)))
+    if disk.TemperatureC > 0 {
+      lines = append(lines, fmt.Sprintf("  Temp: %.1f C", disk.TemperatureC))
+    } else {
+      lines = append(lines, "  Temp: N/A")
+    }
+    if disk.TotalGB > 0 {
+      used := formatFloat(disk.UsedGB, 1)
+      total := formatFloat(disk.TotalGB, 1)
+      percent := formatFloat(disk.UsedPercent, 1)
+      lines = append(lines, fmt.Sprintf("  Usage: %s / %s GB (%s%%)", used, total, percent))
+    } else {
+      lines = append(lines, "  Usage: N/A")
+    }
+    alerts := append([]string{}, disk.Alerts...)
+    if disk.WearPercentUsed >= wearWarnThreshold && !containsAlert(alerts, "wear_warn") && !containsAlert(alerts, "wear_err") {
+      alerts = append(alerts, "wear_warn")
+    }
+    if disk.TemperatureC >= tempWarnThreshold {
+      alerts = append(alerts, "temp_warn")
+    }
+    if len(alerts) > 0 {
+      lines = append(lines, fmt.Sprintf("  Alerts: %s", strings.Join(uniqueStrings(alerts), ", ")))
+    }
+    if len(disk.Partitions) > 0 {
+      lines = append(lines, "  Partitions:")
+      for _, part := range disk.Partitions {
+        partLabel := strings.TrimSpace(part.Device)
+        if part.Mount != "" {
+          partLabel = fmt.Sprintf("%s %s", partLabel, part.Mount)
+        }
+        total := formatFloat(part.TotalGB, 1)
+        used := formatFloat(part.UsedGB, 1)
+        percent := formatFloat(part.UsedPercent, 1)
+        lines = append(lines, fmt.Sprintf("   - %s: %s / %s GB (%s%%)", partLabel, used, total, percent))
+      }
+    }
+  }
+
+  return strings.Join(lines, "\n"), nil
+}
+
 func reportSummaryMetrics(ctx context.Context, svc *reports.Service, key string, now time.Time, loc *time.Location) (reports.Metrics, error) {
   summaryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
   defer cancel()
@@ -693,6 +905,80 @@ func formatSats(value int64) string {
     b.WriteString(raw[i : i+3])
   }
   return b.String()
+}
+
+func formatInt(value int64) string {
+  return formatIntWithSign(value)
+}
+
+func formatIntWithSign(value int64) string {
+  negative := value < 0
+  if negative {
+    value = -value
+  }
+  raw := strconv.FormatInt(value, 10)
+  if len(raw) <= 3 {
+    if negative {
+      return "-" + raw
+    }
+    return raw
+  }
+  var b strings.Builder
+  if negative {
+    b.WriteByte('-')
+  }
+  prefix := len(raw) % 3
+  if prefix == 0 {
+    prefix = 3
+  }
+  b.WriteString(raw[:prefix])
+  for i := prefix; i < len(raw); i += 3 {
+    b.WriteByte(',')
+    b.WriteString(raw[i : i+3])
+  }
+  return b.String()
+}
+
+func formatFloat(value float64, decimals int) string {
+  if value == 0 {
+    return "0"
+  }
+  if decimals < 0 {
+    decimals = 0
+  }
+  formatted := fmt.Sprintf("%.*f", decimals, value)
+  formatted = strings.TrimRight(formatted, "0")
+  formatted = strings.TrimRight(formatted, ".")
+  if formatted == "" || formatted == "-" {
+    return "0"
+  }
+  return formatted
+}
+
+func containsAlert(alerts []string, value string) bool {
+  for _, alert := range alerts {
+    if alert == value {
+      return true
+    }
+  }
+  return false
+}
+
+func uniqueStrings(values []string) []string {
+  seen := map[string]struct{}{}
+  out := make([]string, 0, len(values))
+  for _, val := range values {
+    trimmed := strings.TrimSpace(val)
+    if trimmed == "" {
+      continue
+    }
+    if _, ok := seen[trimmed]; ok {
+      continue
+    }
+    seen[trimmed] = struct{}{}
+    out = append(out, trimmed)
+  }
+  return out
 }
 
 func sendTelegramMessage(ctx context.Context, token, chatID, text string) error {

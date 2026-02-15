@@ -441,9 +441,14 @@
       "summaryInterval": "Summary interval (minutes)",
       "summaryIntervalHint": "Minimum 60, maximum 720 minutes.",
       "summaryIntervalInvalid": "Summary interval must be between 60 and 720 minutes.",
+      "systemLabel": "System status summary",
+      "systemHint": "Send system and disk status on a schedule.",
+      "systemInterval": "System interval (minutes)",
+      "systemIntervalHint": "Minimum 60, maximum 720 minutes.",
+      "systemIntervalInvalid": "System interval must be between 60 and 720 minutes.",
       "rulesSaved": "Notification rules saved.",
       "frequencySaved": "Frequency saved.",
-      "commandsHint": "Commands: /scb for an on-demand backup, /balances for on-demand summary."
+      "commandsHint": "Commands: /scb for an on-demand backup, /balances for on-demand summary, /system for system status."
     },
     "title": "Notifications",
     "txLabel": "Tx {{value}}...",

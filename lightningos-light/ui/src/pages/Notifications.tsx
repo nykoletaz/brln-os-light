@@ -29,6 +29,8 @@ type TelegramNotificationConfig = {
   scb_backup_enabled?: boolean
   summary_enabled?: boolean
   summary_interval_min?: number
+  system_summary_enabled?: boolean
+  system_summary_interval_min?: number
 }
 
 const arrowForDirection = (value: string) => {
@@ -164,6 +166,8 @@ export default function Notifications() {
   const [telegramScbEnabled, setTelegramScbEnabled] = useState(true)
   const [telegramSummaryEnabled, setTelegramSummaryEnabled] = useState(false)
   const [telegramSummaryInterval, setTelegramSummaryInterval] = useState('')
+  const [telegramSystemEnabled, setTelegramSystemEnabled] = useState(false)
+  const [telegramSystemInterval, setTelegramSystemInterval] = useState('')
   const [telegramStatus, setTelegramStatus] = useState('')
   const [telegramSaving, setTelegramSaving] = useState(false)
   const [telegramTesting, setTelegramTesting] = useState(false)
@@ -204,6 +208,8 @@ export default function Notifications() {
         setTelegramScbEnabled(Boolean(data?.scb_backup_enabled))
         setTelegramSummaryEnabled(Boolean(data?.summary_enabled))
         setTelegramSummaryInterval(data?.summary_interval_min ? String(data.summary_interval_min) : '')
+        setTelegramSystemEnabled(Boolean(data?.system_summary_enabled))
+        setTelegramSystemInterval(data?.system_summary_interval_min ? String(data.system_summary_interval_min) : '')
       })
       .catch(() => null)
     return () => {
@@ -300,6 +306,8 @@ export default function Notifications() {
     scbBackupEnabled?: boolean
     summaryEnabled?: boolean
     summaryInterval?: string
+    systemSummaryEnabled?: boolean
+    systemSummaryInterval?: string
   }) => {
     if (telegramSaving) return
     setTelegramSaving(true)
@@ -308,12 +316,24 @@ export default function Notifications() {
       const nextScbEnabled = overrides?.scbBackupEnabled ?? telegramScbEnabled
       const nextSummaryEnabled = overrides?.summaryEnabled ?? telegramSummaryEnabled
       const nextSummaryInterval = overrides?.summaryInterval ?? telegramSummaryInterval
+      const nextSystemEnabled = overrides?.systemSummaryEnabled ?? telegramSystemEnabled
+      const nextSystemInterval = overrides?.systemSummaryInterval ?? telegramSystemInterval
       const prevIntervalValue = Number(telegramConfig?.summary_interval_min || 0)
       const effectiveSummaryInterval = nextSummaryInterval || (prevIntervalValue ? String(prevIntervalValue) : '720')
+      const prevSystemIntervalValue = Number(telegramConfig?.system_summary_interval_min || 0)
+      const effectiveSystemInterval = nextSystemInterval || (prevSystemIntervalValue ? String(prevSystemIntervalValue) : '720')
       const summaryIntervalValue = Number(effectiveSummaryInterval || 0)
+      const systemIntervalValue = Number(effectiveSystemInterval || 0)
       if (nextSummaryEnabled) {
         if (!summaryIntervalValue || summaryIntervalValue < 60 || summaryIntervalValue > 720) {
           setTelegramStatus(t('notifications.telegram.summaryIntervalInvalid'))
+          setTelegramSaving(false)
+          return
+        }
+      }
+      if (nextSystemEnabled) {
+        if (!systemIntervalValue || systemIntervalValue < 60 || systemIntervalValue > 720) {
+          setTelegramStatus(t('notifications.telegram.systemIntervalInvalid'))
           setTelegramSaving(false)
           return
         }
@@ -331,10 +351,14 @@ export default function Notifications() {
         scb_backup_enabled?: boolean
         summary_enabled?: boolean
         summary_interval_min?: number
+        system_summary_enabled?: boolean
+        system_summary_interval_min?: number
       } = {
         scb_backup_enabled: nextScbEnabled,
         summary_enabled: nextSummaryEnabled,
-        summary_interval_min: summaryIntervalValue || undefined
+        summary_interval_min: summaryIntervalValue || undefined,
+        system_summary_enabled: nextSystemEnabled,
+        system_summary_interval_min: systemIntervalValue || undefined
       }
       if (clearTelegram) {
         payload.bot_token = ''
@@ -355,6 +379,8 @@ export default function Notifications() {
       setTelegramScbEnabled(Boolean(data?.scb_backup_enabled))
       setTelegramSummaryEnabled(Boolean(data?.summary_enabled))
       setTelegramSummaryInterval(data?.summary_interval_min ? String(data.summary_interval_min) : '')
+      setTelegramSystemEnabled(Boolean(data?.system_summary_enabled))
+      setTelegramSystemInterval(data?.system_summary_interval_min ? String(data.system_summary_interval_min) : '')
       if (!data?.bot_token_set && !data?.chat_id) {
         setTelegramStatus(t('notifications.telegram.disabled'))
       } else {
@@ -365,11 +391,15 @@ export default function Notifications() {
         } else {
           const prevScbEnabled = Boolean(telegramConfig?.scb_backup_enabled)
           const prevSummaryEnabled = Boolean(telegramConfig?.summary_enabled)
+          const prevSystemEnabled = Boolean(telegramConfig?.system_summary_enabled)
           const prevIntervalValue = Number(telegramConfig?.summary_interval_min || 0)
+          const prevSystemIntervalValue = Number(telegramConfig?.system_summary_interval_min || 0)
           const scbChanged = prevScbEnabled !== nextScbEnabled
           const summaryChanged = prevSummaryEnabled !== nextSummaryEnabled
+          const systemChanged = prevSystemEnabled !== nextSystemEnabled
           const intervalChanged = summaryIntervalValue > 0 && prevIntervalValue !== summaryIntervalValue
-          if (intervalChanged && !scbChanged && !summaryChanged) {
+          const systemIntervalChanged = systemIntervalValue > 0 && prevSystemIntervalValue !== systemIntervalValue
+          if ((intervalChanged || systemIntervalChanged) && !scbChanged && !summaryChanged && !systemChanged) {
             setTelegramStatus(t('notifications.telegram.frequencySaved'))
           } else {
             setTelegramStatus(t('notifications.telegram.rulesSaved'))
@@ -523,6 +553,42 @@ export default function Notifications() {
                   <div className="text-xs text-fog/50 sm:whitespace-nowrap sm:min-w-[260px]">
                     <span className="text-fog/60">{t('notifications.telegram.summaryInterval')}</span>
                     <span className="ml-2">{t('notifications.telegram.summaryIntervalHint')}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-start gap-3 text-sm text-fog">
+                  <input
+                    type="checkbox"
+                    checked={telegramSystemEnabled}
+                    onChange={(e) => {
+                      const checked = e.target.checked
+                      setTelegramSystemEnabled(checked)
+                      void handleSaveTelegram({
+                        systemSummaryEnabled: checked,
+                        systemSummaryInterval: telegramSystemInterval
+                      })
+                    }}
+                  />
+                  <span>
+                    <span className="font-semibold">{t('notifications.telegram.systemLabel')}</span>
+                    <span className="block text-xs text-fog/60">{t('notifications.telegram.systemHint')}</span>
+                  </span>
+                </label>
+                <div className="flex items-center gap-3">
+                  <input
+                    className="input-field w-[96px]"
+                    type="number"
+                    min={60}
+                    max={720}
+                    placeholder="120"
+                    value={telegramSystemInterval}
+                    onChange={(e) => setTelegramSystemInterval(e.target.value)}
+                    onKeyDown={handleTelegramKeyDown}
+                  />
+                  <div className="text-xs text-fog/50 sm:whitespace-nowrap sm:min-w-[260px]">
+                    <span className="text-fog/60">{t('notifications.telegram.systemInterval')}</span>
+                    <span className="ml-2">{t('notifications.telegram.systemIntervalHint')}</span>
                   </div>
                 </div>
               </div>

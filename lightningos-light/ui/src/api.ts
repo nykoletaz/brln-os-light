@@ -236,6 +236,8 @@ export const updateTelegramNotifications = (payload: {
   scb_backup_enabled?: boolean
   summary_enabled?: boolean
   summary_interval_min?: number
+  system_summary_enabled?: boolean
+  system_summary_interval_min?: number
 }) => request('/api/notifications/telegram', { method: 'POST', body: JSON.stringify(payload) })
 
 export const getTelegramBackupConfig = () =>
