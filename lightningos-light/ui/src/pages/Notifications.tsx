@@ -309,13 +309,32 @@ export default function Notifications() {
           return
         }
       }
-      await updateTelegramNotifications({
-        bot_token: telegramToken,
-        chat_id: telegramChatId,
+      const trimmedToken = telegramToken.trim()
+      const trimmedChatId = telegramChatId.trim()
+      const clearTelegram = trimmedToken === '' && trimmedChatId === ''
+      const payload: {
+        bot_token?: string
+        chat_id?: string
+        scb_backup_enabled?: boolean
+        summary_enabled?: boolean
+        summary_interval_min?: number
+      } = {
         scb_backup_enabled: telegramScbEnabled,
         summary_enabled: telegramSummaryEnabled,
         summary_interval_min: summaryIntervalValue || undefined
-      })
+      }
+      if (clearTelegram) {
+        payload.bot_token = ''
+        payload.chat_id = ''
+      } else {
+        if (trimmedToken) {
+          payload.bot_token = trimmedToken
+        }
+        if (trimmedChatId) {
+          payload.chat_id = trimmedChatId
+        }
+      }
+      await updateTelegramNotifications(payload)
       const data: TelegramNotificationConfig = await getTelegramNotifications()
       setTelegramConfig(data)
       setTelegramChatId(data?.chat_id || '')
@@ -455,19 +474,21 @@ export default function Notifications() {
                     <span className="block text-xs text-fog/60">{t('notifications.telegram.summaryHint')}</span>
                   </span>
                 </label>
-                <div className="space-y-1">
-                  <label className="text-xs text-fog/60">{t('notifications.telegram.summaryInterval')}</label>
-                  <input
-                    className="input-field max-w-[200px]"
-                    type="number"
-                    min={60}
-                    max={720}
-                    placeholder="120"
-                    value={telegramSummaryInterval}
-                    onChange={(e) => setTelegramSummaryInterval(e.target.value)}
-                    onKeyDown={handleTelegramKeyDown}
-                  />
-                  <p className="text-xs text-fog/50">{t('notifications.telegram.summaryIntervalHint')}</p>
+                <div className="flex flex-col items-end gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-fog/60">{t('notifications.telegram.summaryInterval')}</span>
+                    <input
+                      className="input-field w-[120px]"
+                      type="number"
+                      min={60}
+                      max={720}
+                      placeholder="120"
+                      value={telegramSummaryInterval}
+                      onChange={(e) => setTelegramSummaryInterval(e.target.value)}
+                      onKeyDown={handleTelegramKeyDown}
+                    />
+                  </div>
+                  <p className="text-xs text-fog/50 text-right">{t('notifications.telegram.summaryIntervalHint')}</p>
                 </div>
               </div>
               <p className="text-xs text-fog/50">{t('notifications.telegram.commandsHint')}</p>
