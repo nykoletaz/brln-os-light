@@ -691,21 +691,21 @@ func (s *Server) buildTelegramBalanceSummary(ctx context.Context) (string, error
     return "", errors.New("server unavailable")
   }
 
-  lines := []string{"LightningOS - Financial Summary"}
+  lines := []string{"⚡ LightningOS — Financial Summary"}
 
   alias := getNodeAlias(ctx, s.lnd)
   if strings.TrimSpace(alias) != "" {
-    lines = append(lines, fmt.Sprintf("Node: %s", strings.TrimSpace(alias)))
+    lines = append(lines, fmt.Sprintf("🔖 Node: %s", strings.TrimSpace(alias)))
   }
 
   if s.lnd == nil {
-    lines = append(lines, "Balances: unavailable (lnd unavailable)")
+    lines = append(lines, "⚠️ Balances: unavailable (lnd unavailable)")
   } else {
     balancesCtx, balancesCancel := context.WithTimeout(ctx, 6*time.Second)
     balances, balErr := s.lnd.GetBalances(balancesCtx)
     balancesCancel()
     if balErr != nil {
-      lines = append(lines, fmt.Sprintf("Balances: unavailable (%s)", balErr.Error()))
+      lines = append(lines, fmt.Sprintf("⚠️ Balances: unavailable (%s)", balErr.Error()))
     } else {
       onchainConfirmed := balances.OnchainConfirmedSat
       onchainUnconfirmed := balances.OnchainUnconfirmedSat
@@ -713,17 +713,17 @@ func (s *Server) buildTelegramBalanceSummary(ctx context.Context) (string, error
       lightningUnsettled := balances.LightningUnsettledLocalSat
       lightningTotal := balances.LightningLocalSat + balances.LightningUnsettledLocalSat
 
-      lines = append(lines, fmt.Sprintf("Onchain: %s sats", formatSats(onchainConfirmed)))
+      lines = append(lines, fmt.Sprintf("⛓️ Onchain: %s sats", formatSats(onchainConfirmed)))
       if onchainUnconfirmed > 0 {
-        lines = append(lines, fmt.Sprintf("Onchain (unconfirmed): %s sats", formatSats(onchainUnconfirmed)))
+        lines = append(lines, fmt.Sprintf("⛓️ Onchain (unconfirmed): %s sats", formatSats(onchainUnconfirmed)))
       }
-      lines = append(lines, fmt.Sprintf("Lightning: %s sats", formatSats(lightningLocal)))
+      lines = append(lines, fmt.Sprintf("⚡ Lightning: %s sats", formatSats(lightningLocal)))
       if lightningUnsettled > 0 {
-        lines = append(lines, fmt.Sprintf("Lightning (unsettled): %s sats", formatSats(lightningUnsettled)))
-        lines = append(lines, fmt.Sprintf("Lightning (total): %s sats", formatSats(lightningTotal)))
+        lines = append(lines, fmt.Sprintf("⚡ Lightning (unsettled): %s sats", formatSats(lightningUnsettled)))
+        lines = append(lines, fmt.Sprintf("⚡ Lightning (total): %s sats", formatSats(lightningTotal)))
       }
       if len(balances.Warnings) > 0 {
-        lines = append(lines, fmt.Sprintf("Balances warning: %s", strings.Join(balances.Warnings, " ")))
+        lines = append(lines, fmt.Sprintf("⚠️ Balances warning: %s", strings.Join(balances.Warnings, " ")))
       }
     }
   }
@@ -734,24 +734,24 @@ func (s *Server) buildTelegramBalanceSummary(ctx context.Context) (string, error
     if msg == "" {
       msg = "reports unavailable"
     }
-    lines = append(lines, fmt.Sprintf("Reports: %s", msg))
+    lines = append(lines, fmt.Sprintf("⚠️ Reports: %s", msg))
     return strings.Join(lines, "\n"), nil
   }
 
   loc := s.reportsLocation()
   now := time.Now()
 
-  d1Line := "D-1: unavailable"
+  d1Line := "📅 D-1: unavailable"
   if metrics, err := reportSummaryMetrics(ctx, svc, reports.RangeD1, now, loc); err == nil {
-    d1Line = formatReportLine("D-1", metrics)
+    d1Line = "📅 " + formatReportLine("D-1", metrics)
   }
-  liveLine := "Live: unavailable"
+  liveLine := "📈 Live: unavailable"
   if metrics, err := reportLiveMetrics(ctx, svc, now, loc); err == nil {
-    liveLine = formatReportLine("Live", metrics)
+    liveLine = "📈 " + formatReportLine("Live", metrics)
   }
-  monthLine := "Month: unavailable"
+  monthLine := "🗓️ Month: unavailable"
   if metrics, err := reportSummaryMetrics(ctx, svc, reports.RangeMonth, now, loc); err == nil {
-    monthLine = formatReportLine("Month", metrics)
+    monthLine = "🗓️ " + formatReportLine("Month", metrics)
   }
 
   lines = append(lines, d1Line, liveLine, monthLine)
@@ -763,27 +763,27 @@ func (s *Server) buildTelegramSystemSummary(ctx context.Context) (string, error)
     return "", errors.New("server unavailable")
   }
 
-  lines := []string{"LightningOS - System Status"}
+  lines := []string{"🖥️ LightningOS — System Status"}
 
   alias := getNodeAlias(ctx, s.lnd)
   if strings.TrimSpace(alias) != "" {
-    lines = append(lines, fmt.Sprintf("Node: %s", strings.TrimSpace(alias)))
+    lines = append(lines, fmt.Sprintf("🔖 Node: %s", strings.TrimSpace(alias)))
   }
 
   sysCtx, sysCancel := context.WithTimeout(ctx, 6*time.Second)
   stats, err := sysinfo.GetSystemStats(sysCtx)
   sysCancel()
   if err != nil {
-    lines = append(lines, "System: unavailable")
+    lines = append(lines, "⚠️ System: unavailable")
   } else {
     uptimeHours := int64(math.Round(float64(stats.UptimeSec) / 3600.0))
-    lines = append(lines, fmt.Sprintf("CPU load: %.2f | CPU: %.1f%%", stats.CPULoad1, stats.CPUPercent))
-    lines = append(lines, fmt.Sprintf("RAM: %s / %s MB", formatInt(stats.RAMUsedMB), formatInt(stats.RAMTotalMB)))
-    lines = append(lines, fmt.Sprintf("Uptime: %s hours", formatInt(uptimeHours)))
+    lines = append(lines, fmt.Sprintf("🧠 CPU load: %.2f | CPU: %.1f%%", stats.CPULoad1, stats.CPUPercent))
+    lines = append(lines, fmt.Sprintf("🧮 RAM: %s / %s MB", formatInt(stats.RAMUsedMB), formatInt(stats.RAMTotalMB)))
+    lines = append(lines, fmt.Sprintf("⏱️ Uptime: %s hours", formatInt(uptimeHours)))
     if stats.TemperatureC > 0 {
-      lines = append(lines, fmt.Sprintf("Temp: %.1f C", stats.TemperatureC))
+      lines = append(lines, fmt.Sprintf("🌡️ Temp: %.1f C", stats.TemperatureC))
     } else {
-      lines = append(lines, "Temp: N/A")
+      lines = append(lines, "🌡️ Temp: N/A")
     }
   }
 
@@ -791,36 +791,36 @@ func (s *Server) buildTelegramSystemSummary(ctx context.Context) (string, error)
   disks, diskErr := sysinfo.ReadDiskSmart(diskCtx)
   diskCancel()
   if diskErr != nil {
-    lines = append(lines, "Disks: unavailable")
+    lines = append(lines, "💾 Disks: unavailable")
     return strings.Join(lines, "\n"), nil
   }
   if len(disks) == 0 {
-    lines = append(lines, "Disks: none detected")
+    lines = append(lines, "💾 Disks: none detected")
     return strings.Join(lines, "\n"), nil
   }
 
   wearWarnThreshold := 75
   tempWarnThreshold := 70.0
-  lines = append(lines, "Disks:")
+  lines = append(lines, "💾 Disks:")
   for _, disk := range disks {
-    header := fmt.Sprintf("- %s (%s) SMART %s", strings.TrimSpace(disk.Device), strings.TrimSpace(disk.Type), strings.TrimSpace(disk.SmartStatus))
+    header := fmt.Sprintf("💽 %s (%s) SMART %s", strings.TrimSpace(disk.Device), strings.TrimSpace(disk.Type), strings.TrimSpace(disk.SmartStatus))
     if header != "" {
       lines = append(lines, header)
     }
-    lines = append(lines, fmt.Sprintf("  Power on hours: %s", formatInt(disk.PowerOnHours)))
-    lines = append(lines, fmt.Sprintf("  Wear: %d%% | Days left: %s", disk.WearPercentUsed, formatInt(disk.DaysLeftEstimate)))
+    lines = append(lines, fmt.Sprintf("  ⏳ Power on hours: %s", formatInt(disk.PowerOnHours)))
+    lines = append(lines, fmt.Sprintf("  🧪 Wear: %d%% | Days left: %s", disk.WearPercentUsed, formatInt(disk.DaysLeftEstimate)))
     if disk.TemperatureC > 0 {
-      lines = append(lines, fmt.Sprintf("  Temp: %.1f C", disk.TemperatureC))
+      lines = append(lines, fmt.Sprintf("  🌡️ Temp: %.1f C", disk.TemperatureC))
     } else {
-      lines = append(lines, "  Temp: N/A")
+      lines = append(lines, "  🌡️ Temp: N/A")
     }
     if disk.TotalGB > 0 {
       used := formatFloat(disk.UsedGB, 1)
       total := formatFloat(disk.TotalGB, 1)
       percent := formatFloat(disk.UsedPercent, 1)
-      lines = append(lines, fmt.Sprintf("  Usage: %s / %s GB (%s%%)", used, total, percent))
+      lines = append(lines, fmt.Sprintf("  📊 Usage: %s / %s GB (%s%%)", used, total, percent))
     } else {
-      lines = append(lines, "  Usage: N/A")
+      lines = append(lines, "  📊 Usage: N/A")
     }
     alerts := append([]string{}, disk.Alerts...)
     if disk.WearPercentUsed >= wearWarnThreshold && !containsAlert(alerts, "wear_warn") && !containsAlert(alerts, "wear_err") {
@@ -830,10 +830,10 @@ func (s *Server) buildTelegramSystemSummary(ctx context.Context) (string, error)
       alerts = append(alerts, "temp_warn")
     }
     if len(alerts) > 0 {
-      lines = append(lines, fmt.Sprintf("  Alerts: %s", strings.Join(uniqueStrings(alerts), ", ")))
+      lines = append(lines, fmt.Sprintf("  ⚠️ Alerts: %s", strings.Join(uniqueStrings(alerts), ", ")))
     }
     if len(disk.Partitions) > 0 {
-      lines = append(lines, "  Partitions:")
+      lines = append(lines, "  📦 Partitions:")
       for _, part := range disk.Partitions {
         partLabel := strings.TrimSpace(part.Device)
         if part.Mount != "" {
@@ -842,7 +842,7 @@ func (s *Server) buildTelegramSystemSummary(ctx context.Context) (string, error)
         total := formatFloat(part.TotalGB, 1)
         used := formatFloat(part.UsedGB, 1)
         percent := formatFloat(part.UsedPercent, 1)
-        lines = append(lines, fmt.Sprintf("   - %s: %s / %s GB (%s%%)", partLabel, used, total, percent))
+        lines = append(lines, fmt.Sprintf("   • %s: %s / %s GB (%s%%)", partLabel, used, total, percent))
       }
     }
   }
