@@ -456,7 +456,7 @@ export default function Notifications() {
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-3">
-                <button className="btn-primary" onClick={handleSaveTelegram} disabled={telegramSaving}>
+                <button className="btn-primary" onClick={() => void handleSaveTelegram()} disabled={telegramSaving}>
                   {telegramSaving ? t('common.saving') : t('notifications.telegram.save')}
                 </button>
                 <button
