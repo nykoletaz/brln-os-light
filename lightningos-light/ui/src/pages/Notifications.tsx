@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getNotifications, getTelegramBackupConfig, testTelegramBackup, updateTelegramBackupConfig } from '../api'
+import { getNotifications, getTelegramNotifications, testTelegramBackup, updateTelegramNotifications } from '../api'
 import { getLocale } from '../i18n'
 
 type Notification = {
@@ -22,9 +22,12 @@ type Notification = {
   memo?: string
 }
 
-type TelegramBackupConfig = {
+type TelegramNotificationConfig = {
   chat_id?: string
   bot_token_set?: boolean
+  scb_backup_enabled?: boolean
+  summary_enabled?: boolean
+  summary_interval_min?: number
 }
 
 const arrowForDirection = (value: string) => {
@@ -154,9 +157,12 @@ export default function Notifications() {
   const [filter, setFilter] = useState<'all' | 'onchain' | 'lightning' | 'keysend' | 'channel' | 'forward' | 'rebalance'>('all')
   const [limit, setLimit] = useState(200)
   const limitRef = useRef(limit)
-  const [telegramConfig, setTelegramConfig] = useState<TelegramBackupConfig | null>(null)
+  const [telegramConfig, setTelegramConfig] = useState<TelegramNotificationConfig | null>(null)
   const [telegramToken, setTelegramToken] = useState('')
   const [telegramChatId, setTelegramChatId] = useState('')
+  const [telegramScbEnabled, setTelegramScbEnabled] = useState(true)
+  const [telegramSummaryEnabled, setTelegramSummaryEnabled] = useState(false)
+  const [telegramSummaryInterval, setTelegramSummaryInterval] = useState('')
   const [telegramStatus, setTelegramStatus] = useState('')
   const [telegramSaving, setTelegramSaving] = useState(false)
   const [telegramTesting, setTelegramTesting] = useState(false)
@@ -188,12 +194,15 @@ export default function Notifications() {
 
   useEffect(() => {
     let mounted = true
-    getTelegramBackupConfig()
-      .then((data: TelegramBackupConfig) => {
+    getTelegramNotifications()
+      .then((data: TelegramNotificationConfig) => {
         if (!mounted) return
         setTelegramConfig(data)
         setTelegramChatId(data?.chat_id || '')
         setTelegramToken('')
+        setTelegramScbEnabled(Boolean(data?.scb_backup_enabled))
+        setTelegramSummaryEnabled(Boolean(data?.summary_enabled))
+        setTelegramSummaryInterval(data?.summary_interval_min ? String(data.summary_interval_min) : '')
       })
       .catch(() => null)
     return () => {
@@ -284,14 +293,28 @@ export default function Notifications() {
     setTelegramSaving(true)
     setTelegramStatus(t('common.saving'))
     try {
-      await updateTelegramBackupConfig({
+      const summaryIntervalValue = Number(telegramSummaryInterval || 0)
+      if (telegramSummaryEnabled) {
+        if (!summaryIntervalValue || summaryIntervalValue < 60 || summaryIntervalValue > 720) {
+          setTelegramStatus(t('notifications.telegram.summaryIntervalInvalid'))
+          setTelegramSaving(false)
+          return
+        }
+      }
+      await updateTelegramNotifications({
         bot_token: telegramToken,
-        chat_id: telegramChatId
+        chat_id: telegramChatId,
+        scb_backup_enabled: telegramScbEnabled,
+        summary_enabled: telegramSummaryEnabled,
+        summary_interval_min: summaryIntervalValue || undefined
       })
-      const data: TelegramBackupConfig = await getTelegramBackupConfig()
+      const data: TelegramNotificationConfig = await getTelegramNotifications()
       setTelegramConfig(data)
       setTelegramChatId(data?.chat_id || '')
       setTelegramToken('')
+      setTelegramScbEnabled(Boolean(data?.scb_backup_enabled))
+      setTelegramSummaryEnabled(Boolean(data?.summary_enabled))
+      setTelegramSummaryInterval(data?.summary_interval_min ? String(data.summary_interval_min) : '')
       if (!data?.bot_token_set && !data?.chat_id) {
         setTelegramStatus(t('notifications.telegram.disabled'))
       } else {
@@ -351,43 +374,94 @@ export default function Notifications() {
         </div>
         {telegramOpen && (
           <div className="mt-4 space-y-4">
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div className="space-y-2">
-                <label className="text-sm text-fog/70">{t('notifications.telegram.botToken')}</label>
+            <div className="rounded-2xl border border-white/10 bg-ink/70 p-4 space-y-4">
+              <div>
+                <h4 className="text-base font-semibold">{t('notifications.telegram.configTitle')}</h4>
+                <p className="text-xs text-fog/60">{t('notifications.telegram.configSubtitle')}</p>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-sm text-fog/70">{t('notifications.telegram.botToken')}</label>
+                  <input
+                    className="input-field"
+                    type="password"
+                    placeholder={telegramConfig?.bot_token_set ? t('notifications.telegram.tokenSaved') : '123456:ABC...'}
+                    value={telegramToken}
+                    onChange={(e) => setTelegramToken(e.target.value)}
+                  />
+                  <p className="text-xs text-fog/50">{t('notifications.telegram.botTokenHint')}</p>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm text-fog/70">{t('notifications.telegram.chatId')}</label>
+                  <input
+                    className="input-field"
+                    placeholder="123456789"
+                    value={telegramChatId}
+                    onChange={(e) => setTelegramChatId(e.target.value)}
+                  />
+                  <p className="text-xs text-fog/50">{t('notifications.telegram.chatIdHint')}</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <button className="btn-primary" onClick={handleSaveTelegram} disabled={telegramSaving}>
+                  {telegramSaving ? t('common.saving') : t('notifications.telegram.save')}
+                </button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => triggerTelegramTest()}
+                  disabled={telegramTesting || !telegramEnabled}
+                >
+                  {telegramTesting ? t('notifications.telegram.sendingTest') : t('notifications.telegram.sendTest')}
+                </button>
+                {telegramStatus && <span className="text-sm text-brass">{telegramStatus}</span>}
+              </div>
+              <p className="text-xs text-fog/50">{t('notifications.telegram.directChatOnly')}</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-ink/70 p-4 space-y-4">
+              <div>
+                <h4 className="text-base font-semibold">{t('notifications.telegram.notificationsTitle')}</h4>
+                <p className="text-xs text-fog/60">{t('notifications.telegram.notificationsSubtitle')}</p>
+              </div>
+              <label className="flex items-start gap-3 text-sm text-fog">
+                <input
+                  type="checkbox"
+                  checked={telegramScbEnabled}
+                  onChange={(e) => setTelegramScbEnabled(e.target.checked)}
+                />
+                <span>
+                  <span className="font-semibold">{t('notifications.telegram.scbBackupLabel')}</span>
+                  <span className="block text-xs text-fog/60">{t('notifications.telegram.scbBackupHint')}</span>
+                </span>
+              </label>
+              <label className="flex items-start gap-3 text-sm text-fog">
+                <input
+                  type="checkbox"
+                  checked={telegramSummaryEnabled}
+                  onChange={(e) => setTelegramSummaryEnabled(e.target.checked)}
+                />
+                <span>
+                  <span className="font-semibold">{t('notifications.telegram.summaryLabel')}</span>
+                  <span className="block text-xs text-fog/60">{t('notifications.telegram.summaryHint')}</span>
+                </span>
+              </label>
+              <div className="grid gap-3 lg:grid-cols-[1fr_200px] lg:items-center">
+                <div className="space-y-1">
+                  <label className="text-xs text-fog/60">{t('notifications.telegram.summaryInterval')}</label>
+                  <p className="text-xs text-fog/50">{t('notifications.telegram.summaryIntervalHint')}</p>
+                </div>
                 <input
                   className="input-field"
-                  type="password"
-                  placeholder={telegramConfig?.bot_token_set ? t('notifications.telegram.tokenSaved') : '123456:ABC...'}
-                  value={telegramToken}
-                  onChange={(e) => setTelegramToken(e.target.value)}
+                  type="number"
+                  min={60}
+                  max={720}
+                  placeholder="120"
+                  value={telegramSummaryInterval}
+                  onChange={(e) => setTelegramSummaryInterval(e.target.value)}
+                  disabled={!telegramSummaryEnabled}
                 />
-                <p className="text-xs text-fog/50">{t('notifications.telegram.botTokenHint')}</p>
               </div>
-              <div className="space-y-2">
-                <label className="text-sm text-fog/70">{t('notifications.telegram.chatId')}</label>
-                <input
-                  className="input-field"
-                  placeholder="123456789"
-                  value={telegramChatId}
-                  onChange={(e) => setTelegramChatId(e.target.value)}
-                />
-                <p className="text-xs text-fog/50">{t('notifications.telegram.chatIdHint')}</p>
-              </div>
+              <p className="text-xs text-fog/50">{t('notifications.telegram.commandsHint')}</p>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <button className="btn-primary" onClick={handleSaveTelegram} disabled={telegramSaving}>
-                {telegramSaving ? t('common.saving') : t('notifications.telegram.save')}
-              </button>
-              <button
-                className="btn-secondary"
-                onClick={() => triggerTelegramTest()}
-                disabled={telegramTesting || !telegramEnabled}
-              >
-                {telegramTesting ? t('notifications.telegram.sendingTest') : t('notifications.telegram.sendTest')}
-              </button>
-              {telegramStatus && <span className="text-sm text-brass">{telegramStatus}</span>}
-            </div>
-            <p className="text-xs text-fog/50">{t('notifications.telegram.directChatOnly')}</p>
           </div>
         )}
       </div>

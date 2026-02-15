@@ -441,14 +441,28 @@ create index if not exists notifications_chan_in_idx on notifications (chan_id_i
 create index if not exists notifications_rebal_target_idx on notifications (rebal_target_chan_id, occurred_at desc);
 create index if not exists notifications_rebal_source_idx on notifications (rebal_source_chan_id, occurred_at desc);
 
-create table if not exists notification_cursors (
-  key text primary key,
-  value text not null,
-  updated_at timestamptz not null default now()
-);
-`)
-  return err
-}
+  create table if not exists notification_cursors (
+    key text primary key,
+    value text not null,
+    updated_at timestamptz not null default now()
+  );
+
+  create table if not exists telegram_notification_settings (
+    id integer primary key,
+    scb_backup_enabled boolean not null default true,
+    summary_enabled boolean not null default false,
+    summary_interval_min integer not null default 720,
+    summary_last_sent_at timestamptz,
+    last_update_id bigint not null default 0,
+    updated_at timestamptz not null default now()
+  );
+
+  insert into telegram_notification_settings (id)
+  values (1)
+  on conflict (id) do nothing;
+  `)
+    return err
+  }
 
 func (n *Notifier) upsertNotification(ctx context.Context, eventKey string, evt Notification) (Notification, error) {
   if eventKey == "" {

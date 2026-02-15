@@ -227,6 +227,17 @@ export const sendChatMessage = (payload: { peer_pubkey: string; message: string 
 export const getNotifications = (limit = 200) =>
   request(`/api/notifications?limit=${limit}`)
 
+export const getTelegramNotifications = () =>
+  request('/api/notifications/telegram')
+
+export const updateTelegramNotifications = (payload: {
+  bot_token?: string
+  chat_id?: string
+  scb_backup_enabled?: boolean
+  summary_enabled?: boolean
+  summary_interval_min?: number
+}) => request('/api/notifications/telegram', { method: 'POST', body: JSON.stringify(payload) })
+
 export const getTelegramBackupConfig = () =>
   request('/api/notifications/backup/telegram')
 

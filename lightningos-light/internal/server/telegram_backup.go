@@ -199,6 +199,9 @@ func (n *Notifier) maybeSendTelegramBackup(update *lnrpc.ChannelEventUpdate) {
 }
 
 func (n *Notifier) triggerTelegramBackup(reason, channelPoint, peerAlias string) {
+  if !n.telegramScbBackupEnabled() {
+    return
+  }
   if !n.shouldSendTelegramBackup(reason, channelPoint) {
     return
   }
@@ -214,6 +217,22 @@ func (n *Notifier) triggerTelegramBackup(reason, channelPoint, peerAlias string)
       n.logger.Printf("notifications: telegram backup failed: %v", err)
     }
   }()
+}
+
+func (n *Notifier) telegramScbBackupEnabled() bool {
+  if n == nil || n.db == nil {
+    return true
+  }
+  ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+  defer cancel()
+  settings, err := loadTelegramNotificationSettings(ctx, n.db)
+  if err != nil {
+    if n.logger != nil {
+      n.logger.Printf("notifications: failed to load telegram settings: %v", err)
+    }
+    return true
+  }
+  return settings.ScbBackupEnabled
 }
 
 func (n *Notifier) shouldSendTelegramBackup(reason, channelPoint string) bool {

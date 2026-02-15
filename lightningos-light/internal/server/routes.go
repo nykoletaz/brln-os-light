@@ -54,6 +54,8 @@ func (s *Server) routes() http.Handler {
   r.Get("/api/apps/{id}/admin-password", s.handleAppAdminPassword)
   r.Get("/api/notifications", s.handleNotificationsList)
   r.Get("/api/notifications/stream", s.handleNotificationsStream)
+  r.Get("/api/notifications/telegram", s.handleTelegramNotificationsGet)
+  r.Post("/api/notifications/telegram", s.handleTelegramNotificationsPost)
   r.Get("/api/notifications/backup/telegram", s.handleTelegramBackupGet)
   r.Post("/api/notifications/backup/telegram", s.handleTelegramBackupPost)
   r.Post("/api/notifications/backup/telegram/test", s.handleTelegramBackupTest)

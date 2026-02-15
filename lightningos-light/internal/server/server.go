@@ -65,6 +65,7 @@ func New(cfg *config.Config, logger *log.Logger) *Server {
 func (s *Server) Run() error {
   s.initNotifications()
   s.initReports()
+  s.startTelegramNotifications()
   s.initRebalance()
   s.initHTLCManager()
   s.initTorPeerChecker()
