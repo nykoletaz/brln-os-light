@@ -311,7 +311,11 @@ export default function Notifications() {
       }
       const trimmedToken = telegramToken.trim()
       const trimmedChatId = telegramChatId.trim()
-      const clearTelegram = trimmedToken === '' && trimmedChatId === ''
+      const existingChatId = String(telegramConfig?.chat_id || '').trim()
+      const hadTelegram = Boolean(telegramConfig?.bot_token_set && existingChatId)
+      const chatChanged = trimmedChatId !== '' && trimmedChatId !== existingChatId
+      const tokenProvided = trimmedToken !== ''
+      const clearTelegram = trimmedToken === '' && trimmedChatId === '' && hadTelegram
       const payload: {
         bot_token?: string
         chat_id?: string
@@ -327,10 +331,10 @@ export default function Notifications() {
         payload.bot_token = ''
         payload.chat_id = ''
       } else {
-        if (trimmedToken) {
+        if (tokenProvided) {
           payload.bot_token = trimmedToken
         }
-        if (trimmedChatId) {
+        if (chatChanged) {
           payload.chat_id = trimmedChatId
         }
       }
@@ -346,7 +350,8 @@ export default function Notifications() {
         setTelegramStatus(t('notifications.telegram.disabled'))
       } else {
         const nextEnabled = Boolean(data?.bot_token_set && data?.chat_id)
-        if (nextEnabled) {
+        const credentialsUpdated = clearTelegram || tokenProvided || chatChanged
+        if (nextEnabled && credentialsUpdated) {
           await triggerTelegramTest(t('notifications.telegram.savedSendingTest'), true)
         } else {
           setTelegramStatus(t('notifications.telegram.saved'))
@@ -474,21 +479,21 @@ export default function Notifications() {
                     <span className="block text-xs text-fog/60">{t('notifications.telegram.summaryHint')}</span>
                   </span>
                 </label>
-                <div className="flex flex-col items-end gap-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-fog/60">{t('notifications.telegram.summaryInterval')}</span>
-                    <input
-                      className="input-field w-[120px]"
-                      type="number"
-                      min={60}
-                      max={720}
-                      placeholder="120"
-                      value={telegramSummaryInterval}
-                      onChange={(e) => setTelegramSummaryInterval(e.target.value)}
-                      onKeyDown={handleTelegramKeyDown}
-                    />
+                <div className="flex items-start gap-2">
+                  <div className="text-right">
+                    <div className="text-xs text-fog/60">{t('notifications.telegram.summaryInterval')}</div>
+                    <div className="text-xs text-fog/50">{t('notifications.telegram.summaryIntervalHint')}</div>
                   </div>
-                  <p className="text-xs text-fog/50 text-right">{t('notifications.telegram.summaryIntervalHint')}</p>
+                  <input
+                    className="input-field w-[120px] mt-0.5"
+                    type="number"
+                    min={60}
+                    max={720}
+                    placeholder="120"
+                    value={telegramSummaryInterval}
+                    onChange={(e) => setTelegramSummaryInterval(e.target.value)}
+                    onKeyDown={handleTelegramKeyDown}
+                  />
                 </div>
               </div>
               <p className="text-xs text-fog/50">{t('notifications.telegram.commandsHint')}</p>
