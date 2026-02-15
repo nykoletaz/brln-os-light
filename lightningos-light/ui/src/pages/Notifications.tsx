@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getNotifications, getTelegramNotifications, testTelegramBackup, updateTelegramNotifications } from '../api'
 import { getLocale } from '../i18n'
@@ -266,6 +267,13 @@ export default function Notifications() {
 
   const telegramEnabled = Boolean(telegramConfig?.bot_token_set && telegramConfig?.chat_id)
 
+  const handleTelegramKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      handleSaveTelegram()
+    }
+  }
+
   const triggerTelegramTest = async (startingMessage?: string, force?: boolean) => {
     if (telegramTesting) return
     if (!force && !telegramEnabled) {
@@ -388,6 +396,7 @@ export default function Notifications() {
                     placeholder={telegramConfig?.bot_token_set ? t('notifications.telegram.tokenSaved') : '123456:ABC...'}
                     value={telegramToken}
                     onChange={(e) => setTelegramToken(e.target.value)}
+                    onKeyDown={handleTelegramKeyDown}
                   />
                   <p className="text-xs text-fog/50">{t('notifications.telegram.botTokenHint')}</p>
                 </div>
@@ -398,6 +407,7 @@ export default function Notifications() {
                     placeholder="123456789"
                     value={telegramChatId}
                     onChange={(e) => setTelegramChatId(e.target.value)}
+                    onKeyDown={handleTelegramKeyDown}
                   />
                   <p className="text-xs text-fog/50">{t('notifications.telegram.chatIdHint')}</p>
                 </div>
@@ -433,32 +443,32 @@ export default function Notifications() {
                   <span className="block text-xs text-fog/60">{t('notifications.telegram.scbBackupHint')}</span>
                 </span>
               </label>
-              <label className="flex items-start gap-3 text-sm text-fog">
-                <input
-                  type="checkbox"
-                  checked={telegramSummaryEnabled}
-                  onChange={(e) => setTelegramSummaryEnabled(e.target.checked)}
-                />
-                <span>
-                  <span className="font-semibold">{t('notifications.telegram.summaryLabel')}</span>
-                  <span className="block text-xs text-fog/60">{t('notifications.telegram.summaryHint')}</span>
-                </span>
-              </label>
-              <div className="grid gap-3 lg:grid-cols-[1fr_200px] lg:items-center">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <label className="flex items-start gap-3 text-sm text-fog">
+                  <input
+                    type="checkbox"
+                    checked={telegramSummaryEnabled}
+                    onChange={(e) => setTelegramSummaryEnabled(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-semibold">{t('notifications.telegram.summaryLabel')}</span>
+                    <span className="block text-xs text-fog/60">{t('notifications.telegram.summaryHint')}</span>
+                  </span>
+                </label>
                 <div className="space-y-1">
                   <label className="text-xs text-fog/60">{t('notifications.telegram.summaryInterval')}</label>
+                  <input
+                    className="input-field max-w-[200px]"
+                    type="number"
+                    min={60}
+                    max={720}
+                    placeholder="120"
+                    value={telegramSummaryInterval}
+                    onChange={(e) => setTelegramSummaryInterval(e.target.value)}
+                    onKeyDown={handleTelegramKeyDown}
+                  />
                   <p className="text-xs text-fog/50">{t('notifications.telegram.summaryIntervalHint')}</p>
                 </div>
-                <input
-                  className="input-field"
-                  type="number"
-                  min={60}
-                  max={720}
-                  placeholder="120"
-                  value={telegramSummaryInterval}
-                  onChange={(e) => setTelegramSummaryInterval(e.target.value)}
-                  disabled={!telegramSummaryEnabled}
-                />
               </div>
               <p className="text-xs text-fog/50">{t('notifications.telegram.commandsHint')}</p>
             </div>
