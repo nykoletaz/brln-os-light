@@ -86,7 +86,16 @@
       "slate": "Ardosia"
     },
     "systemLabel": "SISTEMA",
-    "toggleLanguage": "Alternar idioma"
+    "toggleLanguage": "Alternar idioma",
+    "appUpgradeAvailable": "Nova versão da app detectada",
+    "appUpgradeButton": "Atualizar",
+    "appUpgradeConfirm": "Atualizar a app de {{current}} para {{latest}} agora?",
+    "appUpgradeRunning": "Atualização da app em andamento",
+    "appUpgradeRunningShort": "Atualizando...",
+    "appUpgradeStarting": "Iniciando...",
+    "appUpgradeStarted": "Atualização iniciada. Veja os logs para progresso.",
+    "appUpgradeStartFailed": "Falha ao iniciar atualização da app.",
+    "appUpgradeVersions": "{{current}} -> {{latest}}"
   },
   "sidebar": {
     "closeMenu": "Fechar menu",
@@ -262,6 +271,7 @@
       "autofee": "Autofee",
       "lnd": "LND",
       "lndUpgrade": "Upgrade LND",
+      "appUpgrade": "Upgrade App",
       "manager": "Manager",
       "elements": "Elements",
       "peerswapd": "Peerswap",

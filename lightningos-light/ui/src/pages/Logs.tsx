@@ -6,6 +6,7 @@ const services = [
   { labelKey: 'logs.services.lnd', value: 'lnd' },
   { labelKey: 'logs.services.autofee', value: 'autofee' },
   { labelKey: 'logs.services.lndUpgrade', value: 'lnd-upgrade' },
+  { labelKey: 'logs.services.appUpgrade', value: 'app-upgrade' },
   { labelKey: 'logs.services.manager', value: 'lightningos-manager' },
   { labelKey: 'logs.services.elements', value: 'lightningos-elements' },
   { labelKey: 'logs.services.peerswapd', value: 'lightningos-peerswapd' },

@@ -86,7 +86,16 @@
       "slate": "Slate"
     },
     "systemLabel": "SYSTEM",
-    "toggleLanguage": "Toggle language"
+    "toggleLanguage": "Toggle language",
+    "appUpgradeAvailable": "New app version detected",
+    "appUpgradeButton": "Upgrade",
+    "appUpgradeConfirm": "Upgrade app from {{current}} to {{latest}} now?",
+    "appUpgradeRunning": "App upgrade in progress",
+    "appUpgradeRunningShort": "Upgrading...",
+    "appUpgradeStarting": "Starting...",
+    "appUpgradeStarted": "Upgrade started. Check logs for progress.",
+    "appUpgradeStartFailed": "Failed to start app upgrade.",
+    "appUpgradeVersions": "{{current}} -> {{latest}}"
   },
   "sidebar": {
     "closeMenu": "Close menu",
@@ -262,6 +271,7 @@
       "autofee": "Autofee",
       "lnd": "LND",
       "lndUpgrade": "LND upgrade",
+      "appUpgrade": "App upgrade",
       "manager": "Manager",
       "elements": "Elements",
       "peerswapd": "Peerswap",

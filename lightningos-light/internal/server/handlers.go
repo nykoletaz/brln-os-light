@@ -1209,6 +1209,8 @@ func mapService(name string) string {
     return pswebServiceName
   case "lnd-upgrade", "lightningos-lnd-upgrade":
     return lndUpgradeUnitName
+  case "app-upgrade", "lightningos-app-upgrade":
+    return appUpgradeUnitName
   case "postgresql":
     return "postgresql"
   default:

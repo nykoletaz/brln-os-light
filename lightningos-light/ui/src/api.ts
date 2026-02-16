@@ -65,6 +65,10 @@ export const getLndUpgradeStatus = (force?: boolean) =>
   request(`/api/lnd/upgrade/status${buildQuery({ force: force ? 1 : undefined })}`)
 export const startLndUpgrade = (payload: { target_version: string; download_url?: string }) =>
   request('/api/lnd/upgrade', { method: 'POST', body: JSON.stringify(payload) })
+export const getAppUpgradeStatus = (force?: boolean) =>
+  request(`/api/app/upgrade/status${buildQuery({ force: force ? 1 : undefined })}`)
+export const startAppUpgrade = (payload?: { target_version?: string }) =>
+  request('/api/app/upgrade/start', { method: 'POST', body: JSON.stringify(payload ?? {}) })
 export const getWizardStatus = () => request('/api/wizard/status')
 
 export const postBitcoinRemote = (payload: { rpcuser: string; rpcpass: string }) =>
