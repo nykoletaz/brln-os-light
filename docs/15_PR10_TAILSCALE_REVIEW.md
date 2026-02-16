@@ -93,16 +93,6 @@ Aceitar a PR somente quando:
 4. Fluxo de login estiver em endpoint `POST` e UI sem reexecucao automatica indevida.
 5. Testes minimos cobrirem os handlers novos.
 
-## Texto curto sugerido para responder na PR
 
-```txt
-Obrigado pela contribuicao. A feature esta boa, mas para evitar regressao no host e na rede precisamos de alguns ajustes antes do merge:
 
-1) Remover install via `curl | sh` (usar instalacao controlada/pinada).
-2) `GET /api/apps/tailscale/auth-url` nao pode executar `tailscale up` (GET sem side effects).
-3) Nao ignorar erros de `tailscale up` em Start/AuthURL handler.
-4) Ajustar UI para fluxo de login por acao explicita (POST), sem polling que repete acao.
-5) Adicionar cobertura minima de testes para os handlers novos.
 
-Com esses pontos corrigidos, revalidamos para merge.
-```
