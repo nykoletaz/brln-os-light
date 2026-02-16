@@ -11,6 +11,7 @@ func (s *Server) appRegistry() ([]appHandler, error) {
     newLndgApp(s),
     newElementsApp(s),
     newPeerswapApp(s),
+    newRobosatsApp(s),
   }
   if err := validateAppRegistry(apps); err != nil {
     return nil, err
