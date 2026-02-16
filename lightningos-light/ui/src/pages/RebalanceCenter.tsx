@@ -51,6 +51,9 @@ type RebalanceOverview = {
   last_scan_at?: string
   last_scan_status?: string
   last_scan_detail?: string
+  last_scan_candidates?: number
+  last_scan_remaining_budget_sat?: number
+  last_scan_reasons?: Record<string, number>
   last_scan_top_score_sat?: number
   last_scan_profit_skipped?: number
   last_scan_queued?: number
@@ -607,6 +610,58 @@ export default function RebalanceCenter() {
         return reason
     }
   }
+  const formatScanReason = (reason: string) => {
+    switch (reason) {
+      case 'channel_busy':
+        return t('rebalanceCenter.overview.scanReasonBusy')
+      case 'target_already_balanced':
+        return t('rebalanceCenter.overview.scanReasonBalanced')
+      case 'recently_attempted':
+        return t('rebalanceCenter.overview.scanReasonRecent')
+      case 'fee_cap_zero':
+        return t('rebalanceCenter.overview.scanReasonFeeCap')
+      case 'budget_below_min':
+        return t('rebalanceCenter.overview.scanReasonBudgetMin')
+      case 'budget_too_low':
+        return t('rebalanceCenter.overview.scanReasonBudgetLow')
+      case 'target_not_found':
+        return t('rebalanceCenter.overview.scanReasonTargetNotFound')
+      case 'start_error':
+        return t('rebalanceCenter.overview.scanReasonStartError')
+      default:
+        return reason
+    }
+  }
+  const scanDetailText = useMemo(() => {
+    if (!overview) return ''
+    const reasons = overview.last_scan_reasons ?? {}
+    const entries = Object.entries(reasons).filter(([, count]) => count > 0)
+    if (entries.length > 0) {
+      const ordered = ['channel_busy', 'target_already_balanced', 'recently_attempted', 'fee_cap_zero', 'budget_below_min', 'budget_too_low', 'target_not_found', 'start_error']
+      entries.sort((a, b) => {
+        const ai = ordered.indexOf(a[0])
+        const bi = ordered.indexOf(b[0])
+        const ap = ai === -1 ? Number.MAX_SAFE_INTEGER : ai
+        const bp = bi === -1 ? Number.MAX_SAFE_INTEGER : bi
+        if (ap !== bp) return ap - bp
+        return a[0].localeCompare(b[0])
+      })
+      const reasonsText = entries.map(([key, count]) => `${formatScanReason(key)}: ${count}`).join(', ')
+      const parts = [t('rebalanceCenter.overview.scanDetailNoJobs')]
+      if ((overview.last_scan_candidates ?? 0) > 0) {
+        parts.push(t('rebalanceCenter.overview.scanDetailCandidates', { count: overview.last_scan_candidates }))
+      }
+      if ((overview.last_scan_remaining_budget_sat ?? 0) > 0) {
+        parts.push(t('rebalanceCenter.overview.scanDetailRemaining', { value: formatSats(overview.last_scan_remaining_budget_sat ?? 0) }))
+      }
+      parts.push(t('rebalanceCenter.overview.scanDetailReasons', { value: reasonsText }))
+      return parts.join(' ')
+    }
+    if (overview.last_scan_detail) {
+      return t('rebalanceCenter.overview.scanDetail', { value: overview.last_scan_detail })
+    }
+    return ''
+  }, [overview, t])
 
   const togglePaybackFlag = (flag: number) => {
     if (!config) return
@@ -650,9 +705,9 @@ export default function RebalanceCenter() {
                   {t(`rebalanceCenter.overview.scanStatus.${overview.last_scan_status}`)}
                 </p>
               )}
-              {overview.auto_enabled && overview.last_scan_detail && (
+              {overview.auto_enabled && scanDetailText && (
                 <div className="flex flex-wrap items-center gap-2 text-xs text-amber-200">
-                  <span>{t('rebalanceCenter.overview.scanDetail', { value: overview.last_scan_detail })}</span>
+                  <span>{scanDetailText}</span>
                   {diagnosticSkipTotal > 0 && (
                     <button
                       type="button"

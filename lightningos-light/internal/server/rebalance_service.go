@@ -89,6 +89,9 @@ type RebalanceOverview struct {
   LastScanAt string `json:"last_scan_at,omitempty"`
   LastScanStatus string `json:"last_scan_status,omitempty"`
   LastScanDetail string `json:"last_scan_detail,omitempty"`
+  LastScanCandidates int `json:"last_scan_candidates"`
+  LastScanRemainingBudgetSat int64 `json:"last_scan_remaining_budget_sat"`
+  LastScanReasons map[string]int `json:"last_scan_reasons,omitempty"`
   LastScanTopScoreSat int64 `json:"last_scan_top_score_sat"`
   LastScanProfitSkipped int `json:"last_scan_profit_skipped"`
   LastScanQueued int `json:"last_scan_queued"`
@@ -250,6 +253,9 @@ type RebalanceService struct {
   lastScan time.Time
   lastScanStatus string
   lastScanDetail string
+  lastScanCandidates int
+  lastScanRemainingBudgetSat int64
+  lastScanReasons map[string]int
   lastScanTopScoreSat int64
   lastScanProfitSkipped int
   lastScanQueued int
@@ -609,6 +615,9 @@ func (s *RebalanceService) runAutoScan() {
   scanAt := time.Now()
   scanStatus := "scanned"
   scanDetail := ""
+  scanCandidates := 0
+  scanRemainingBudget := int64(0)
+  scanReasons := map[string]int{}
   profitSkipped := 0
   topScore := int64(0)
   queuedCount := 0
@@ -618,6 +627,13 @@ func (s *RebalanceService) runAutoScan() {
     s.lastScan = scanAt
     s.lastScanStatus = scanStatus
     s.lastScanDetail = scanDetail
+    s.lastScanCandidates = scanCandidates
+    s.lastScanRemainingBudgetSat = scanRemainingBudget
+    reasonsCopy := map[string]int{}
+    for key, value := range scanReasons {
+      reasonsCopy[key] = value
+    }
+    s.lastScanReasons = reasonsCopy
     s.lastScanTopScoreSat = topScore
     s.lastScanProfitSkipped = profitSkipped
     s.lastScanQueued = queuedCount
@@ -729,6 +745,9 @@ func (s *RebalanceService) runAutoScan() {
     s.mu.Lock()
     s.criticalMissCount++
     s.mu.Unlock()
+    scanCandidates = 0
+    scanRemainingBudget = 0
+    scanReasons = map[string]int{}
     if profitSkipped > 0 {
       scanStatus = "profit_guardrail"
       if s.logger != nil {
@@ -799,6 +818,9 @@ func (s *RebalanceService) runAutoScan() {
     remaining = 0
   }
   if remaining == 0 {
+    scanCandidates = len(candidates)
+    scanRemainingBudget = 0
+    scanReasons = map[string]int{"budget_too_low": len(candidates)}
     scanStatus = "budget_exhausted"
     return
   }
@@ -891,6 +913,9 @@ func (s *RebalanceService) runAutoScan() {
 
   if queuedCount > 0 {
     scanStatus = "queued"
+    scanCandidates = len(candidates)
+    scanRemainingBudget = remaining
+    scanReasons = map[string]int{}
   } else if remaining > 0 {
     budgetBlocked := skipReasons["budget_too_low"] + skipReasons["budget_below_min"]
     if budgetBlocked == len(candidates) {
@@ -898,7 +923,14 @@ func (s *RebalanceService) runAutoScan() {
     } else {
       scanStatus = "no_queue"
     }
-    scanDetail = buildScanDetail(skipReasons, remaining)
+    scanCandidates = len(candidates)
+    scanRemainingBudget = remaining
+    reasonsCopy := map[string]int{}
+    for key, value := range skipReasons {
+      reasonsCopy[key] = value
+    }
+    scanReasons = reasonsCopy
+    scanDetail = buildScanDetail(skipReasons, remaining, len(candidates))
   }
 
   if s.logger != nil {
@@ -2992,7 +3024,7 @@ func estimateTargetGain(amountSat int64, revenue7dSat int64, localBalanceSat int
   return int64(math.Round(gain))
 }
 
-func buildScanDetail(reasons map[string]int, remaining int64) string {
+func buildScanDetail(reasons map[string]int, remaining int64, candidates int) string {
   if len(reasons) == 0 {
     return ""
   }
@@ -3019,10 +3051,14 @@ func buildScanDetail(reasons map[string]int, remaining int64) string {
   if len(parts) == 0 {
     return ""
   }
-  if remaining > 0 {
-    return fmt.Sprintf("No jobs queued. Remaining budget %d sats. Reasons: %s.", remaining, strings.Join(parts, ", "))
+  base := "No jobs queued."
+  if candidates > 0 {
+    base = fmt.Sprintf("No jobs queued. Candidates after guardrails: %d.", candidates)
   }
-  return fmt.Sprintf("No jobs queued. Reasons: %s.", strings.Join(parts, ", "))
+  if remaining > 0 {
+    return fmt.Sprintf("%s Remaining budget %d sats. Reasons: %s.", base, remaining, strings.Join(parts, ", "))
+  }
+  return fmt.Sprintf("%s Reasons: %s.", base, strings.Join(parts, ", "))
 }
 
 func estimateTargetROI(expectedGainSat int64, estimatedCostSat int64, amountSat int64, outgoingFeePpm int64, peerFeeRatePpm int64) (float64, bool) {
@@ -4046,6 +4082,12 @@ from rebalance_channel_ledger
   lastScan := s.lastScan
   lastScanStatus := s.lastScanStatus
   lastScanDetail := s.lastScanDetail
+  lastScanCandidates := s.lastScanCandidates
+  lastScanRemainingBudgetSat := s.lastScanRemainingBudgetSat
+  lastScanReasons := map[string]int{}
+  for key, value := range s.lastScanReasons {
+    lastScanReasons[key] = value
+  }
   lastScanTopScore := s.lastScanTopScoreSat
   lastScanProfitSkipped := s.lastScanProfitSkipped
   lastScanQueued := s.lastScanQueued
@@ -4066,6 +4108,9 @@ from rebalance_channel_ledger
     PaybackProgress: paybackProgress,
     LastScanStatus: lastScanStatus,
     LastScanDetail: lastScanDetail,
+    LastScanCandidates: lastScanCandidates,
+    LastScanRemainingBudgetSat: lastScanRemainingBudgetSat,
+    LastScanReasons: lastScanReasons,
     LastScanTopScoreSat: lastScanTopScore,
     LastScanProfitSkipped: lastScanProfitSkipped,
     LastScanQueued: lastScanQueued,

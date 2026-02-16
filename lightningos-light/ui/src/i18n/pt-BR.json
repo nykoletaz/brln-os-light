@@ -1169,8 +1169,20 @@
         "budget_exhausted": "Orçamento esgotado",
         "budget_insufficient": "Orçamento insuficiente"
       },
-        "scanDetail": "Diagnóstico: {{value}}",
-        "budgetPaused": {
+      "scanDetail": "Diagnóstico: {{value}}",
+      "scanDetailNoJobs": "Diagnóstico: nenhum rebalance enfileirado.",
+      "scanDetailCandidates": "Candidatos após guardrails: {{count}}.",
+      "scanDetailRemaining": "Orçamento restante {{value}}.",
+      "scanDetailReasons": "Motivos: {{value}}.",
+      "scanReasonBusy": "canal ocupado",
+      "scanReasonBalanced": "target já balanceado",
+      "scanReasonRecent": "tentado recentemente",
+      "scanReasonFeeCap": "fee cap zerado",
+      "scanReasonBudgetMin": "orçamento abaixo do mínimo",
+      "scanReasonBudgetLow": "orçamento muito baixo",
+      "scanReasonTargetNotFound": "target não encontrado",
+      "scanReasonStartError": "erro ao iniciar",
+      "budgetPaused": {
           "budget_exhausted": "Auto pausado: orçamento diário esgotado.",
           "budget_insufficient": "Auto pausado: orçamento baixo para o alvo."
         },
