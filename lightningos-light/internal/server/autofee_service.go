@@ -2441,7 +2441,7 @@ func formatAutofeeDecisionLine(d *decision, dryRun bool, isError bool) (string, 
     d.RevShare,
     tagLine,
   )
-  if dryRun && d.HTLCAttempts > 0 {
+  if d.HTLCAttempts > 0 {
     line = line + fmt.Sprintf(" | htlc%dm a=%d p=%d l=%d",
       maxInt(1, d.HTLCWindowMin), d.HTLCAttempts, d.HTLCPolicyFails, d.HTLCLiquidityFails)
   }
