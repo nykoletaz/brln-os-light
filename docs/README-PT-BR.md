@@ -3,10 +3,10 @@
 <img width="1920" height="1080" alt="logo" src="https://github.com/user-attachments/assets/504ec23e-31f8-407a-a848-3fa4ce3ec1f9" />
 
 O LightningOS Light é um instalador completo do Daemon de Nó Lightning, um gerenciador de nó Lightning com um assistente guiado, painel de controle (dashboard) e carteira. O gerenciador fornece a interface de usuário (UI) e a API via HTTPS em `0.0.0.0:8443` por padrão para acesso em rede local (LAN) (defina `server.host: "127.0.0.1"` para acesso apenas local) e integra-se com systemd, Postgres, smartctl, Tor/i2pd e LND gRPC.
-<img width="1494" height="1045" alt="image" src="[https://github.com/user-attachments/assets/8fb801c0-4946-48d8-8c24-c36a53d193b3](https://github.com/user-attachments/assets/8fb801c0-4946-48d8-8c24-c36a53d193b3)" />
-<img width="1491" height="903" alt="image" src="[https://github.com/user-attachments/assets/cfda34d5-bccc-4b18-9970-bad494ae77b3](https://github.com/user-attachments/assets/cfda34d5-bccc-4b18-9970-bad494ae77b3)" />
-<img width="1576" height="1337" alt="image" src="[https://github.com/user-attachments/assets/019cfff2-f354-4c2b-a595-2a15bb228864](https://github.com/user-attachments/assets/019cfff2-f354-4c2b-a595-2a15bb228864)" />
-<img width="1280" height="660" alt="image" src="[https://github.com/user-attachments/assets/84489b07-8397-4195-b0d4-7e332618666d](https://github.com/user-attachments/assets/84489b07-8397-4195-b0d4-7e332618666d)" />
+<img width="1494" height="1045" alt="image" src="https://github.com/user-attachments/assets/8fb801c0-4946-48d8-8c24-c36a53d193b3" />
+<img width="1491" height="903" alt="image" src="https://github.com/user-attachments/assets/cfda34d5-bccc-4b18-9970-bad494ae77b3" />
+<img width="1576" height="1337" alt="image" src="https://github.com/user-attachments/assets/019cfff2-f354-4c2b-a595-2a15bb228864" />
+<img width="1280" height="660" alt="image" src="https://github.com/user-attachments/assets/84489b07-8397-4195-b0d4-7e332618666d" />
 
 ## Destaques
 
