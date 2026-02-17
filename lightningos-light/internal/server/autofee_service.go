@@ -160,8 +160,12 @@ type autofeeLogItem struct {
   SuperSource int `json:"super_source,omitempty"`
   HTLCLiqHot int `json:"htlc_liq_hot,omitempty"`
   HTLCPolicyHot int `json:"htlc_policy_hot,omitempty"`
+  HTLCForwardHot int `json:"htlc_forward_hot,omitempty"`
   HTLCSampleLow int `json:"htlc_sample_low,omitempty"`
   HTLCAttemptsTotal int `json:"htlc_attempts_total,omitempty"`
+  HTLCLinkFailsTotal int `json:"htlc_link_fails_total,omitempty"`
+  HTLCForwardFailsTotal int `json:"htlc_forward_fails_total,omitempty"`
+  HTLCOtherFailsTotal int `json:"htlc_other_fails_total,omitempty"`
   HTLCClassifiedTotal int `json:"htlc_classified_total,omitempty"`
   HTLCUnclassifiedTotal int `json:"htlc_unclassified_total,omitempty"`
   HTLCTopReasons []string `json:"htlc_top_reasons,omitempty"`
@@ -169,8 +173,10 @@ type autofeeLogItem struct {
   HTLCMinAttempts int `json:"htlc_min_attempts,omitempty"`
   HTLCMinPolicyFails int `json:"htlc_min_policy_fails,omitempty"`
   HTLCMinLiquidityFails int `json:"htlc_min_liquidity_fails,omitempty"`
+  HTLCMinForwardFails int `json:"htlc_min_forward_fails,omitempty"`
   HTLCPolicyFailRateMin float64 `json:"htlc_policy_fail_rate_min,omitempty"`
   HTLCLiquidityFailRateMin float64 `json:"htlc_liquidity_fail_rate_min,omitempty"`
+  HTLCForwardFailRateMin float64 `json:"htlc_forward_fail_rate_min,omitempty"`
   HTLCGlobalCountFactor float64 `json:"htlc_global_count_factor,omitempty"`
   HTLCGlobalRateFactor float64 `json:"htlc_global_rate_factor,omitempty"`
   HTLCNodeFactor float64 `json:"htlc_node_factor,omitempty"`
@@ -210,6 +216,7 @@ type autofeeLogItem struct {
   HTLCAttempts int `json:"htlc_attempts,omitempty"`
   HTLCPolicyFails int `json:"htlc_policy_fails,omitempty"`
   HTLCLiquidityFails int `json:"htlc_liquidity_fails,omitempty"`
+  HTLCForwardFails int `json:"htlc_forward_fails,omitempty"`
   HTLCUnclassifiedFails int `json:"htlc_unclassified_fails,omitempty"`
   HTLCWindowMinChannel int `json:"htlc_window_min_channel,omitempty"`
 }
@@ -525,6 +532,10 @@ const (
   htlcGlobalMinFailsFloor = 2
   htlcGlobalPolicyRateFloor = 0.08
   htlcGlobalLiquidityRateFloor = 0.10
+  htlcForwardSoftCountFactor = 0.60
+  htlcForwardSoftRateFactor = 0.60
+  htlcForwardSoftRateFloor = 0.10
+  htlcForwardSoftMinFailsFloor = 2
 )
 
 var superSourceThresholdsByProfile = map[string]superSourceThresholds{
@@ -1326,8 +1337,10 @@ type autofeeCalibration struct {
   HTLCMinAttempts int
   HTLCMinPolicyFails int
   HTLCMinLiquidityFails int
+  HTLCMinForwardFails int
   HTLCPolicyRateMin float64
   HTLCLiquidityRateMin float64
+  HTLCForwardRateMin float64
   HTLCGlobalCountFactor float64
   HTLCGlobalRateFactor float64
   HTLCWindowMin int
@@ -1358,8 +1371,12 @@ type autofeeRunSummary struct {
   inboundDiscount int
   htlcLiqHot int
   htlcPolicyHot int
+  htlcForwardHot int
   htlcSampleLow int
   htlcAttemptsTotal int
+  htlcLinkFailsTotal int
+  htlcForwardFailsTotal int
+  htlcOtherFailsTotal int
   htlcClassifiedTotal int
   htlcUnclassifiedTotal int
   htlcTopReasons []string
@@ -1367,8 +1384,10 @@ type autofeeRunSummary struct {
   htlcMinAttempts int
   htlcMinPolicyFails int
   htlcMinLiquidityFails int
+  htlcMinForwardFails int
   htlcPolicyRateMin float64
   htlcLiquidityRateMin float64
+  htlcForwardRateMin float64
   htlcGlobalCountFactor float64
   htlcGlobalRateFactor float64
   htlcNodeFactor float64
@@ -1403,6 +1422,8 @@ func (s *autofeeRunSummary) addTags(tags []string) {
       s.htlcLiqHot++
     case "htlc-policy-hot":
       s.htlcPolicyHot++
+    case "htlc-forward-hot":
+      s.htlcForwardHot++
     case "htlc-sample-low":
       s.htlcSampleLow++
     }
@@ -1619,12 +1640,17 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   summary.htlcMinAttempts = htlcMeta.MinAttempts
   summary.htlcMinPolicyFails = htlcMeta.MinPolicyFails
   summary.htlcMinLiquidityFails = htlcMeta.MinLiquidityFails
+  summary.htlcMinForwardFails = htlcMeta.MinForwardFails
   summary.htlcAttemptsTotal = htlcMeta.AttemptsTotal
+  summary.htlcLinkFailsTotal = htlcMeta.LinkFailsTotal
+  summary.htlcForwardFailsTotal = htlcMeta.ForwardFailsTotal
+  summary.htlcOtherFailsTotal = htlcMeta.OtherFailsTotal
   summary.htlcClassifiedTotal = htlcMeta.ClassifiedTotal
   summary.htlcUnclassifiedTotal = htlcMeta.UnclassifiedTotal
   summary.htlcTopReasons = append([]string{}, htlcMeta.TopReasons...)
   summary.htlcPolicyRateMin = htlcMeta.PolicyRateMin
   summary.htlcLiquidityRateMin = htlcMeta.LiquidityRateMin
+  summary.htlcForwardRateMin = htlcMeta.ForwardRateMin
   summary.htlcGlobalCountFactor = htlcMeta.GlobalCountFactor
   summary.htlcGlobalRateFactor = htlcMeta.GlobalRateFactor
   summary.htlcNodeFactor = htlcMeta.NodeFactor
@@ -1715,14 +1741,16 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   }
 
   summaryText := fmt.Sprintf(
-    "📊 up %d | down %d | flat %d | cooldown %d | small %d | same %d | disabled %d | inactive %d | inb_disc %d | super_source %d | htlc_liq_hot %d | htlc_policy_hot %d | htlc_low_sample %d | htlc_window %dm | htlc_min a>=%d p>=%d l>=%d | htlc_rate p>=%.1f%% l>=%.1f%% | htlc_global c×%.2f r×%.2f | htlc_classified %d/%d | htlc_unclassified %d",
+    "📊 up %d | down %d | flat %d | cooldown %d | small %d | same %d | disabled %d | inactive %d | inb_disc %d | super_source %d | htlc_liq_hot %d | htlc_policy_hot %d | htlc_forward_hot %d | htlc_low_sample %d | htlc_window %dm | htlc_min a>=%d p>=%d l>=%d f>=%d | htlc_rate p>=%.1f%% l>=%.1f%% f>=%.1f%% | htlc_global c×%.2f r×%.2f | htlc_events link=%d forward=%d other=%d | htlc_classified %d/%d | htlc_unclassified %d",
     summary.changedUp, summary.changedDown, summary.kept,
     summary.skippedCooldown, summary.skippedSmall, summary.skippedSame,
     summary.disabled, summary.inactive, summary.inboundDiscount, summary.superSource,
-    summary.htlcLiqHot, summary.htlcPolicyHot, summary.htlcSampleLow, summary.htlcWindowMin,
-    summary.htlcMinAttempts, summary.htlcMinPolicyFails, summary.htlcMinLiquidityFails,
+    summary.htlcLiqHot, summary.htlcPolicyHot, summary.htlcForwardHot, summary.htlcSampleLow, summary.htlcWindowMin,
+    summary.htlcMinAttempts, summary.htlcMinPolicyFails, summary.htlcMinLiquidityFails, summary.htlcMinForwardFails,
     summary.htlcPolicyRateMin*100, summary.htlcLiquidityRateMin*100,
+    summary.htlcForwardRateMin*100,
     summary.htlcGlobalCountFactor, summary.htlcGlobalRateFactor,
+    summary.htlcLinkFailsTotal, summary.htlcForwardFailsTotal, summary.htlcOtherFailsTotal,
     summary.htlcClassifiedTotal, summary.htlcAttemptsTotal, summary.htlcUnclassifiedTotal,
   )
   seedText := fmt.Sprintf(
@@ -1750,8 +1778,12 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       SuperSource: summary.superSource,
       HTLCLiqHot: summary.htlcLiqHot,
       HTLCPolicyHot: summary.htlcPolicyHot,
+      HTLCForwardHot: summary.htlcForwardHot,
       HTLCSampleLow: summary.htlcSampleLow,
       HTLCAttemptsTotal: summary.htlcAttemptsTotal,
+      HTLCLinkFailsTotal: summary.htlcLinkFailsTotal,
+      HTLCForwardFailsTotal: summary.htlcForwardFailsTotal,
+      HTLCOtherFailsTotal: summary.htlcOtherFailsTotal,
       HTLCClassifiedTotal: summary.htlcClassifiedTotal,
       HTLCUnclassifiedTotal: summary.htlcUnclassifiedTotal,
       HTLCTopReasons: append([]string{}, summary.htlcTopReasons...),
@@ -1759,8 +1791,10 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       HTLCMinAttempts: summary.htlcMinAttempts,
       HTLCMinPolicyFails: summary.htlcMinPolicyFails,
       HTLCMinLiquidityFails: summary.htlcMinLiquidityFails,
+      HTLCMinForwardFails: summary.htlcMinForwardFails,
       HTLCPolicyFailRateMin: summary.htlcPolicyRateMin,
       HTLCLiquidityFailRateMin: summary.htlcLiquidityRateMin,
+      HTLCForwardFailRateMin: summary.htlcForwardRateMin,
       HTLCGlobalCountFactor: summary.htlcGlobalCountFactor,
       HTLCGlobalRateFactor: summary.htlcGlobalRateFactor,
       HTLCNodeFactor: summary.htlcNodeFactor,
@@ -1779,11 +1813,12 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       CooldownIgnored: e.ignoreCooldown,
     }},
   }
-  calibLine := fmt.Sprintf("⚙️ calib node=%s channels=%d cap=%d avg=%d local=%d (%.0f%%) revfloor_thr=%d revfloor_min=%d liq=%s | htlc_k node=%.2f liq=%.2f total=%.2f | htlc_rate p>=%.1f%% l>=%.1f%% | htlc_global c×%.2f r×%.2f",
+  calibLine := fmt.Sprintf("⚙️ calib node=%s channels=%d cap=%d avg=%d local=%d (%.0f%%) revfloor_thr=%d revfloor_min=%d liq=%s | htlc_k node=%.2f liq=%.2f total=%.2f | htlc_rate p>=%.1f%% l>=%.1f%% f>=%.1f%% | htlc_global c×%.2f r×%.2f",
     e.calib.NodeClass, e.calib.ChannelCount, e.calib.TotalCapacitySat, e.calib.AvgCapacitySat,
     e.calib.LocalCapacitySat, e.calib.LocalRatio*100, e.calib.RevfloorBaseline, e.calib.RevfloorMinAbs, e.calib.LiquidityClass,
     e.calib.HTLCNodeFactor, e.calib.HTLCLiquidityFactor, e.calib.HTLCThresholdFactor,
     e.calib.HTLCPolicyRateMin*100, e.calib.HTLCLiquidityRateMin*100,
+    e.calib.HTLCForwardRateMin*100,
     e.calib.HTLCGlobalCountFactor, e.calib.HTLCGlobalRateFactor,
   )
   entries = append(entries, autofeeLogEntry{
@@ -1803,8 +1838,10 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       HTLCMinAttempts: e.calib.HTLCMinAttempts,
       HTLCMinPolicyFails: e.calib.HTLCMinPolicyFails,
       HTLCMinLiquidityFails: e.calib.HTLCMinLiquidityFails,
+      HTLCMinForwardFails: e.calib.HTLCMinForwardFails,
       HTLCPolicyFailRateMin: e.calib.HTLCPolicyRateMin,
       HTLCLiquidityFailRateMin: e.calib.HTLCLiquidityRateMin,
+      HTLCForwardFailRateMin: e.calib.HTLCForwardRateMin,
       HTLCGlobalCountFactor: e.calib.HTLCGlobalCountFactor,
       HTLCGlobalRateFactor: e.calib.HTLCGlobalRateFactor,
       HTLCNodeFactor: e.calib.HTLCNodeFactor,
@@ -1812,13 +1849,24 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       HTLCThresholdFactor: e.calib.HTLCThresholdFactor,
     },
   })
-  if len(summary.htlcTopReasons) > 0 {
+  if summary.htlcAttemptsTotal > 0 {
+    diagParts := []string{
+      fmt.Sprintf("htlc_classified %d/%d", summary.htlcClassifiedTotal, summary.htlcAttemptsTotal),
+      fmt.Sprintf("htlc_forward %d", summary.htlcForwardFailsTotal),
+      fmt.Sprintf("htlc_unclassified %d", summary.htlcUnclassifiedTotal),
+    }
+    if len(summary.htlcTopReasons) > 0 {
+      diagParts = append(diagParts, "htlc_unclassified_top "+strings.Join(summary.htlcTopReasons, " | "))
+    }
     entries = append(entries, autofeeLogEntry{
-      Line: "🧪 htlc_unclassified_top " + strings.Join(summary.htlcTopReasons, " | "),
+      Line: "🧪 " + strings.Join(diagParts, " | "),
       Payload: &autofeeLogItem{
         Kind: "htlc_diag",
         Category: "htlc_diag",
         HTLCTopReasons: append([]string{}, summary.htlcTopReasons...),
+        HTLCForwardFailsTotal: summary.htlcForwardFailsTotal,
+        HTLCLinkFailsTotal: summary.htlcLinkFailsTotal,
+        HTLCOtherFailsTotal: summary.htlcOtherFailsTotal,
         HTLCUnclassifiedTotal: summary.htlcUnclassifiedTotal,
         HTLCClassifiedTotal: summary.htlcClassifiedTotal,
         HTLCAttemptsTotal: summary.htlcAttemptsTotal,
@@ -1879,15 +1927,19 @@ type rebalStats struct {
 
 type htlcFailureSignal struct {
   Attempts60m int
+  LinkFails60m int
+  ForwardFails60m int
   PolicyFails60m int
   LiquidityFails60m int
   UnclassifiedFails60m int
+  ForwardFailRate60m float64
   PolicyFailRate60m float64
   LiquidityFailRate60m float64
   WindowMin int
   SampleLow bool
   PolicyHot bool
   LiquidityHot bool
+  ForwardHot bool
 }
 
 type htlcSignalMeta struct {
@@ -1895,12 +1947,17 @@ type htlcSignalMeta struct {
   MinAttempts int
   MinPolicyFails int
   MinLiquidityFails int
+  MinForwardFails int
   AttemptsTotal int
+  LinkFailsTotal int
+  ForwardFailsTotal int
+  OtherFailsTotal int
   ClassifiedTotal int
   UnclassifiedTotal int
   TopReasons []string
   PolicyRateMin float64
   LiquidityRateMin float64
+  ForwardRateMin float64
   GlobalCountFactor float64
   GlobalRateFactor float64
   NodeFactor float64
@@ -1922,15 +1979,27 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
   minAttempts = applyHTLCGlobalCountFactor(minAttempts, htlcGlobalMinCountFactor, htlcGlobalMinAttemptsFloor)
   minPolicyFails = applyHTLCGlobalCountFactor(minPolicyFails, htlcGlobalMinCountFactor, htlcGlobalMinFailsFloor)
   minLiquidityFails = applyHTLCGlobalCountFactor(minLiquidityFails, htlcGlobalMinCountFactor, htlcGlobalMinFailsFloor)
+  minForwardFails := applyHTLCGlobalCountFactor(
+    int(math.Round(float64(maxInt(1, minLiquidityFails))*htlcForwardSoftCountFactor)),
+    htlcGlobalMinCountFactor,
+    htlcForwardSoftMinFailsFloor,
+  )
   policyRateThreshold := applyHTLCGlobalRateFactor(e.profile.HTLCPolicyFailRate, htlcGlobalRateFactor, htlcGlobalPolicyRateFloor)
   liquidityRateThreshold := applyHTLCGlobalRateFactor(e.profile.HTLCLiquidityFailRate, htlcGlobalRateFactor, htlcGlobalLiquidityRateFloor)
+  forwardRateThreshold := applyHTLCGlobalRateFactor(
+    e.profile.HTLCLiquidityFailRate*htlcForwardSoftRateFactor,
+    htlcGlobalRateFactor,
+    htlcForwardSoftRateFloor,
+  )
   meta := htlcSignalMeta{
     WindowMin: windowMin,
     MinAttempts: minAttempts,
     MinPolicyFails: minPolicyFails,
     MinLiquidityFails: minLiquidityFails,
+    MinForwardFails: minForwardFails,
     PolicyRateMin: policyRateThreshold,
     LiquidityRateMin: liquidityRateThreshold,
+    ForwardRateMin: forwardRateThreshold,
     GlobalCountFactor: htlcGlobalMinCountFactor,
     GlobalRateFactor: htlcGlobalRateFactor,
     NodeFactor: nodeFactor,
@@ -1941,8 +2010,10 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
   e.calib.HTLCMinAttempts = meta.MinAttempts
   e.calib.HTLCMinPolicyFails = meta.MinPolicyFails
   e.calib.HTLCMinLiquidityFails = meta.MinLiquidityFails
+  e.calib.HTLCMinForwardFails = meta.MinForwardFails
   e.calib.HTLCPolicyRateMin = meta.PolicyRateMin
   e.calib.HTLCLiquidityRateMin = meta.LiquidityRateMin
+  e.calib.HTLCForwardRateMin = meta.ForwardRateMin
   e.calib.HTLCGlobalCountFactor = meta.GlobalCountFactor
   e.calib.HTLCGlobalRateFactor = meta.GlobalRateFactor
   e.calib.HTLCNodeFactor = meta.NodeFactor
@@ -1961,11 +2032,16 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
   }
 
   attempts := map[uint64]int{}
+  linkFails := map[uint64]int{}
+  forwardFails := map[uint64]int{}
   policyFails := map[uint64]int{}
   liquidityFails := map[uint64]int{}
   unclassifiedFails := map[uint64]int{}
   unclassifiedReasons := map[string]int{}
   attemptsTotal := 0
+  linkFailsTotal := 0
+  forwardFailsTotal := 0
+  otherFailsTotal := 0
   classifiedTotal := 0
   unclassifiedTotal := 0
   cutoff := e.now.Add(-window)
@@ -1984,16 +2060,30 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
     }
     attempts[chanID]++
     attemptsTotal++
-    policy, liquidity := classifyHTLCFailure(entry)
-    if policy {
-      policyFails[chanID]++
-    }
-    if liquidity {
-      liquidityFails[chanID]++
-    }
-    if policy || liquidity {
-      classifiedTotal++
-    } else {
+    switch normalizeHTLCFailureEvent(entry) {
+    case "forward_fail":
+      forwardFails[chanID]++
+      forwardFailsTotal++
+    case "link_fail":
+      linkFails[chanID]++
+      linkFailsTotal++
+      policy, liquidity := classifyHTLCFailure(entry)
+      if policy {
+        policyFails[chanID]++
+      }
+      if liquidity {
+        liquidityFails[chanID]++
+      }
+      if policy || liquidity {
+        classifiedTotal++
+      } else {
+        unclassifiedFails[chanID]++
+        unclassifiedTotal++
+        reasonKey := htlcFailureReasonKey(entry)
+        unclassifiedReasons[reasonKey]++
+      }
+    default:
+      otherFailsTotal++
       unclassifiedFails[chanID]++
       unclassifiedTotal++
       reasonKey := htlcFailureReasonKey(entry)
@@ -2001,6 +2091,9 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
     }
   }
   meta.AttemptsTotal = attemptsTotal
+  meta.LinkFailsTotal = linkFailsTotal
+  meta.ForwardFailsTotal = forwardFailsTotal
+  meta.OtherFailsTotal = otherFailsTotal
   meta.ClassifiedTotal = classifiedTotal
   meta.UnclassifiedTotal = unclassifiedTotal
   meta.TopReasons = summarizeTopReasonCounts(unclassifiedReasons, 3)
@@ -2013,11 +2106,14 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
     if total == 0 {
       continue
     }
+    lnkFails := linkFails[ch.ChannelID]
+    fwdFails := forwardFails[ch.ChannelID]
     polFails := policyFails[ch.ChannelID]
     liqFails := liquidityFails[ch.ChannelID]
     uncFails := unclassifiedFails[ch.ChannelID]
     polRate := float64(polFails) / float64(total)
     liqRate := float64(liqFails) / float64(total)
+    fwdRate := float64(fwdFails) / float64(total)
     sampleLow := total < minAttempts
     policyHot := !sampleLow &&
       polFails >= minPolicyFails &&
@@ -2025,17 +2121,24 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
     liquidityHot := !sampleLow &&
       liqFails >= minLiquidityFails &&
       liqRate >= liquidityRateThreshold
+    forwardHot := !sampleLow &&
+      fwdFails >= minForwardFails &&
+      fwdRate >= forwardRateThreshold
     signals[ch.ChannelID] = htlcFailureSignal{
       Attempts60m: total,
+      LinkFails60m: lnkFails,
+      ForwardFails60m: fwdFails,
       PolicyFails60m: polFails,
       LiquidityFails60m: liqFails,
       UnclassifiedFails60m: uncFails,
+      ForwardFailRate60m: fwdRate,
       PolicyFailRate60m: polRate,
       LiquidityFailRate60m: liqRate,
       WindowMin: windowMin,
       SampleLow: sampleLow,
       PolicyHot: policyHot,
       LiquidityHot: liquidityHot,
+      ForwardHot: forwardHot,
     }
   }
   return signals, meta
@@ -2205,6 +2308,24 @@ func htlcFailureBlob(entry htlcManagerFailedEntry) string {
     normalized = append(normalized, token)
   }
   return strings.Join(normalized, " | ")
+}
+
+func normalizeHTLCFailureEvent(entry htlcManagerFailedEntry) string {
+  event := strings.ToLower(strings.TrimSpace(entry.Event))
+  switch event {
+  case "link_fail", "forward_fail":
+    return event
+  }
+  if strings.EqualFold(strings.TrimSpace(entry.FailureCode), "FORWARD_FAIL") {
+    return "forward_fail"
+  }
+  if strings.TrimSpace(entry.FailureCode) != "" || strings.TrimSpace(entry.FailureDetail) != "" {
+    return "link_fail"
+  }
+  if event == "" {
+    return "unknown"
+  }
+  return event
 }
 
 func htlcFailureReasonKey(entry htlcManagerFailedEntry) string {
@@ -2540,6 +2661,7 @@ type decision struct {
   PredictionCode string
   PredictionCooldownHours int
   HTLCAttempts int
+  HTLCForwardFails int
   HTLCPolicyFails int
   HTLCLiquidityFails int
   HTLCUnclassifiedFails int
@@ -2636,8 +2758,8 @@ func formatAutofeeDecisionLine(d *decision, dryRun bool, isError bool) (string, 
     tagLine,
   )
   if d.HTLCAttempts > 0 {
-    line = line + fmt.Sprintf(" | htlc%dm a=%d p=%d l=%d u=%d",
-      maxInt(1, d.HTLCWindowMin), d.HTLCAttempts, d.HTLCPolicyFails, d.HTLCLiquidityFails, d.HTLCUnclassifiedFails)
+    line = line + fmt.Sprintf(" | htlc%dm a=%d p=%d l=%d f=%d u=%d",
+      maxInt(1, d.HTLCWindowMin), d.HTLCAttempts, d.HTLCPolicyFails, d.HTLCLiquidityFails, d.HTLCForwardFails, d.HTLCUnclassifiedFails)
   }
   return strings.TrimSpace(line), category
 }
@@ -2692,6 +2814,7 @@ func buildAutofeeChannelLogEntry(d *decision, category string, dryRun bool, err 
     PredictionCode: d.PredictionCode,
     PredictionCooldownHours: d.PredictionCooldownHours,
     HTLCAttempts: d.HTLCAttempts,
+    HTLCForwardFails: d.HTLCForwardFails,
     HTLCPolicyFails: d.HTLCPolicyFails,
     HTLCLiquidityFails: d.HTLCLiquidityFails,
     HTLCUnclassifiedFails: d.HTLCUnclassifiedFails,
@@ -2886,6 +3009,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   htlcPolicyHot := false
   htlcLiquidityHot := false
   htlcAttempts := 0
+  htlcForwardFails := 0
   htlcPolicyFails := 0
   htlcLiquidityFails := 0
   htlcUnclassifiedFails := 0
@@ -2901,6 +3025,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     htlcPolicyHot = signal.PolicyHot
     htlcLiquidityHot = signal.LiquidityHot
     htlcAttempts = signal.Attempts60m
+    htlcForwardFails = signal.ForwardFails60m
     htlcPolicyFails = signal.PolicyFails60m
     htlcLiquidityFails = signal.LiquidityFails60m
     htlcUnclassifiedFails = signal.UnclassifiedFails60m
@@ -2913,6 +3038,9 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
     if signal.LiquidityHot {
       tags = append(tags, "htlc-liquidity-hot")
+    }
+    if signal.ForwardHot {
+      tags = append(tags, "htlc-forward-hot")
     }
     if signal.PolicyHot && signal.LiquidityHot {
       tags = append(tags, "htlc-neutral-lock")
@@ -3517,6 +3645,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     PredictionCode: predictionCode,
     PredictionCooldownHours: predictionCooldownHours,
     HTLCAttempts: htlcAttempts,
+    HTLCForwardFails: htlcForwardFails,
     HTLCPolicyFails: htlcPolicyFails,
     HTLCLiquidityFails: htlcLiquidityFails,
     HTLCUnclassifiedFails: htlcUnclassifiedFails,
@@ -4023,6 +4152,8 @@ func formatAutofeeTags(d *decision) string {
       add("🧾policy-hot")
     case t == "htlc-liquidity-hot":
       add("💧liq-hot")
+    case t == "htlc-forward-hot":
+      add("🧵forward-hot")
     case t == "htlc-sample-low":
       add("📉htlc-low-sample")
     case t == "htlc-neutral-lock":

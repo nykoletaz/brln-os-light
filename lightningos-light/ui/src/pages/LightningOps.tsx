@@ -202,8 +202,12 @@ type AutofeeResultItem = {
   super_source?: number
   htlc_liq_hot?: number
   htlc_policy_hot?: number
+  htlc_forward_hot?: number
   htlc_sample_low?: number
   htlc_attempts_total?: number
+  htlc_link_fails_total?: number
+  htlc_forward_fails_total?: number
+  htlc_other_fails_total?: number
   htlc_classified_total?: number
   htlc_unclassified_total?: number
   htlc_top_reasons?: string[]
@@ -211,8 +215,10 @@ type AutofeeResultItem = {
   htlc_min_attempts?: number
   htlc_min_policy_fails?: number
   htlc_min_liquidity_fails?: number
+  htlc_min_forward_fails?: number
   htlc_policy_fail_rate_min?: number
   htlc_liquidity_fail_rate_min?: number
+  htlc_forward_fail_rate_min?: number
   htlc_global_count_factor?: number
   htlc_global_rate_factor?: number
   htlc_node_factor?: number
@@ -259,6 +265,7 @@ type AutofeeResultItem = {
   prediction_code?: string
   prediction_cooldown_hours?: number
   htlc_attempts?: number
+  htlc_forward_fails?: number
   htlc_policy_fails?: number
   htlc_liquidity_fails?: number
   htlc_unclassified_fails?: number
@@ -561,9 +568,10 @@ export default function LightningOps() {
     }
     if (
       typeof item.htlc_policy_fail_rate_min === 'number' &&
-      typeof item.htlc_liquidity_fail_rate_min === 'number'
+      typeof item.htlc_liquidity_fail_rate_min === 'number' &&
+      typeof item.htlc_forward_fail_rate_min === 'number'
     ) {
-      line += ` | htlc_rate p>=${(item.htlc_policy_fail_rate_min * 100).toFixed(1)}% l>=${(item.htlc_liquidity_fail_rate_min * 100).toFixed(1)}%`
+      line += ` | htlc_rate p>=${(item.htlc_policy_fail_rate_min * 100).toFixed(1)}% l>=${(item.htlc_liquidity_fail_rate_min * 100).toFixed(1)}% f>=${(item.htlc_forward_fail_rate_min * 100).toFixed(1)}%`
     }
     if (
       typeof item.htlc_global_count_factor === 'number' &&
@@ -596,24 +604,27 @@ export default function LightningOps() {
       `${t('lightningOps.autofeeResultsSuperSource')} ${item.super_source ?? 0}`,
       `htlc_liq_hot ${item.htlc_liq_hot ?? 0}`,
       `htlc_policy_hot ${item.htlc_policy_hot ?? 0}`,
+      `htlc_forward_hot ${item.htlc_forward_hot ?? 0}`,
       `htlc_low_sample ${item.htlc_sample_low ?? 0}`,
       `htlc_window ${(item.htlc_window_min ?? 0)}m`
     ]
     if (
       typeof item.htlc_min_attempts === 'number' &&
       typeof item.htlc_min_policy_fails === 'number' &&
-      typeof item.htlc_min_liquidity_fails === 'number'
+      typeof item.htlc_min_liquidity_fails === 'number' &&
+      typeof item.htlc_min_forward_fails === 'number'
     ) {
       parts.push(
-        `htlc_min a>=${item.htlc_min_attempts} p>=${item.htlc_min_policy_fails} l>=${item.htlc_min_liquidity_fails}`
+        `htlc_min a>=${item.htlc_min_attempts} p>=${item.htlc_min_policy_fails} l>=${item.htlc_min_liquidity_fails} f>=${item.htlc_min_forward_fails}`
       )
     }
     if (
       typeof item.htlc_policy_fail_rate_min === 'number' &&
-      typeof item.htlc_liquidity_fail_rate_min === 'number'
+      typeof item.htlc_liquidity_fail_rate_min === 'number' &&
+      typeof item.htlc_forward_fail_rate_min === 'number'
     ) {
       parts.push(
-        `htlc_rate p>=${(item.htlc_policy_fail_rate_min * 100).toFixed(1)}% l>=${(item.htlc_liquidity_fail_rate_min * 100).toFixed(1)}%`
+        `htlc_rate p>=${(item.htlc_policy_fail_rate_min * 100).toFixed(1)}% l>=${(item.htlc_liquidity_fail_rate_min * 100).toFixed(1)}% f>=${(item.htlc_forward_fail_rate_min * 100).toFixed(1)}%`
       )
     }
     if (
@@ -627,6 +638,16 @@ export default function LightningOps() {
       typeof item.htlc_attempts_total === 'number'
     ) {
       parts.push(`htlc_classified ${item.htlc_classified_total}/${item.htlc_attempts_total}`)
+    }
+    if (typeof item.htlc_forward_fails_total === 'number') {
+      parts.push(`htlc_forward ${item.htlc_forward_fails_total}`)
+    }
+    if (
+      typeof item.htlc_link_fails_total === 'number' &&
+      typeof item.htlc_forward_fails_total === 'number' &&
+      typeof item.htlc_other_fails_total === 'number'
+    ) {
+      parts.push(`htlc_events link=${item.htlc_link_fails_total} forward=${item.htlc_forward_fails_total} other=${item.htlc_other_fails_total}`)
     }
     if (typeof item.htlc_unclassified_total === 'number') {
       parts.push(`htlc_unclassified ${item.htlc_unclassified_total}`)
@@ -661,6 +682,16 @@ export default function LightningOps() {
       typeof item.htlc_attempts_total === 'number'
     ) {
       parts.push(`htlc_classified ${item.htlc_classified_total}/${item.htlc_attempts_total}`)
+    }
+    if (typeof item.htlc_forward_fails_total === 'number') {
+      parts.push(`htlc_forward ${item.htlc_forward_fails_total}`)
+    }
+    if (
+      typeof item.htlc_link_fails_total === 'number' &&
+      typeof item.htlc_forward_fails_total === 'number' &&
+      typeof item.htlc_other_fails_total === 'number'
+    ) {
+      parts.push(`htlc_events link=${item.htlc_link_fails_total} forward=${item.htlc_forward_fails_total} other=${item.htlc_other_fails_total}`)
     }
     if (typeof item.htlc_unclassified_total === 'number') {
       parts.push(`htlc_unclassified ${item.htlc_unclassified_total}`)
@@ -719,6 +750,8 @@ export default function LightningOps() {
         add('🧾policy-hot')
       } else if (tag === 'htlc-liquidity-hot') {
         add('💧liq-hot')
+      } else if (tag === 'htlc-forward-hot') {
+        add('forward-hot')
       } else if (tag === 'htlc-sample-low') {
         add('📉htlc-low-sample')
       } else if (tag === 'htlc-neutral-lock') {
@@ -909,6 +942,7 @@ export default function LightningOps() {
     const revShare = typeof item.rev_share === 'number' ? item.rev_share : 0
     const tagLine = formatAutofeeTags(tags, item.inbound_discount, item.class_label) || '-'
     const htlcAttempts = item.htlc_attempts ?? 0
+    const htlcForwardFails = item.htlc_forward_fails ?? 0
     const htlcPolicyFails = item.htlc_policy_fails ?? 0
     const htlcLiquidityFails = item.htlc_liquidity_fails ?? 0
     const htlcUnclassifiedFails = item.htlc_unclassified_fails ?? 0
@@ -917,7 +951,7 @@ export default function LightningOps() {
     const prediction = formatAutofeePrediction(item)
     let baseLine = `${prefix} ${alias}: ${action}${deltaStr} | ${t('lightningOps.autofeeResultsLabelTarget')} ${item.target ?? 0} | ${t('lightningOps.autofeeResultsLabelOutRatio')} ${outRatio.toFixed(2)} | ${t('lightningOps.autofeeResultsLabelOutPpm7d')}≈${outPpm7d} | ${t('lightningOps.autofeeResultsLabelRebalPpm7d')}≈${rebalPpm7d} | ${t('lightningOps.autofeeResultsLabelSeed')}≈${seed} | ${t('lightningOps.autofeeResultsLabelFloor')}≥${floor}${floorSrc} | ${t('lightningOps.autofeeResultsLabelMargin')}≈${margin} | ${t('lightningOps.autofeeResultsLabelRevShare')}≈${revShare.toFixed(2)} | ${tagLine}`
     if (htlcAttempts > 0) {
-      baseLine += ` | htlc${Math.max(1, htlcWindow)}m a=${htlcAttempts} p=${htlcPolicyFails} l=${htlcLiquidityFails} u=${htlcUnclassifiedFails}`
+      baseLine += ` | htlc${Math.max(1, htlcWindow)}m a=${htlcAttempts} p=${htlcPolicyFails} l=${htlcLiquidityFails} f=${htlcForwardFails} u=${htlcUnclassifiedFails}`
     }
     return prediction ? `${baseLine} | ${prediction}` : baseLine
   }
