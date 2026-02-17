@@ -526,14 +526,14 @@ const (
 const (
   // Global HTLC sensitivity knobs applied after profile/node/liquidity calibration.
   // Keep them shared across all profiles so behavior stays consistent network-wide.
-  htlcGlobalMinCountFactor = 0.80
-  htlcGlobalRateFactor = 0.85
-  htlcGlobalMinAttemptsFloor = 6
+  htlcGlobalMinCountFactor = 0.65
+  htlcGlobalRateFactor = 0.80
+  htlcGlobalMinAttemptsFloor = 4
   htlcGlobalMinFailsFloor = 2
   htlcGlobalPolicyRateFloor = 0.08
   htlcGlobalLiquidityRateFloor = 0.10
-  htlcForwardSoftCountFactor = 0.60
-  htlcForwardSoftRateFactor = 0.60
+  htlcForwardSoftCountFactor = 0.45
+  htlcForwardSoftRateFactor = 0.50
   htlcForwardSoftRateFloor = 0.10
   htlcForwardSoftMinFailsFloor = 2
 )
