@@ -125,6 +125,7 @@ fi
 mirror_root="/var/lib/lightningos/src/brln-os-light"
 worktree_root="/var/lib/lightningos/worktrees"
 worktree_dir=""
+project_dir=""
 
 cleanup() {
   if [[ -n "$worktree_dir" && -d "$worktree_dir" ]]; then
@@ -166,22 +167,33 @@ safe_tag="$(echo "$TAG" | tr '/\\' '__')"
 worktree_dir="${worktree_root}/app-upgrade-${safe_tag}-$("$DATE_BIN" +%Y%m%d%H%M%S)"
 "$GIT_BIN" -C "$mirror_root" worktree add --detach "$worktree_dir" "$TAG"
 
+if [[ -f "$worktree_dir/go.mod" ]]; then
+  project_dir="$worktree_dir"
+elif [[ -f "$worktree_dir/lightningos-light/go.mod" ]]; then
+  project_dir="$worktree_dir/lightningos-light"
+else
+  die "Could not find go.mod in worktree."
+fi
+
+if [[ ! -d "$project_dir/ui" ]]; then
+  die "Could not find UI directory in worktree."
+fi
+
+print_ok "Using project directory: $project_dir"
+
 go_env="GOPATH=/opt/lightningos/go GOCACHE=/opt/lightningos/go-cache GOMODCACHE=/opt/lightningos/go/pkg/mod"
 mkdir -p /opt/lightningos/go /opt/lightningos/go-cache /opt/lightningos/go/pkg/mod
 
-print_step "Downloading Go modules"
-(cd "$worktree_dir" && env $go_env GOFLAGS=-mod=mod "$GO_BIN" mod download)
-print_ok "Go modules ready"
-
 print_step "Building manager binary"
-(cd "$worktree_dir" && env $go_env GOFLAGS=-mod=mod "$GO_BIN" build -o dist/lightningos-manager ./cmd/lightningos-manager)
-"$INSTALL_BIN" -m 0755 "$worktree_dir/dist/lightningos-manager" /opt/lightningos/manager/lightningos-manager
+mkdir -p "$project_dir/dist"
+(cd "$project_dir" && env $go_env GOFLAGS=-mod=mod "$GO_BIN" build -o dist/lightningos-manager ./cmd/lightningos-manager)
+"$INSTALL_BIN" -m 0755 "$project_dir/dist/lightningos-manager" /opt/lightningos/manager/lightningos-manager
 print_ok "Manager installed"
 
 print_step "Building UI"
-(cd "$worktree_dir/ui" && "$NPM_BIN" install && "$NPM_BIN" run build)
+(cd "$project_dir/ui" && "$NPM_BIN" install && "$NPM_BIN" run build)
 "$RM_BIN" -rf /opt/lightningos/ui/*
-"$CP_BIN" -a "$worktree_dir/ui/dist/." /opt/lightningos/ui/
+"$CP_BIN" -a "$project_dir/ui/dist/." /opt/lightningos/ui/
 print_ok "UI installed"
 
 print_step "Restarting lightningos-manager"
