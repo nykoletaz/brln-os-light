@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <linearGradient id="depixBg" x1="18" y1="18" x2="238" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B7F3EA"/>
+      <stop offset="1" stop-color="#E6FBF7"/>
+    </linearGradient>
+    <linearGradient id="depixMint" x1="70" y1="50" x2="196" y2="182" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8AEBDD"/>
+      <stop offset="1" stop-color="#59CDBE"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="8" y="8" width="240" height="240" rx="24" fill="url(#depixBg)"/>
+  <rect x="16" y="16" width="224" height="224" rx="20" stroke="#6FDCCC" stroke-width="12"/>
+
+  <rect x="70" y="40" width="18" height="176" rx="6" fill="#1E3B45"/>
+  <rect x="84" y="40" width="16" height="176" rx="6" fill="#2B5862" opacity="0.86"/>
+
+  <path d="M104 58h58c34 0 62 27 62 61s-28 61-62 61h-30v36h-28V58Zm28 26v70h30c19 0 34-16 34-35s-15-35-34-35h-30Z" fill="url(#depixMint)"/>
+</svg>
+

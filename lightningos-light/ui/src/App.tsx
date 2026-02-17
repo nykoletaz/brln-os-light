@@ -19,7 +19,8 @@ import Notifications from './pages/Notifications'
 import LndConfig from './pages/LndConfig'
 import AppStore from './pages/AppStore'
 import Terminal from './pages/Terminal'
-import { getLndStatus, getWizardStatus } from './api'
+import BuyDepix from './pages/BuyDepix'
+import { getDepixConfig, getLndStatus, getWizardStatus } from './api'
 import { defaultPalette, paletteOrder, resolvePalette, resolveTheme, type PaletteKey, type ThemeMode } from './theme'
 
 function useHashRoute() {
@@ -121,8 +122,12 @@ export default function App() {
   const [palette, setPalette] = useState<PaletteKey>(() => resolvePalette(window.localStorage.getItem('los-palette')))
   const [walletUnlocked, setWalletUnlocked] = useState<boolean | null>(null)
   const [walletExists, setWalletExists] = useState<boolean | null>(null)
+  const [depixEnabled, setDepixEnabled] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const baseRoutes = useMemo(() => {
+    const depixRoute = depixEnabled
+      ? [{ key: 'buy-depix', label: t('nav.buyDepix'), element: <BuyDepix /> }]
+      : []
     return [
       { key: 'dashboard', label: t('nav.dashboard'), element: <Dashboard /> },
       { key: 'reports', label: t('nav.reports'), element: <Reports /> },
@@ -133,6 +138,7 @@ export default function App() {
       { key: 'chat', label: t('nav.chat'), element: <Chat /> },
       { key: 'lnd', label: t('nav.lndConfig'), element: <LndConfig /> },
       { key: 'apps', label: t('nav.apps'), element: <AppStore /> },
+      ...depixRoute,
       { key: 'bitcoin', label: t('nav.bitcoinRemote'), element: <BitcoinRemote /> },
       { key: 'bitcoin-local', label: t('nav.bitcoinLocal'), element: <BitcoinLocal /> },
       { key: 'elements', label: t('nav.elements'), element: <Elements /> },
@@ -141,7 +147,7 @@ export default function App() {
       { key: 'terminal', label: t('nav.terminal'), element: <Terminal /> },
       { key: 'logs', label: t('nav.logs'), element: <Logs /> }
     ]
-  }, [i18n.language, t])
+  }, [depixEnabled, i18n.language, t])
   const baseRouteKeys = useMemo(() => baseRoutes.map((item) => item.key), [baseRoutes])
   const [menuConfig, setMenuConfig] = useState<MenuConfig>(() => normalizeMenuConfig(readMenuConfig(), baseRouteKeys))
 
@@ -177,6 +183,26 @@ export default function App() {
     }
     load()
     const timer = window.setInterval(load, 30000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    const loadDepix = async () => {
+      try {
+        const data: any = await getDepixConfig()
+        if (!active) return
+        setDepixEnabled(Boolean(data?.enabled))
+      } catch {
+        if (!active) return
+        setDepixEnabled(false)
+      }
+    }
+    loadDepix()
+    const timer = window.setInterval(loadDepix, 30000)
     return () => {
       active = false
       window.clearInterval(timer)

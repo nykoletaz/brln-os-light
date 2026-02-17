@@ -41,6 +41,10 @@ type Server struct {
   torPeerCheckerMu sync.Mutex
   torPeerChecker *TorPeerChecker
   torPeerCheckerErr string
+  depixInitAt time.Time
+  depixMu sync.Mutex
+  depix *DepixService
+  depixErr string
   autofeeInitAt time.Time
   autofeeMu sync.Mutex
   autofee *AutofeeService
@@ -70,6 +74,7 @@ func (s *Server) Run() error {
   s.initRebalance()
   s.initHTLCManager()
   s.initTorPeerChecker()
+  s.initDepix()
   s.initAutofee()
   if s.chat != nil {
     s.chat.Start()

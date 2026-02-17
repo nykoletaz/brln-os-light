@@ -336,6 +336,19 @@ export const updateRebalanceChannelManualRestart = (payload: { channel_id: numbe
 export const updateRebalanceExclude = (payload: { channel_id: number; channel_point: string; excluded: boolean }) =>
   request('/api/rebalance/channel/exclude', { method: 'POST', body: JSON.stringify(payload) })
 
+export const getDepixConfig = (params?: { user_key?: string; timezone?: string }) =>
+  request(`/api/depix/config${buildQuery(params)}`)
+export const createDepixOrder = (payload: {
+  user_key: string
+  timezone: string
+  liquid_address: string
+  amount_brl: string
+}) => request('/api/depix/orders', { method: 'POST', body: JSON.stringify(payload) })
+export const getDepixOrders = (params: { user_key: string; limit?: number }) =>
+  request(`/api/depix/orders${buildQuery(params)}`)
+export const getDepixOrder = (id: number, params: { user_key: string; refresh?: boolean }) =>
+  request(`/api/depix/orders/${encodeURIComponent(String(id))}${buildQuery(params)}`)
+
 export const getApps = () => request('/api/apps')
 export const getAppAdminPassword = (id: string) => request(`/api/apps/${id}/admin-password`)
 export const installApp = (id: string) => request(`/api/apps/${id}/install`, { method: 'POST' })

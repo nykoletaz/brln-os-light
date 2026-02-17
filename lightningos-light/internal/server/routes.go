@@ -67,6 +67,10 @@ func (s *Server) routes() http.Handler {
   r.Get("/api/reports/live", s.handleReportsLive)
   r.Get("/api/reports/config", s.handleReportsConfigGet)
   r.Post("/api/reports/config", s.handleReportsConfigPost)
+  r.Get("/api/depix/config", s.handleDepixConfig)
+  r.Post("/api/depix/orders", s.handleDepixCreateOrder)
+  r.Get("/api/depix/orders", s.handleDepixOrdersList)
+  r.Get("/api/depix/orders/{id}", s.handleDepixOrderGet)
   r.Get("/api/terminal/status", s.handleTerminalStatus)
 
   r.Route("/api/onchain", func(r chi.Router) {
