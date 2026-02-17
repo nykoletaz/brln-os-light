@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Sidebar from './components/Sidebar'
 import Topbar from './components/Topbar'
@@ -124,6 +124,14 @@ export default function App() {
   const [walletExists, setWalletExists] = useState<boolean | null>(null)
   const [depixEnabled, setDepixEnabled] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const refreshDepixEnabled = useCallback(async () => {
+    try {
+      const data: any = await getDepixConfig()
+      setDepixEnabled(Boolean(data?.enabled))
+    } catch {
+      setDepixEnabled(false)
+    }
+  }, [])
   const baseRoutes = useMemo(() => {
     const depixRoute = depixEnabled
       ? [{ key: 'buy-depix', label: t('nav.buyDepix'), element: <BuyDepix /> }]
@@ -190,24 +198,20 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    let active = true
-    const loadDepix = async () => {
-      try {
-        const data: any = await getDepixConfig()
-        if (!active) return
-        setDepixEnabled(Boolean(data?.enabled))
-      } catch {
-        if (!active) return
-        setDepixEnabled(false)
+    const handleAppsChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{ id?: string }>).detail
+      if (detail?.id === 'depixbuy') {
+        void refreshDepixEnabled()
       }
     }
-    loadDepix()
-    const timer = window.setInterval(loadDepix, 30000)
+    void refreshDepixEnabled()
+    const timer = window.setInterval(refreshDepixEnabled, 30000)
+    window.addEventListener('apps:changed', handleAppsChanged as EventListener)
     return () => {
-      active = false
       window.clearInterval(timer)
+      window.removeEventListener('apps:changed', handleAppsChanged as EventListener)
     }
-  }, [])
+  }, [refreshDepixEnabled])
 
   useEffect(() => {
     setMenuConfig((current) => {

@@ -98,6 +98,7 @@ export default function AppStore() {
       if (action === 'start') await startApp(id)
       if (action === 'stop') await stopApp(id)
       if (action === 'uninstall') await uninstallApp(id)
+      window.dispatchEvent(new CustomEvent('apps:changed', { detail: { id, action } }))
       loadApps()
     } catch (err) {
       setMessage(err instanceof Error ? err.message : t('appStore.actionFailed'))
