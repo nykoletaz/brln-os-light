@@ -391,7 +391,11 @@ func ensureLndUpgradeScript(ctx context.Context) error {
     return nil
   }
 
-  tmpFile, err := os.CreateTemp("", "lightningos-upgrade-lnd-*.sh")
+  stageDir := "/var/lib/lightningos"
+  if err := os.MkdirAll(stageDir, 0750); err != nil {
+    return err
+  }
+  tmpFile, err := os.CreateTemp(stageDir, "lightningos-upgrade-lnd-*.sh")
   if err != nil {
     return err
   }

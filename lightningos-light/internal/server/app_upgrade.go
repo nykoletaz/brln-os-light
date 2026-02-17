@@ -357,7 +357,11 @@ func ensureAppUpgradeScript(ctx context.Context) error {
     return nil
   }
 
-  tmpFile, err := os.CreateTemp("", "lightningos-upgrade-app-*.sh")
+  stageDir := "/var/lib/lightningos"
+  if err := os.MkdirAll(stageDir, 0750); err != nil {
+    return err
+  }
+  tmpFile, err := os.CreateTemp(stageDir, "lightningos-upgrade-app-*.sh")
   if err != nil {
     return err
   }
