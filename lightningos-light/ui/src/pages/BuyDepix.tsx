@@ -35,6 +35,7 @@ type DepixOrder = {
 }
 
 const USER_KEY_STORAGE = 'los-depix-user-key'
+const TERMINAL_RECHECK_WINDOW_MS = 2 * 60 * 60 * 1000
 
 const normalizeAmountInput = (raw: string) => raw.trim().replace(',', '.')
 
@@ -65,7 +66,9 @@ const ensureUserKey = () => {
 const statusTone = (status: string) => {
   const normalized = (status || '').toLowerCase()
   if (normalized === 'depix_sent') return 'bg-emerald-500/15 text-emerald-200 border border-emerald-400/30'
-  if (normalized === 'pending') return 'bg-amber-500/15 text-amber-200 border border-amber-400/30'
+  if (normalized === 'pending' || normalized === 'under_review' || normalized === 'pending_pix2fa') {
+    return 'bg-amber-500/15 text-amber-200 border border-amber-400/30'
+  }
   if (normalized === 'expired' || normalized === 'timeout' || normalized === 'error' || normalized === 'not_found') {
     return 'bg-rose-500/15 text-rose-200 border border-rose-400/30'
   }
@@ -75,6 +78,17 @@ const statusTone = (status: string) => {
 const isTerminalStatus = (status: string) => {
   const normalized = (status || '').toLowerCase()
   return ['depix_sent', 'expired', 'timeout', 'canceled', 'refunded', 'error', 'not_found'].includes(normalized)
+}
+
+const shouldRefreshOrder = (order: DepixOrder) => {
+  const normalized = (order.status || '').toLowerCase()
+  if (normalized === 'pending' || normalized === 'under_review' || normalized === 'pending_pix2fa') return true
+  if (!['timeout', 'expired', 'error', 'not_found'].includes(normalized)) return false
+  if (order.confirmed_at) return false
+  const createdAtMs = new Date(order.created_at).getTime()
+  if (!Number.isFinite(createdAtMs)) return true
+  const timeoutMs = Math.max(0, (order.timeout_seconds || 0) * 1000)
+  return Date.now() <= createdAtMs + timeoutMs + TERMINAL_RECHECK_WINDOW_MS
 }
 
 export default function BuyDepix() {
@@ -156,14 +170,14 @@ export default function BuyDepix() {
   }, [orders, activeOrderID])
 
   useEffect(() => {
-    if (!userKey || !activeOrder || isTerminalStatus(activeOrder.status)) return
+    if (!userKey || !activeOrder || !shouldRefreshOrder(activeOrder)) return
     let active = true
     const timer = window.setInterval(async () => {
       try {
         const refreshed = await getDepixOrder(activeOrder.id, { user_key: userKey, refresh: true }) as DepixOrder
         if (!active) return
         setOrders((current) => current.map((item) => (item.id === refreshed.id ? refreshed : item)))
-        if (!isTerminalStatus(refreshed.status)) return
+        if (shouldRefreshOrder(refreshed)) return
         await loadConfig(userKey, timezone)
       } catch {
         // keep UI calm on transient provider errors
@@ -183,6 +197,7 @@ export default function BuyDepix() {
   const statusLabel = (value: string) => {
     const normalized = (value || '').toLowerCase()
     if (normalized === 'pending') return t('depix.statusPending')
+    if (normalized === 'under_review' || normalized === 'pending_pix2fa') return t('depix.statusPending')
     if (normalized === 'depix_sent') return t('depix.statusSent')
     if (normalized === 'expired') return t('depix.statusExpired')
     if (normalized === 'timeout') return t('depix.statusTimeout')
@@ -388,4 +403,3 @@ export default function BuyDepix() {
     </section>
   )
 }
-

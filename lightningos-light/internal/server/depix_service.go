@@ -24,6 +24,7 @@ const (
 	depixProviderStatusPath = "/v1/deposits/%s"
 
 	depixDefaultPurpose = "Buy DePix"
+	depixTerminalRecheckWindow = 2 * time.Hour
 )
 
 var (
@@ -475,7 +476,7 @@ func (s *DepixService) GetOrder(ctx context.Context, userKeyRaw string, id int64
 	if err != nil {
 		return depixOrder{}, err
 	}
-	if refresh && !depixStatusIsTerminal(order.Status) {
+	if refresh && depixShouldRefreshStatus(order, time.Now()) {
 		updated, refreshErr := s.refreshOrderStatus(ctx, order)
 		if refreshErr == nil {
 			order = updated
@@ -825,6 +826,26 @@ func depixStatusIsTerminal(status string) bool {
 	switch strings.TrimSpace(strings.ToLower(status)) {
 	case "depix_sent", "expired", "timeout", "canceled", "refunded", "error", "not_found":
 		return true
+	default:
+		return false
+	}
+}
+
+func depixShouldRefreshStatus(order depixOrder, now time.Time) bool {
+	status := strings.TrimSpace(strings.ToLower(order.Status))
+	if !depixStatusIsTerminal(status) {
+		return true
+	}
+	switch status {
+	case "timeout", "expired", "error", "not_found":
+		baseWindow := depixTerminalRecheckWindow
+		if order.TimeoutSeconds > 0 {
+			baseWindow += time.Duration(order.TimeoutSeconds) * time.Second
+		}
+		if order.CreatedAt.IsZero() {
+			return true
+		}
+		return now.Before(order.CreatedAt.Add(baseWindow))
 	default:
 		return false
 	}
