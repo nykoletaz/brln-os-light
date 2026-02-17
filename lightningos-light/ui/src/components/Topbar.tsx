@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getAppUpgradeStatus, getHealth, getLndConfig, getLndStatus, startAppUpgrade } from '../api'
+import { getHealth, getLndConfig, getLndStatus } from '../api'
 import { setLanguage } from '../i18n'
 import type { PaletteKey, ThemeMode } from '../theme'
 
@@ -19,24 +19,12 @@ type TopbarProps = {
   onPaletteToggle: () => void
 }
 
-type AppUpgradeStatus = {
-  current_version?: string
-  latest_version?: string
-  latest_tag?: string
-  update_available?: boolean
-  running?: boolean
-  error?: string
-}
-
 export default function Topbar({ onMenuToggle, menuOpen, theme, palette, onThemeToggle, onPaletteToggle }: TopbarProps) {
   const { t, i18n } = useTranslation()
   const [status, setStatus] = useState('...')
   const [issues, setIssues] = useState<Array<{ component?: string; level?: string; message?: string }>>([])
   const [nodeAlias, setNodeAlias] = useState('')
   const [nodePubkey, setNodePubkey] = useState('')
-  const [appUpgrade, setAppUpgrade] = useState<AppUpgradeStatus | null>(null)
-  const [appUpgradeBusy, setAppUpgradeBusy] = useState(false)
-  const [appUpgradeMessage, setAppUpgradeMessage] = useState('')
   const isPortuguese = i18n.language === 'pt-BR'
   const paletteName = t(`topbar.paletteNames.${palette}`)
   const paletteLabel = t('topbar.paletteLabel', { palette: paletteName })
@@ -87,62 +75,6 @@ export default function Topbar({ onMenuToggle, menuOpen, theme, palette, onTheme
     }
   }, [])
 
-  const formatVersion = (value?: string) => {
-    if (!value) return t('common.na')
-    return value.startsWith('v') ? value : `v${value}`
-  }
-
-  const loadAppUpgradeStatus = async (force = false) => {
-    const data = await getAppUpgradeStatus(force)
-    setAppUpgrade(data as AppUpgradeStatus)
-  }
-
-  useEffect(() => {
-    let mounted = true
-    const load = async () => {
-      try {
-        const data = await getAppUpgradeStatus()
-        if (!mounted) return
-        setAppUpgrade(data as AppUpgradeStatus)
-      } catch {
-        if (!mounted) return
-      }
-    }
-
-    load()
-    const timer = setInterval(load, 60000)
-    return () => {
-      mounted = false
-      clearInterval(timer)
-    }
-  }, [])
-
-  const appUpgradeCurrent = formatVersion(appUpgrade?.current_version)
-  const appUpgradeLatest = formatVersion(appUpgrade?.latest_version)
-
-  const handleStartAppUpgrade = async () => {
-    if (!appUpgrade?.update_available || appUpgradeBusy || appUpgrade?.running) return
-    const confirmed = window.confirm(
-      t('topbar.appUpgradeConfirm', {
-        current: appUpgradeCurrent,
-        latest: appUpgradeLatest
-      })
-    )
-    if (!confirmed) return
-
-    setAppUpgradeBusy(true)
-    setAppUpgradeMessage(t('topbar.appUpgradeStarting'))
-    try {
-      await startAppUpgrade({ target_version: appUpgrade.latest_version })
-      setAppUpgradeMessage(t('topbar.appUpgradeStarted'))
-      await loadAppUpgradeStatus(true)
-    } catch (err) {
-      setAppUpgradeMessage(err instanceof Error ? err.message : t('topbar.appUpgradeStartFailed'))
-    } finally {
-      setAppUpgradeBusy(false)
-    }
-  }
-
   const resolvedNodeLabel = nodeAlias || nodePubkey
   const compactPubkey = nodePubkey.length > 20
     ? `${nodePubkey.slice(0, 12)}...${nodePubkey.slice(-6)}`
@@ -189,33 +121,6 @@ export default function Topbar({ onMenuToggle, menuOpen, theme, palette, onTheme
           )}
         </div>
         <div className="flex flex-wrap items-center justify-end gap-4">
-          {(appUpgrade?.running || appUpgrade?.update_available) && (
-            <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-ink/60 px-3 py-2">
-              <div className="text-[11px] leading-tight text-fog/70">
-                <p>
-                  {appUpgrade?.running
-                    ? t('topbar.appUpgradeRunning')
-                    : t('topbar.appUpgradeAvailable')}
-                </p>
-                <p className="font-mono text-fog/90">
-                  {t('topbar.appUpgradeVersions', { current: appUpgradeCurrent, latest: appUpgradeLatest })}
-                </p>
-                {appUpgradeMessage && (
-                  <p className="text-brass">{appUpgradeMessage}</p>
-                )}
-              </div>
-              <button
-                type="button"
-                className="btn-secondary px-3 py-2 text-xs"
-                onClick={handleStartAppUpgrade}
-                disabled={appUpgradeBusy || appUpgrade?.running || !appUpgrade?.update_available}
-              >
-                {appUpgrade?.running
-                  ? t('topbar.appUpgradeRunningShort')
-                  : (appUpgradeBusy ? t('topbar.appUpgradeStarting') : t('topbar.appUpgradeButton'))}
-              </button>
-            </div>
-          )}
           <div className={`px-4 py-2 rounded-full border text-sm ${statusColors[status] || 'bg-white/10 border-white/20'}`}>
             {status}
           </div>

@@ -183,6 +183,11 @@ func (s *Server) handleAppUpgradeStart(w http.ResponseWriter, r *http.Request) {
     if s.logger != nil {
       s.logger.Printf("app upgrade start failed: %v (%s)", err, strings.TrimSpace(out))
     }
+    details := strings.TrimSpace(out)
+    if details != "" {
+      writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to start app upgrade: %s", details))
+      return
+    }
     writeError(w, http.StatusInternalServerError, "failed to start app upgrade (check logs)")
     return
   }
@@ -369,7 +374,16 @@ func ensureAppUpgradeScript(ctx context.Context) error {
   defer os.Remove(tmpPath)
 
   installCmd := fmt.Sprintf("mkdir -p %s && install -m 0755 %s %s", filepath.Dir(appUpgradeScriptPath), tmpPath, appUpgradeScriptPath)
-  if _, err := runSystemd(ctx, "/bin/sh", "-c", installCmd); err != nil {
+  out, err := runSystemd(ctx, "/bin/sh", "-c", installCmd)
+  if err != nil {
+    if info, statErr := os.Stat(appUpgradeScriptPath); statErr == nil && info.Mode()&0111 != 0 {
+      // Keep running with the existing on-disk script if the update step failed.
+      return nil
+    }
+    msg := strings.TrimSpace(out)
+    if msg != "" {
+      return fmt.Errorf("systemd-run failed (check sudoers for lightningos): %w: %s", err, msg)
+    }
     return fmt.Errorf("systemd-run failed (check sudoers for lightningos): %w", err)
   }
   return nil

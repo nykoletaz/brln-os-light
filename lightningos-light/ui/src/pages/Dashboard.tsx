@@ -1,7 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getBitcoinActive, getDisk, getLndStatus, getPostgres, getSystem, restartService, runSystemAction } from '../api'
+import { getAppUpgradeStatus, getBitcoinActive, getDisk, getLndStatus, getLogs, getPostgres, getSystem, restartService, runSystemAction, startAppUpgrade } from '../api'
 import { getLocale } from '../i18n'
+
+type AppUpgradeStatus = {
+  current_version?: string
+  latest_version?: string
+  latest_tag?: string
+  latest_channel?: string
+  checked_at?: string
+  update_available?: boolean
+  running?: boolean
+  error?: string
+}
 
 export default function Dashboard() {
   const { t, i18n } = useTranslation()
@@ -19,6 +30,18 @@ export default function Dashboard() {
   const [systemAction, setSystemAction] = useState<'restart' | 'shutdown' | null>(null)
   const [systemActionBusy, setSystemActionBusy] = useState(false)
   const [systemActionError, setSystemActionError] = useState<string | null>(null)
+  const [appUpgrade, setAppUpgrade] = useState<AppUpgradeStatus | null>(null)
+  const [appUpgradeChecking, setAppUpgradeChecking] = useState(false)
+  const [appUpgradeMessage, setAppUpgradeMessage] = useState('')
+  const [appUpgradeModalOpen, setAppUpgradeModalOpen] = useState(false)
+  const [appUpgradeBusy, setAppUpgradeBusy] = useState(false)
+  const [appUpgradeLogs, setAppUpgradeLogs] = useState<string[]>([])
+  const [appUpgradeLogsStatus, setAppUpgradeLogsStatus] = useState('')
+  const [appUpgradeError, setAppUpgradeError] = useState<string | null>(null)
+  const [appUpgradeComplete, setAppUpgradeComplete] = useState(false)
+  const [appUpgradeLocked, setAppUpgradeLocked] = useState(false)
+  const [appUpgradeStartedVersion, setAppUpgradeStartedVersion] = useState('')
+  const [appUpgradeLogSince, setAppUpgradeLogSince] = useState('')
 
   const wearWarnThreshold = 75
   const tempWarnThreshold = 70
@@ -102,6 +125,18 @@ export default function Dashboard() {
     ? 'text-rose-200 border-rose-400/30'
     : 'text-amber-200 border-amber-400/30'
 
+  const formatVersion = (value?: string) => {
+    if (!value) return t('common.na')
+    return value.startsWith('v') ? value : `v${value}`
+  }
+
+  const formatCheckedAt = (value?: string) => {
+    if (!value) return ''
+    const parsed = new Date(value)
+    if (Number.isNaN(parsed.getTime())) return ''
+    return parsed.toLocaleString()
+  }
+
   useEffect(() => {
     let mounted = true
     const load = async () => {
@@ -127,6 +162,48 @@ export default function Dashboard() {
     }
     load()
     const timer = setInterval(load, 30000)
+    return () => {
+      mounted = false
+      clearInterval(timer)
+    }
+  }, [])
+
+  const loadAppUpgradeStatus = async (force = false, silent = false) => {
+    if (!force && appUpgradeChecking) return
+    if (!silent) {
+      setAppUpgradeChecking(true)
+      setAppUpgradeMessage(t('appUpgrade.checking'))
+    }
+    try {
+      const data = await getAppUpgradeStatus(force)
+      setAppUpgrade(data as AppUpgradeStatus)
+      if (!silent) {
+        setAppUpgradeMessage('')
+      }
+    } catch (err) {
+      if (!silent) {
+        setAppUpgradeMessage(err instanceof Error ? err.message : t('appUpgrade.statusFailed'))
+      }
+    } finally {
+      if (!silent) {
+        setAppUpgradeChecking(false)
+      }
+    }
+  }
+
+  useEffect(() => {
+    let mounted = true
+    const load = async () => {
+      try {
+        const data = await getAppUpgradeStatus()
+        if (!mounted) return
+        setAppUpgrade(data as AppUpgradeStatus)
+      } catch {
+        if (!mounted) return
+      }
+    }
+    load()
+    const timer = setInterval(load, 60000)
     return () => {
       mounted = false
       clearInterval(timer)
@@ -161,6 +238,109 @@ export default function Dashboard() {
       setSystemActionBusy(false)
     }
   }
+
+  const openAppUpgradeModal = () => {
+    setAppUpgradeModalOpen(true)
+    setAppUpgradeLogs([])
+    setAppUpgradeLogsStatus('')
+    setAppUpgradeError(null)
+    setAppUpgradeComplete(false)
+    setAppUpgradeMessage('')
+    setAppUpgradeLocked(Boolean(appUpgrade?.running))
+    setAppUpgradeStartedVersion('')
+    setAppUpgradeLogSince(appUpgrade?.running ? '' : new Date().toISOString())
+  }
+
+  const closeAppUpgradeModal = () => {
+    if (appUpgradeBusy || (appUpgradeLocked && !appUpgradeError && !appUpgradeComplete)) return
+    setAppUpgradeModalOpen(false)
+  }
+
+  const startAppUpgradeFlow = async () => {
+    if (!appUpgrade?.latest_version || appUpgradeBusy) return
+    const sinceNow = new Date(Date.now() - 15000).toISOString()
+    setAppUpgradeStartedVersion(appUpgrade.latest_version)
+    setAppUpgradeLogSince(sinceNow)
+    setAppUpgradeBusy(true)
+    setAppUpgradeError(null)
+    setAppUpgradeComplete(false)
+    setAppUpgradeMessage(t('appUpgrade.starting'))
+    try {
+      await startAppUpgrade({ target_version: appUpgrade.latest_version })
+      setAppUpgradeMessage(t('appUpgrade.started'))
+      setAppUpgradeModalOpen(true)
+      setAppUpgradeLocked(true)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t('appUpgrade.startFailed')
+      setAppUpgradeMessage(message)
+      setAppUpgradeError(message)
+      setAppUpgradeLocked(false)
+    } finally {
+      setAppUpgradeBusy(false)
+      loadAppUpgradeStatus(true, true)
+    }
+  }
+
+  useEffect(() => {
+    if (!appUpgradeModalOpen) return
+    let mounted = true
+    const loadLogs = async () => {
+      setAppUpgradeLogsStatus(t('appUpgrade.loadingLogs'))
+      try {
+        const res = await getLogs('app-upgrade', 200, appUpgradeLogSince || undefined)
+        if (!mounted) return
+        const lines: string[] = Array.isArray(res?.lines) ? res.lines : []
+        setAppUpgradeLogs(lines)
+        const completed = lines.some((line) => line.includes('App upgrade complete'))
+        const errorLine = [...lines].reverse().find((line) =>
+          line.includes('[ERROR]') || line.toLowerCase().includes('failed')
+        )
+        if (completed) {
+          setAppUpgradeComplete(true)
+          setAppUpgradeLocked(false)
+        }
+        if (errorLine) {
+          setAppUpgradeError(errorLine)
+          setAppUpgradeLocked(false)
+        }
+        setAppUpgradeLogsStatus('')
+      } catch (err) {
+        if (!mounted) return
+        setAppUpgradeLogsStatus(err instanceof Error ? err.message : t('appUpgrade.logFetchFailed'))
+      }
+    }
+    const refreshStatus = async () => {
+      try {
+        const data = await getAppUpgradeStatus()
+        if (!mounted) return
+        const next = data as AppUpgradeStatus
+        setAppUpgrade(next)
+        if (next.running) {
+          setAppUpgradeLocked(true)
+        } else if (appUpgradeLocked) {
+          setAppUpgradeLocked(false)
+        }
+        if (appUpgradeStartedVersion && !next.running && !appUpgradeError && !next.update_available) {
+          setAppUpgradeComplete(true)
+        }
+      } catch {
+        // ignore status refresh errors while modal is open
+      }
+    }
+
+    loadLogs()
+    refreshStatus()
+    const timer = setInterval(() => {
+      loadLogs()
+      refreshStatus()
+    }, 4000)
+    return () => {
+      mounted = false
+      clearInterval(timer)
+    }
+  }, [appUpgradeModalOpen, t, appUpgradeLogSince, appUpgradeLocked, appUpgradeStartedVersion, appUpgradeError])
+
+  const showConfirmAppUpgrade = Boolean(appUpgrade?.update_available) && !appUpgradeComplete
 
   return (
     <section className="space-y-6">
@@ -461,6 +641,73 @@ export default function Dashboard() {
         )}
       </div>
 
+      <div className="section-card space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-semibold">{t('appUpgrade.title')}</h3>
+            <p className="text-fog/60">{t('appUpgrade.subtitle')}</p>
+          </div>
+          <button
+            className="btn-secondary"
+            onClick={() => loadAppUpgradeStatus(true)}
+            disabled={appUpgradeChecking}
+          >
+            {appUpgradeChecking ? t('appUpgrade.checking') : t('common.refresh')}
+          </button>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 text-sm">
+          <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-ink/40 px-4 py-3">
+            <span className="text-fog/70">{t('appUpgrade.current')}</span>
+            <span className="font-mono text-fog">{formatVersion(appUpgrade?.current_version)}</span>
+          </div>
+          <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-ink/40 px-4 py-3">
+            <span className="text-fog/70">{t('appUpgrade.latest')}</span>
+            <span className="font-mono text-fog">{formatVersion(appUpgrade?.latest_version)}</span>
+          </div>
+          <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-ink/40 px-4 py-3">
+            <span className="text-fog/70">{t('appUpgrade.channel')}</span>
+            <span className="text-fog/90">
+              {appUpgrade?.latest_channel
+                ? t(`appUpgrade.channels.${appUpgrade.latest_channel}`)
+                : t('common.na')}
+            </span>
+          </div>
+          <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-ink/40 px-4 py-3">
+            <span className="text-fog/70">{t('appUpgrade.checkedAt')}</span>
+            <span className="text-fog/90">{formatCheckedAt(appUpgrade?.checked_at) || t('common.na')}</span>
+          </div>
+        </div>
+
+        {appUpgrade?.error && (
+          <p className="text-sm text-rose-200">{t('appUpgrade.statusError', { error: appUpgrade.error })}</p>
+        )}
+
+        {!appUpgrade?.error && (
+          <p className="text-sm text-fog/70">
+            {appUpgrade?.running
+              ? t('appUpgrade.inProgress')
+              : appUpgrade?.update_available
+                ? t('appUpgrade.updateAvailable')
+                : t('appUpgrade.upToDate')}
+          </p>
+        )}
+
+        {appUpgradeMessage && <p className="text-sm text-brass">{appUpgradeMessage}</p>}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            className="btn-primary"
+            onClick={openAppUpgradeModal}
+            disabled={!appUpgrade?.update_available && !appUpgrade?.running}
+          >
+            {appUpgrade?.running ? t('appUpgrade.viewLogs') : t('appUpgrade.upgrade')}
+          </button>
+        </div>
+
+        <p className="text-xs text-fog/50">{t('appUpgrade.warning')}</p>
+      </div>
+
       {systemAction && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={closeSystemAction} aria-hidden="true" />
@@ -491,6 +738,67 @@ export default function Dashboard() {
               >
                 {t('common.ok')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {appUpgradeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={closeAppUpgradeModal}
+            aria-hidden="true"
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="app-upgrade-title"
+            className="relative z-10 w-full max-w-3xl rounded-3xl border border-white/10 bg-slate/95 p-6 shadow-panel"
+          >
+            <h4 id="app-upgrade-title" className="text-lg font-semibold">{t('appUpgrade.confirmTitle')}</h4>
+            <p className="mt-2 text-sm text-fog/70">
+              {t('appUpgrade.confirmBody', { version: formatVersion(appUpgrade?.latest_version) })}
+            </p>
+            <p className="mt-3 text-xs text-rose-200">{t('appUpgrade.confirmWarning')}</p>
+            {appUpgradeMessage && <p className="mt-3 text-sm text-brass">{appUpgradeMessage}</p>}
+            {appUpgradeError && <p className="mt-2 text-sm text-rose-200">{appUpgradeError}</p>}
+            {appUpgradeComplete && !appUpgradeError && (
+              <p className="mt-2 text-sm text-emerald-200">{t('appUpgrade.completed')}</p>
+            )}
+
+            <div className="mt-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-fog/70">{t('appUpgrade.logsTitle')}</span>
+                <span className="text-xs text-fog/50">
+                  {appUpgrade?.running ? t('appUpgrade.inProgress') : t('appUpgrade.logsHint')}
+                </span>
+              </div>
+              {appUpgradeLogsStatus && <p className="mt-2 text-xs text-brass">{appUpgradeLogsStatus}</p>}
+              <div className="mt-2 max-h-[320px] overflow-y-auto rounded-2xl border border-white/10 bg-ink/70 p-3 text-xs font-mono whitespace-pre-wrap">
+                {appUpgradeLogs.length ? appUpgradeLogs.join('\n') : t('appUpgrade.noLogs')}
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center justify-end gap-3">
+              <button
+                className={`btn-secondary ${(appUpgradeBusy || (appUpgradeLocked && !appUpgradeError && !appUpgradeComplete)) ? 'opacity-60 pointer-events-none' : ''}`}
+                onClick={closeAppUpgradeModal}
+                type="button"
+                disabled={appUpgradeBusy || (appUpgradeLocked && !appUpgradeError && !appUpgradeComplete)}
+              >
+                {appUpgradeComplete || appUpgradeError ? t('common.close') : t('common.cancel')}
+              </button>
+              {showConfirmAppUpgrade && (
+                <button
+                  className={`btn-secondary text-amber-200 border-amber-400/30 ${appUpgradeBusy ? 'opacity-60 pointer-events-none' : ''}`}
+                  onClick={startAppUpgradeFlow}
+                  type="button"
+                  disabled={!appUpgrade?.update_available || appUpgrade?.running}
+                >
+                  {appUpgradeBusy ? t('appUpgrade.upgrading') : t('appUpgrade.confirmUpgrade')}
+                </button>
+              )}
             </div>
           </div>
         </div>
