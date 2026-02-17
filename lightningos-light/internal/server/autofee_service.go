@@ -161,6 +161,10 @@ type autofeeLogItem struct {
   HTLCLiqHot int `json:"htlc_liq_hot,omitempty"`
   HTLCPolicyHot int `json:"htlc_policy_hot,omitempty"`
   HTLCSampleLow int `json:"htlc_sample_low,omitempty"`
+  HTLCAttemptsTotal int `json:"htlc_attempts_total,omitempty"`
+  HTLCClassifiedTotal int `json:"htlc_classified_total,omitempty"`
+  HTLCUnclassifiedTotal int `json:"htlc_unclassified_total,omitempty"`
+  HTLCTopReasons []string `json:"htlc_top_reasons,omitempty"`
   HTLCWindowMin int `json:"htlc_window_min,omitempty"`
   HTLCMinAttempts int `json:"htlc_min_attempts,omitempty"`
   HTLCMinPolicyFails int `json:"htlc_min_policy_fails,omitempty"`
@@ -206,6 +210,7 @@ type autofeeLogItem struct {
   HTLCAttempts int `json:"htlc_attempts,omitempty"`
   HTLCPolicyFails int `json:"htlc_policy_fails,omitempty"`
   HTLCLiquidityFails int `json:"htlc_liquidity_fails,omitempty"`
+  HTLCUnclassifiedFails int `json:"htlc_unclassified_fails,omitempty"`
   HTLCWindowMinChannel int `json:"htlc_window_min_channel,omitempty"`
 }
 
@@ -1354,6 +1359,10 @@ type autofeeRunSummary struct {
   htlcLiqHot int
   htlcPolicyHot int
   htlcSampleLow int
+  htlcAttemptsTotal int
+  htlcClassifiedTotal int
+  htlcUnclassifiedTotal int
+  htlcTopReasons []string
   htlcWindowMin int
   htlcMinAttempts int
   htlcMinPolicyFails int
@@ -1610,6 +1619,10 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   summary.htlcMinAttempts = htlcMeta.MinAttempts
   summary.htlcMinPolicyFails = htlcMeta.MinPolicyFails
   summary.htlcMinLiquidityFails = htlcMeta.MinLiquidityFails
+  summary.htlcAttemptsTotal = htlcMeta.AttemptsTotal
+  summary.htlcClassifiedTotal = htlcMeta.ClassifiedTotal
+  summary.htlcUnclassifiedTotal = htlcMeta.UnclassifiedTotal
+  summary.htlcTopReasons = append([]string{}, htlcMeta.TopReasons...)
   summary.htlcPolicyRateMin = htlcMeta.PolicyRateMin
   summary.htlcLiquidityRateMin = htlcMeta.LiquidityRateMin
   summary.htlcGlobalCountFactor = htlcMeta.GlobalCountFactor
@@ -1702,7 +1715,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   }
 
   summaryText := fmt.Sprintf(
-    "📊 up %d | down %d | flat %d | cooldown %d | small %d | same %d | disabled %d | inactive %d | inb_disc %d | super_source %d | htlc_liq_hot %d | htlc_policy_hot %d | htlc_low_sample %d | htlc_window %dm | htlc_min a>=%d p>=%d l>=%d | htlc_rate p>=%.1f%% l>=%.1f%% | htlc_global c×%.2f r×%.2f",
+    "📊 up %d | down %d | flat %d | cooldown %d | small %d | same %d | disabled %d | inactive %d | inb_disc %d | super_source %d | htlc_liq_hot %d | htlc_policy_hot %d | htlc_low_sample %d | htlc_window %dm | htlc_min a>=%d p>=%d l>=%d | htlc_rate p>=%.1f%% l>=%.1f%% | htlc_global c×%.2f r×%.2f | htlc_classified %d/%d | htlc_unclassified %d",
     summary.changedUp, summary.changedDown, summary.kept,
     summary.skippedCooldown, summary.skippedSmall, summary.skippedSame,
     summary.disabled, summary.inactive, summary.inboundDiscount, summary.superSource,
@@ -1710,6 +1723,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     summary.htlcMinAttempts, summary.htlcMinPolicyFails, summary.htlcMinLiquidityFails,
     summary.htlcPolicyRateMin*100, summary.htlcLiquidityRateMin*100,
     summary.htlcGlobalCountFactor, summary.htlcGlobalRateFactor,
+    summary.htlcClassifiedTotal, summary.htlcAttemptsTotal, summary.htlcUnclassifiedTotal,
   )
   seedText := fmt.Sprintf(
     "🌱 seed amboss=%d missing=%d err=%d empty=%d outrate=%d mem=%d default=%d",
@@ -1737,6 +1751,10 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       HTLCLiqHot: summary.htlcLiqHot,
       HTLCPolicyHot: summary.htlcPolicyHot,
       HTLCSampleLow: summary.htlcSampleLow,
+      HTLCAttemptsTotal: summary.htlcAttemptsTotal,
+      HTLCClassifiedTotal: summary.htlcClassifiedTotal,
+      HTLCUnclassifiedTotal: summary.htlcUnclassifiedTotal,
+      HTLCTopReasons: append([]string{}, summary.htlcTopReasons...),
       HTLCWindowMin: summary.htlcWindowMin,
       HTLCMinAttempts: summary.htlcMinAttempts,
       HTLCMinPolicyFails: summary.htlcMinPolicyFails,
@@ -1794,6 +1812,20 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       HTLCThresholdFactor: e.calib.HTLCThresholdFactor,
     },
   })
+  if len(summary.htlcTopReasons) > 0 {
+    entries = append(entries, autofeeLogEntry{
+      Line: "🧪 htlc_unclassified_top " + strings.Join(summary.htlcTopReasons, " | "),
+      Payload: &autofeeLogItem{
+        Kind: "htlc_diag",
+        Category: "htlc_diag",
+        HTLCTopReasons: append([]string{}, summary.htlcTopReasons...),
+        HTLCUnclassifiedTotal: summary.htlcUnclassifiedTotal,
+        HTLCClassifiedTotal: summary.htlcClassifiedTotal,
+        HTLCAttemptsTotal: summary.htlcAttemptsTotal,
+        HTLCWindowMin: summary.htlcWindowMin,
+      },
+    })
+  }
 
   if len(changedLines) > 0 {
     entries = append(entries, autofeeLogEntry{Line: "✅", Payload: &autofeeLogItem{Kind: "section", Category: "changed"}})
@@ -1849,6 +1881,7 @@ type htlcFailureSignal struct {
   Attempts60m int
   PolicyFails60m int
   LiquidityFails60m int
+  UnclassifiedFails60m int
   PolicyFailRate60m float64
   LiquidityFailRate60m float64
   WindowMin int
@@ -1862,6 +1895,10 @@ type htlcSignalMeta struct {
   MinAttempts int
   MinPolicyFails int
   MinLiquidityFails int
+  AttemptsTotal int
+  ClassifiedTotal int
+  UnclassifiedTotal int
+  TopReasons []string
   PolicyRateMin float64
   LiquidityRateMin float64
   GlobalCountFactor float64
@@ -1926,6 +1963,11 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
   attempts := map[uint64]int{}
   policyFails := map[uint64]int{}
   liquidityFails := map[uint64]int{}
+  unclassifiedFails := map[uint64]int{}
+  unclassifiedReasons := map[string]int{}
+  attemptsTotal := 0
+  classifiedTotal := 0
+  unclassifiedTotal := 0
   cutoff := e.now.Add(-window)
 
   for _, entry := range entries {
@@ -1941,6 +1983,7 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
       continue
     }
     attempts[chanID]++
+    attemptsTotal++
     policy, liquidity := classifyHTLCFailure(entry)
     if policy {
       policyFails[chanID]++
@@ -1948,7 +1991,19 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
     if liquidity {
       liquidityFails[chanID]++
     }
+    if policy || liquidity {
+      classifiedTotal++
+    } else {
+      unclassifiedFails[chanID]++
+      unclassifiedTotal++
+      reasonKey := htlcFailureReasonKey(entry)
+      unclassifiedReasons[reasonKey]++
+    }
   }
+  meta.AttemptsTotal = attemptsTotal
+  meta.ClassifiedTotal = classifiedTotal
+  meta.UnclassifiedTotal = unclassifiedTotal
+  meta.TopReasons = summarizeTopReasonCounts(unclassifiedReasons, 3)
 
   for _, ch := range channels {
     if ch.ChannelID == 0 {
@@ -1960,6 +2015,7 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
     }
     polFails := policyFails[ch.ChannelID]
     liqFails := liquidityFails[ch.ChannelID]
+    uncFails := unclassifiedFails[ch.ChannelID]
     polRate := float64(polFails) / float64(total)
     liqRate := float64(liqFails) / float64(total)
     sampleLow := total < minAttempts
@@ -1973,6 +2029,7 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
       Attempts60m: total,
       PolicyFails60m: polFails,
       LiquidityFails60m: liqFails,
+      UnclassifiedFails60m: uncFails,
       PolicyFailRate60m: polRate,
       LiquidityFailRate60m: liqRate,
       WindowMin: windowMin,
@@ -2148,6 +2205,61 @@ func htlcFailureBlob(entry htlcManagerFailedEntry) string {
     normalized = append(normalized, token)
   }
   return strings.Join(normalized, " | ")
+}
+
+func htlcFailureReasonKey(entry htlcManagerFailedEntry) string {
+  candidates := []string{
+    strings.TrimSpace(entry.FailureDetail),
+    strings.TrimSpace(entry.FailureCode),
+    strings.TrimSpace(entry.FailureReason),
+    strings.TrimSpace(entry.Event),
+  }
+  for _, raw := range candidates {
+    if raw == "" {
+      continue
+    }
+    token := strings.ToUpper(strings.ReplaceAll(strings.ReplaceAll(raw, "_", " "), "-", " "))
+    token = strings.Join(strings.Fields(token), " ")
+    if token == "" {
+      continue
+    }
+    if len(token) > 64 {
+      token = token[:64]
+    }
+    return token
+  }
+  return "UNKNOWN"
+}
+
+func summarizeTopReasonCounts(counts map[string]int, limit int) []string {
+  if limit <= 0 || len(counts) == 0 {
+    return nil
+  }
+  type item struct {
+    key string
+    count int
+  }
+  items := make([]item, 0, len(counts))
+  for key, count := range counts {
+    if count <= 0 {
+      continue
+    }
+    items = append(items, item{key: key, count: count})
+  }
+  sort.Slice(items, func(i, j int) bool {
+    if items[i].count != items[j].count {
+      return items[i].count > items[j].count
+    }
+    return items[i].key < items[j].key
+  })
+  if len(items) > limit {
+    items = items[:limit]
+  }
+  out := make([]string, 0, len(items))
+  for _, it := range items {
+    out = append(out, fmt.Sprintf("%s:%d", it.key, it.count))
+  }
+  return out
 }
 
 func containsAnyFailureToken(blob string, terms []string) bool {
@@ -2430,6 +2542,7 @@ type decision struct {
   HTLCAttempts int
   HTLCPolicyFails int
   HTLCLiquidityFails int
+  HTLCUnclassifiedFails int
   HTLCWindowMin int
   Apply bool
   Error error
@@ -2523,8 +2636,8 @@ func formatAutofeeDecisionLine(d *decision, dryRun bool, isError bool) (string, 
     tagLine,
   )
   if d.HTLCAttempts > 0 {
-    line = line + fmt.Sprintf(" | htlc%dm a=%d p=%d l=%d",
-      maxInt(1, d.HTLCWindowMin), d.HTLCAttempts, d.HTLCPolicyFails, d.HTLCLiquidityFails)
+    line = line + fmt.Sprintf(" | htlc%dm a=%d p=%d l=%d u=%d",
+      maxInt(1, d.HTLCWindowMin), d.HTLCAttempts, d.HTLCPolicyFails, d.HTLCLiquidityFails, d.HTLCUnclassifiedFails)
   }
   return strings.TrimSpace(line), category
 }
@@ -2581,6 +2694,7 @@ func buildAutofeeChannelLogEntry(d *decision, category string, dryRun bool, err 
     HTLCAttempts: d.HTLCAttempts,
     HTLCPolicyFails: d.HTLCPolicyFails,
     HTLCLiquidityFails: d.HTLCLiquidityFails,
+    HTLCUnclassifiedFails: d.HTLCUnclassifiedFails,
     HTLCWindowMinChannel: d.HTLCWindowMin,
   }
   if err != nil {
@@ -2774,6 +2888,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   htlcAttempts := 0
   htlcPolicyFails := 0
   htlcLiquidityFails := 0
+  htlcUnclassifiedFails := 0
   htlcWindowMin := 0
   if superSourceActive {
     tags = append(tags, "super-source")
@@ -2788,6 +2903,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     htlcAttempts = signal.Attempts60m
     htlcPolicyFails = signal.PolicyFails60m
     htlcLiquidityFails = signal.LiquidityFails60m
+    htlcUnclassifiedFails = signal.UnclassifiedFails60m
     htlcWindowMin = signal.WindowMin
     if signal.SampleLow {
       tags = append(tags, "htlc-sample-low")
@@ -3403,6 +3519,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     HTLCAttempts: htlcAttempts,
     HTLCPolicyFails: htlcPolicyFails,
     HTLCLiquidityFails: htlcLiquidityFails,
+    HTLCUnclassifiedFails: htlcUnclassifiedFails,
     HTLCWindowMin: htlcWindowMin,
     Apply: apply && finalPpm != localPpm,
     State: st,
