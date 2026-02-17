@@ -380,15 +380,19 @@ func ensureAppUpgradeScript(ctx context.Context) error {
   installCmd := fmt.Sprintf("mkdir -p %s && install -m 0755 %s %s", filepath.Dir(appUpgradeScriptPath), tmpPath, appUpgradeScriptPath)
   out, err := runSystemd(ctx, "/bin/sh", "-c", installCmd)
   if err != nil {
-    if info, statErr := os.Stat(appUpgradeScriptPath); statErr == nil && info.Mode()&0111 != 0 {
-      // Keep running with the existing on-disk script if the update step failed.
-      return nil
-    }
     msg := strings.TrimSpace(out)
     if msg != "" {
       return fmt.Errorf("systemd-run failed (check sudoers for lightningos): %w: %s", err, msg)
     }
     return fmt.Errorf("systemd-run failed (check sudoers for lightningos): %w", err)
+  }
+
+  installed, readErr := os.ReadFile(appUpgradeScriptPath)
+  if readErr != nil {
+    return fmt.Errorf("failed to read installed app upgrade script: %w", readErr)
+  }
+  if string(installed) != embeddedAppUpgradeScript {
+    return errors.New("installed app upgrade script content does not match embedded script")
   }
   return nil
 }
