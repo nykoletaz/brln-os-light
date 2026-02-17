@@ -168,16 +168,16 @@ on conflict (id) do nothing;
 	if _, err := tx.Exec(ctx, `
 update depix_settings
 set
-  provider_base_url = coalesce(nullif(provider_base_url, ''), $4),
-  provider_api_key = coalesce(nullif(provider_api_key, ''), $5),
-  default_timezone = coalesce(nullif(default_timezone, ''), $6),
-  min_amount_cents = case when min_amount_cents <= 0 then $7 else min_amount_cents end,
-  max_amount_cents = case when max_amount_cents <= 0 then $8 else max_amount_cents end,
-  daily_limit_cents = case when daily_limit_cents <= 0 then $9 else daily_limit_cents end,
-  eulen_fee_cents = case when eulen_fee_cents < 0 then $10 else eulen_fee_cents end,
-  brln_fee_bps = case when brln_fee_bps <= 0 then $11 else brln_fee_bps end
+  provider_base_url = coalesce(nullif(provider_base_url, ''), $2),
+  provider_api_key = coalesce(nullif(provider_api_key, ''), $3),
+  default_timezone = coalesce(nullif(default_timezone, ''), $4),
+  min_amount_cents = case when min_amount_cents <= 0 then $5 else min_amount_cents end,
+  max_amount_cents = case when max_amount_cents <= 0 then $6 else max_amount_cents end,
+  daily_limit_cents = case when daily_limit_cents <= 0 then $7 else daily_limit_cents end,
+  eulen_fee_cents = case when eulen_fee_cents < 0 then $8 else eulen_fee_cents end,
+  brln_fee_bps = case when brln_fee_bps <= 0 then $9 else brln_fee_bps end
 where id = $1;
-`, depixSettingsID, defaults.AppInstalled, defaults.AppEnabled, defaults.ProviderBaseURL, defaults.ProviderAPIKey, defaults.DefaultTimezone, defaults.MinAmountCents, defaults.MaxAmountCents, defaults.DailyLimitCents, defaults.EulenFeeCents, defaults.BrlnFeeBPS); err != nil {
+`, depixSettingsID, defaults.ProviderBaseURL, defaults.ProviderAPIKey, defaults.DefaultTimezone, defaults.MinAmountCents, defaults.MaxAmountCents, defaults.DailyLimitCents, defaults.EulenFeeCents, defaults.BrlnFeeBPS); err != nil {
 		return err
 	}
 
