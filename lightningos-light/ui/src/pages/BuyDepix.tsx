@@ -129,8 +129,8 @@ export default function BuyDepix() {
       const items: DepixOrder[] = Array.isArray(payload?.items) ? payload.items : []
       setOrders(items)
       if (items.length > 0 && activeOrderID === null) {
-        const firstOpen = items.find((item) => !isTerminalStatus(item.status))
-        setActiveOrderID(firstOpen ? firstOpen.id : items[0].id)
+        const firstLive = items.find((item) => shouldRefreshOrder(item))
+        setActiveOrderID(firstLive ? firstLive.id : null)
       }
     } catch {
       setOrders([])
@@ -164,9 +164,9 @@ export default function BuyDepix() {
     if (orders.length === 0) return null
     if (activeOrderID !== null) {
       const match = orders.find((item) => item.id === activeOrderID)
-      if (match) return match
+      if (match && shouldRefreshOrder(match)) return match
     }
-    return orders.find((item) => !isTerminalStatus(item.status)) || orders[0]
+    return orders.find((item) => shouldRefreshOrder(item)) || null
   }, [orders, activeOrderID])
 
   useEffect(() => {
