@@ -128,7 +128,15 @@ func (s *DepixService) EnsureSchema(ctx context.Context) error {
 		return errors.New("db unavailable")
 	}
 	defaults := depixDefaultSettings()
-	_, err := s.db.Exec(ctx, `
+	tx, err := s.db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	if _, err := tx.Exec(ctx, `
 create table if not exists depix_settings (
   id integer primary key,
   app_installed boolean not null default false,
@@ -142,15 +150,22 @@ create table if not exists depix_settings (
   eulen_fee_cents bigint not null default 99,
   brln_fee_bps bigint not null default 150,
   updated_at timestamptz not null default now()
-);
+);`); err != nil {
+		return err
+	}
 
+	if _, err := tx.Exec(ctx, `
 insert into depix_settings (
   id, app_installed, app_enabled, provider_base_url, provider_api_key, default_timezone,
   min_amount_cents, max_amount_cents, daily_limit_cents, eulen_fee_cents, brln_fee_bps, updated_at
 )
 values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
 on conflict (id) do nothing;
+`, depixSettingsID, defaults.AppInstalled, defaults.AppEnabled, defaults.ProviderBaseURL, defaults.ProviderAPIKey, defaults.DefaultTimezone, defaults.MinAmountCents, defaults.MaxAmountCents, defaults.DailyLimitCents, defaults.EulenFeeCents, defaults.BrlnFeeBPS); err != nil {
+		return err
+	}
 
+	if _, err := tx.Exec(ctx, `
 update depix_settings
 set
   provider_base_url = coalesce(nullif(provider_base_url, ''), $4),
@@ -162,7 +177,11 @@ set
   eulen_fee_cents = case when eulen_fee_cents < 0 then $10 else eulen_fee_cents end,
   brln_fee_bps = case when brln_fee_bps <= 0 then $11 else brln_fee_bps end
 where id = $1;
+`, depixSettingsID, defaults.AppInstalled, defaults.AppEnabled, defaults.ProviderBaseURL, defaults.ProviderAPIKey, defaults.DefaultTimezone, defaults.MinAmountCents, defaults.MaxAmountCents, defaults.DailyLimitCents, defaults.EulenFeeCents, defaults.BrlnFeeBPS); err != nil {
+		return err
+	}
 
+	if _, err := tx.Exec(ctx, `
 create table if not exists depix_orders (
   id bigserial primary key,
   user_key text not null,
@@ -192,12 +211,18 @@ create table if not exists depix_orders (
   updated_at timestamptz not null default now(),
   last_checked_at timestamptz,
   confirmed_at timestamptz
-);
+);`); err != nil {
+		return err
+	}
 
-create index if not exists depix_orders_user_created_idx on depix_orders (user_key, created_at desc);
-create index if not exists depix_orders_status_idx on depix_orders (status, created_at desc);
-`, depixSettingsID, defaults.AppInstalled, defaults.AppEnabled, defaults.ProviderBaseURL, defaults.ProviderAPIKey, defaults.DefaultTimezone, defaults.MinAmountCents, defaults.MaxAmountCents, defaults.DailyLimitCents, defaults.EulenFeeCents, defaults.BrlnFeeBPS)
-	return err
+	if _, err := tx.Exec(ctx, `create index if not exists depix_orders_user_created_idx on depix_orders (user_key, created_at desc);`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `create index if not exists depix_orders_status_idx on depix_orders (status, created_at desc);`); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (s *DepixService) Config(ctx context.Context, userKeyRaw, timezoneRaw string) (depixConfig, error) {

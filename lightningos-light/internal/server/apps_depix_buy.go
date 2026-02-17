@@ -20,7 +20,7 @@ func depixBuyDefinition() appDefinition {
 	return appDefinition{
 		ID:          depixBuyAppID,
 		Name:        "Buy DePix",
-		Description: "Buy DePix via PIX with BRLN split lock and checkout tracking.",
+		Description: "Buy DePix via PIX with checkout tracking.",
 		Port:        0,
 	}
 }
