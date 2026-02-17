@@ -30,6 +30,27 @@ require_root() {
   fi
 }
 
+resolve_bin() {
+  local name="$1"
+  shift
+
+  local candidate=""
+  candidate="$(command -v "$name" 2>/dev/null || true)"
+  if [[ -n "$candidate" ]]; then
+    echo "$candidate"
+    return 0
+  fi
+
+  for candidate in "$@"; do
+    if [[ -x "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 VERSION=""
 TAG=""
 REPO_URL="https://github.com/jvxis/brln-os-light.git"
@@ -68,6 +89,8 @@ done
 
 require_root
 
+export PATH="/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
 VERSION="${VERSION#v}"
 VERSION="$(echo "${VERSION}" | tr -s '[:space:]' ' ' | sed 's/^ *//;s/ *$//;s/ /-/g')"
 if [[ -z "$VERSION" ]]; then
@@ -85,16 +108,19 @@ if [[ "$TAG" =~ [[:space:]] ]]; then
 fi
 
 LOCK_FILE="/var/lib/lightningos/app-upgrade.lock"
+GIT_BIN="$(resolve_bin git /usr/bin/git /bin/git)" || die "Required command missing: git"
+GO_BIN="$(resolve_bin go /usr/local/go/bin/go /usr/bin/go /bin/go)" || die "Required command missing: go"
+NPM_BIN="$(resolve_bin npm /usr/bin/npm /usr/local/bin/npm /bin/npm)" || die "Required command missing: npm"
+SYSTEMCTL_BIN="$(resolve_bin systemctl /usr/bin/systemctl /bin/systemctl)" || die "Required command missing: systemctl"
+INSTALL_BIN="$(resolve_bin install /usr/bin/install /bin/install)" || die "Required command missing: install"
+CP_BIN="$(resolve_bin cp /usr/bin/cp /bin/cp)" || die "Required command missing: cp"
+RM_BIN="$(resolve_bin rm /usr/bin/rm /bin/rm)" || die "Required command missing: rm"
+FLOCK_BIN="$(resolve_bin flock /usr/bin/flock /bin/flock)" || die "Required command missing: flock"
+DATE_BIN="$(resolve_bin date /usr/bin/date /bin/date)" || die "Required command missing: date"
 exec 9>"$LOCK_FILE"
-if ! flock -n 9; then
+if ! "$FLOCK_BIN" -n 9; then
   die "Another app upgrade is already running."
 fi
-
-for dep in git go npm systemctl install cp rm flock; do
-  if ! command -v "$dep" >/dev/null 2>&1; then
-    die "Required command missing: ${dep}"
-  fi
-done
 
 mirror_root="/var/lib/lightningos/src/brln-os-light"
 worktree_root="/var/lib/lightningos/worktrees"
@@ -102,8 +128,8 @@ worktree_dir=""
 
 cleanup() {
   if [[ -n "$worktree_dir" && -d "$worktree_dir" ]]; then
-    git -C "$mirror_root" worktree remove --force "$worktree_dir" >/dev/null 2>&1 || true
-    rm -rf "$worktree_dir" >/dev/null 2>&1 || true
+    "$GIT_BIN" -C "$mirror_root" worktree remove --force "$worktree_dir" >/dev/null 2>&1 || true
+    "$RM_BIN" -rf "$worktree_dir" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -111,56 +137,56 @@ trap cleanup EXIT
 print_step "Preparing repository mirror"
 mkdir -p "$(dirname "$mirror_root")" "$worktree_root"
 if [[ ! -d "$mirror_root/.git" ]]; then
-  rm -rf "$mirror_root"
-  git clone --no-checkout "$REPO_URL" "$mirror_root"
+  "$RM_BIN" -rf "$mirror_root"
+  "$GIT_BIN" clone --no-checkout "$REPO_URL" "$mirror_root"
 else
-  git -C "$mirror_root" remote set-url origin "$REPO_URL" || true
+  "$GIT_BIN" -C "$mirror_root" remote set-url origin "$REPO_URL" || true
 fi
-git -C "$mirror_root" fetch --tags --prune origin
+"$GIT_BIN" -C "$mirror_root" fetch --tags --prune origin
 
-if ! git -C "$mirror_root" rev-parse -q --verify "refs/tags/$TAG^{}" >/dev/null 2>&1; then
+if ! "$GIT_BIN" -C "$mirror_root" rev-parse -q --verify "refs/tags/$TAG^{}" >/dev/null 2>&1; then
   alt_tag=""
   while IFS= read -r candidate; do
     if [[ "${candidate,,}" == "${TAG,,}" ]]; then
       alt_tag="$candidate"
       break
     fi
-  done < <(git -C "$mirror_root" tag --list)
+  done < <("$GIT_BIN" -C "$mirror_root" tag --list)
   if [[ -n "$alt_tag" ]]; then
     TAG="$alt_tag"
   fi
 fi
 
-if ! git -C "$mirror_root" rev-parse -q --verify "refs/tags/$TAG^{}" >/dev/null 2>&1; then
+if ! "$GIT_BIN" -C "$mirror_root" rev-parse -q --verify "refs/tags/$TAG^{}" >/dev/null 2>&1; then
   die "Tag not found in repository: ${TAG}"
 fi
 
 print_step "Creating temporary worktree for ${TAG}"
 safe_tag="$(echo "$TAG" | tr '/\\' '__')"
-worktree_dir="${worktree_root}/app-upgrade-${safe_tag}-$(date +%Y%m%d%H%M%S)"
-git -C "$mirror_root" worktree add --detach "$worktree_dir" "$TAG"
+worktree_dir="${worktree_root}/app-upgrade-${safe_tag}-$("$DATE_BIN" +%Y%m%d%H%M%S)"
+"$GIT_BIN" -C "$mirror_root" worktree add --detach "$worktree_dir" "$TAG"
 
 go_env="GOPATH=/opt/lightningos/go GOCACHE=/opt/lightningos/go-cache GOMODCACHE=/opt/lightningos/go/pkg/mod"
 mkdir -p /opt/lightningos/go /opt/lightningos/go-cache /opt/lightningos/go/pkg/mod
 
 print_step "Downloading Go modules"
-(cd "$worktree_dir" && env $go_env GOFLAGS=-mod=mod go mod download)
+(cd "$worktree_dir" && env $go_env GOFLAGS=-mod=mod "$GO_BIN" mod download)
 print_ok "Go modules ready"
 
 print_step "Building manager binary"
-(cd "$worktree_dir" && env $go_env GOFLAGS=-mod=mod go build -o dist/lightningos-manager ./cmd/lightningos-manager)
-install -m 0755 "$worktree_dir/dist/lightningos-manager" /opt/lightningos/manager/lightningos-manager
+(cd "$worktree_dir" && env $go_env GOFLAGS=-mod=mod "$GO_BIN" build -o dist/lightningos-manager ./cmd/lightningos-manager)
+"$INSTALL_BIN" -m 0755 "$worktree_dir/dist/lightningos-manager" /opt/lightningos/manager/lightningos-manager
 print_ok "Manager installed"
 
 print_step "Building UI"
-(cd "$worktree_dir/ui" && npm install && npm run build)
-rm -rf /opt/lightningos/ui/*
-cp -a "$worktree_dir/ui/dist/." /opt/lightningos/ui/
+(cd "$worktree_dir/ui" && "$NPM_BIN" install && "$NPM_BIN" run build)
+"$RM_BIN" -rf /opt/lightningos/ui/*
+"$CP_BIN" -a "$worktree_dir/ui/dist/." /opt/lightningos/ui/
 print_ok "UI installed"
 
 print_step "Restarting lightningos-manager"
-systemctl restart lightningos-manager
-if systemctl is-active --quiet lightningos-manager; then
+"$SYSTEMCTL_BIN" restart lightningos-manager
+if "$SYSTEMCTL_BIN" is-active --quiet lightningos-manager; then
   print_ok "lightningos-manager is active"
 else
   die "lightningos-manager failed to start"
