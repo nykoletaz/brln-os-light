@@ -443,7 +443,7 @@ export default function Reports() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-5">
-        <div className="section-card lg:col-span-3 space-y-4">
+        <div className="section-card lg:col-span-3 flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold">{t('reports.liveResults')}</h3>
             <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-fog">
@@ -453,7 +453,7 @@ export default function Reports() {
           {liveLoading && !live && <p className="text-sm text-fog/60">{t('reports.loadingLive')}</p>}
           {liveError && <p className="text-sm text-brass">{liveError}</p>}
           {!liveLoading && !liveError && live && (
-            <>
+            <div className="flex flex-1 flex-col gap-4">
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl bg-white/5 p-4">
                   <p className="text-xs uppercase tracking-wide text-fog/60">{t('reports.revenue')}</p>
@@ -478,7 +478,7 @@ export default function Reports() {
                   <span className="text-fog">{formatter.format(live.rebalance_count)}</span>
                 </div>
               </div>
-              <div className="h-44">
+              <div className="min-h-[220px] flex-1">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={liveChartData} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
                     <CartesianGrid stroke="rgba(255,255,255,0.08)" vertical={false} />
@@ -498,7 +498,7 @@ export default function Reports() {
                 </ResponsiveContainer>
               </div>
               <p className="text-xs text-fog/50">{t('reports.lastUpdated', { time: formatDateLong(live.end) })}</p>
-            </>
+            </div>
           )}
         </div>
 
