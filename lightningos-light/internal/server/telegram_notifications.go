@@ -22,10 +22,11 @@ import (
 )
 
 const (
-  telegramSettingsID = 1
-  telegramSummaryIntervalMin = 60
-  telegramSummaryIntervalMax = 720
-  telegramSummaryIntervalDefault = 720
+	telegramSettingsID = 1
+	telegramSummaryIntervalMin = 60
+	telegramSummaryIntervalMax = 720
+	telegramSummaryIntervalDefault = 720
+	telegramGoalBarSegments = 14
 )
 
 type telegramNotificationSettings struct {
@@ -753,7 +754,7 @@ func (s *Server) buildTelegramBalanceSummary(ctx context.Context) (string, error
 	if movement, err := reportLiveMovement(ctx, svc, now, loc); err == nil && movement.TargetSat > 0 {
 		goalLine = fmt.Sprintf("🎯 Goal: %s %s %s",
 			movementToneEmoji(movement.MovementPct),
-			renderProgressBar(movement.MovementPct, 10),
+			renderProgressBar(movement.MovementPct, telegramGoalBarSegments),
 			formatProgressPercent(movement.MovementPct),
 		)
 	}
