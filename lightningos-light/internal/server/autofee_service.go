@@ -364,8 +364,8 @@ var autofeeProfiles = map[string]autofeeProfile{
     HTLCMinAttempts60m: 20,
     HTLCPolicyFailRate: 0.20,
     HTLCPolicyMinFails: 4,
-    HTLCLiquidityFailRate: 0.30,
-    HTLCLiquidityMinFails: 5,
+    HTLCLiquidityFailRate: 0.25,
+    HTLCLiquidityMinFails: 4,
     HTLCLiquidityHotBump: 0.03,
     HTLCLiquidityHotNoDownOutRatio: 0.08,
     HTLCPolicyHotBump: 0.015,
@@ -434,8 +434,8 @@ var autofeeProfiles = map[string]autofeeProfile{
     HTLCMinAttempts60m: 12,
     HTLCPolicyFailRate: 0.15,
     HTLCPolicyMinFails: 3,
-    HTLCLiquidityFailRate: 0.25,
-    HTLCLiquidityMinFails: 4,
+    HTLCLiquidityFailRate: 0.20,
+    HTLCLiquidityMinFails: 3,
     HTLCLiquidityHotBump: 0.05,
     HTLCLiquidityHotNoDownOutRatio: 0.12,
     HTLCPolicyHotBump: 0.025,
@@ -504,8 +504,8 @@ var autofeeProfiles = map[string]autofeeProfile{
     HTLCMinAttempts60m: 8,
     HTLCPolicyFailRate: 0.10,
     HTLCPolicyMinFails: 2,
-    HTLCLiquidityFailRate: 0.20,
-    HTLCLiquidityMinFails: 3,
+    HTLCLiquidityFailRate: 0.15,
+    HTLCLiquidityMinFails: 2,
     HTLCLiquidityHotBump: 0.07,
     HTLCLiquidityHotNoDownOutRatio: 0.18,
     HTLCPolicyHotBump: 0.035,
@@ -526,8 +526,8 @@ const (
 const (
   // Global HTLC sensitivity knobs applied after profile/node/liquidity calibration.
   // Keep them shared across all profiles so behavior stays consistent network-wide.
-  htlcGlobalMinCountFactor = 0.65
-  htlcGlobalRateFactor = 0.80
+  htlcGlobalMinCountFactor = 0.55
+  htlcGlobalRateFactor = 0.75
   htlcGlobalMinAttemptsFloor = 4
   htlcGlobalMinFailsFloor = 2
   htlcGlobalPolicyRateFloor = 0.08
