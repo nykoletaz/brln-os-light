@@ -14,6 +14,7 @@ POSTGRES_VERSION="${POSTGRES_VERSION:-latest}"
 LND_FIX_PERMS_SCRIPT="/usr/local/sbin/lightningos-fix-lnd-perms"
 LND_UPGRADE_SCRIPT="/usr/local/sbin/lightningos-upgrade-lnd"
 APP_UPGRADE_SCRIPT="/usr/local/sbin/lightningos-upgrade-app"
+TERMINAL_OPERATOR_USER="${TERMINAL_OPERATOR_USER:-losop}"
 
 CURRENT_STEP=""
 LOG_FILE="/var/log/lightningos-install-existing.log"
@@ -715,16 +716,7 @@ ensure_reports_services() {
 }
 
 ensure_terminal_service() {
-  local user="$1"
-  local group="$2"
   cp "$REPO_ROOT/templates/systemd/lightningos-terminal.service" /etc/systemd/system/lightningos-terminal.service
-  sed -i "s|^User=.*|User=${user}|" /etc/systemd/system/lightningos-terminal.service
-  sed -i "s|^Group=.*|Group=${group}|" /etc/systemd/system/lightningos-terminal.service
-  if getent group lightningos >/dev/null 2>&1; then
-    sed -i "s|^SupplementaryGroups=.*|SupplementaryGroups=lightningos|" /etc/systemd/system/lightningos-terminal.service
-  else
-    sed -i "/^SupplementaryGroups=/d" /etc/systemd/system/lightningos-terminal.service
-  fi
 }
 
 ensure_terminal_helper() {
@@ -737,21 +729,55 @@ ensure_terminal_helper() {
   fi
 }
 
-ensure_terminal_user() {
-  local user="$1"
+ensure_operator_user() {
+  local user="$TERMINAL_OPERATOR_USER"
+  print_step "Ensuring operator user ${user}"
+
+  local pw="${TERMINAL_OPERATOR_PASSWORD:-}"
+  if [[ -z "$pw" ]]; then
+    local file="$SECRETS_PATH"
+    mkdir -p /etc/lightningos
+    if [[ ! -f "$file" ]]; then
+      cp "$REPO_ROOT/templates/secrets.env" "$file"
+    fi
+    if ! grep -q '^TERMINAL_OPERATOR_USER=' "$file"; then
+      echo "TERMINAL_OPERATOR_USER=${user}" >> "$file"
+    fi
+    if ! grep -q '^TERMINAL_OPERATOR_PASSWORD=' "$file"; then
+      echo "TERMINAL_OPERATOR_PASSWORD=" >> "$file"
+    fi
+    pw=$(grep '^TERMINAL_OPERATOR_PASSWORD=' "$file" | cut -d= -f2- || true)
+    if [[ -z "$pw" ]]; then
+      pw=$(openssl rand -hex 12)
+      sed -i "s|^TERMINAL_OPERATOR_PASSWORD=.*|TERMINAL_OPERATOR_PASSWORD=${pw}|" "$file"
+    fi
+    TERMINAL_OPERATOR_PASSWORD="$pw"
+    export TERMINAL_OPERATOR_PASSWORD
+    if id lightningos >/dev/null 2>&1; then
+      chown root:lightningos "$file"
+      chmod 660 "$file"
+    fi
+  fi
+
+  set_env_value "TERMINAL_OPERATOR_USER" "$user"
+  set_env_value "TERMINAL_OPERATOR_PASSWORD" "$pw"
+  set_env_value "TERMINAL_CREDENTIAL" "${user}:${pw}"
+
   if id "$user" >/dev/null 2>&1; then
+    ensure_group_membership "$user" lightningos sudo systemd-journal
+    print_ok "Operator user ${user} already exists"
     return
   fi
-  if prompt_yes_no "User ${user} does not exist. Create it?" "y"; then
-    if command -v adduser >/dev/null 2>&1; then
-      adduser --disabled-password --gecos "" "$user"
-    else
-      useradd -m -d "/home/${user}" -s /bin/bash "$user"
-    fi
+
+  if command -v adduser >/dev/null 2>&1; then
+    adduser --disabled-password --gecos "" "$user"
   else
-    print_warn "Terminal service requires a valid user"
-    exit 1
+    useradd -m -d "/home/${user}" -s /bin/bash "$user"
   fi
+
+  echo "${user}:${pw}" | chpasswd
+  ensure_group_membership "$user" lightningos sudo systemd-journal
+  print_ok "Operator user ${user} ready"
 }
 
 ensure_lightningos_user() {
@@ -1153,6 +1179,7 @@ main() {
   ensure_dirs
   ensure_secrets_file
   ensure_lightningos_user
+  ensure_operator_user
 
   local manager_user="lightningos"
   local manager_group="lightningos"
@@ -1217,39 +1244,21 @@ main() {
     fi
   fi
 
-  if prompt_yes_no "Enable LightningOS terminal service (GoTTY)?" "n"; then
-    if ! command -v tmux >/dev/null 2>&1; then
-      if prompt_yes_no "tmux not found. Install it now?" "y"; then
-        if command -v apt-get >/dev/null 2>&1; then
-          apt-get update
-          apt-get install -y tmux
-        else
-          print_warn "apt-get not found; install tmux manually"
-        fi
-      fi
+  print_step "Configuring LightningOS terminal service (GoTTY)"
+  if ! command -v tmux >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+      apt-get update
+      apt-get install -y tmux
+    else
+      print_warn "apt-get not found; install tmux manually"
     fi
-    if ! command -v gotty >/dev/null 2>&1; then
-      if prompt_yes_no "GoTTY not found. Install it now?" "y"; then
-        install_gotty
-      else
-        print_warn "Terminal service requires GoTTY"
-      fi
-    fi
-    local terminal_user
-    terminal_user=$(prompt_value "Terminal operator user" "admin")
-    ensure_terminal_user "$terminal_user"
-    local terminal_pass
-    terminal_pass=$(prompt_value "Terminal password (leave blank to auto-generate)")
-    if [[ -z "$terminal_pass" ]]; then
-      terminal_pass=$(openssl rand -hex 12)
-    fi
-    set_env_value "TERMINAL_ENABLED" "1"
-    set_env_value "TERMINAL_OPERATOR_USER" "$terminal_user"
-    set_env_value "TERMINAL_OPERATOR_PASSWORD" "$terminal_pass"
-    set_env_value "TERMINAL_CREDENTIAL" "${terminal_user}:${terminal_pass}"
-    ensure_terminal_helper
-    ensure_terminal_service "$manager_user" "$manager_group"
   fi
+  if ! command -v gotty >/dev/null 2>&1; then
+    install_gotty
+  fi
+  set_env_value "TERMINAL_ENABLED" "1"
+  ensure_terminal_helper
+  ensure_terminal_service
 
   local membership_groups=()
   if [[ -n "$LND_GROUP" ]]; then
@@ -1303,11 +1312,21 @@ main() {
   print_step "Enabling services"
   systemctl daemon-reload
   systemctl enable --now lightningos-manager
+  systemctl restart lightningos-manager >/dev/null 2>&1 || true
   if [[ -f /etc/systemd/system/lightningos-reports.timer ]]; then
     systemctl enable --now lightningos-reports.timer
   fi
+  if [[ -f /etc/lightningos/secrets.env ]]; then
+    # shellcheck disable=SC1091
+    source /etc/lightningos/secrets.env
+  fi
   if [[ -f /etc/systemd/system/lightningos-terminal.service ]]; then
-    systemctl enable --now lightningos-terminal || true
+    if [[ "${TERMINAL_ENABLED:-0}" == "1" && -n "${TERMINAL_CREDENTIAL:-}" ]]; then
+      systemctl enable --now lightningos-terminal >/dev/null 2>&1 || true
+      systemctl restart lightningos-terminal >/dev/null 2>&1 || true
+    else
+      systemctl disable --now lightningos-terminal >/dev/null 2>&1 || true
+    fi
   fi
 
   ensure_ufw_manager_port
