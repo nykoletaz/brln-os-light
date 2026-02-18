@@ -275,7 +275,10 @@ export const getReportsCustom = (from: string, to: string) =>
   request(`/api/reports/custom?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
 export const getReportsSummary = (range: string) =>
   request(`/api/reports/summary?range=${encodeURIComponent(range)}`)
+export const getReportsSummaryCustom = (from: string, to: string) =>
+  request(`/api/reports/summary/custom?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
 export const getReportsLive = () => request('/api/reports/live')
+export const getReportsMovementLive = () => request('/api/reports/movement/live')
 export const getReportsConfig = () => request('/api/reports/config')
 export const updateReportsConfig = (payload: {
   live_timeout_sec?: number | null

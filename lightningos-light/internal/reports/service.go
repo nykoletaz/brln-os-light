@@ -80,10 +80,28 @@ func (s *Service) Summary(ctx context.Context, key string, now time.Time, loc *t
   }
   if dr.All {
     summary, err := FetchSummaryAll(ctx, s.db)
-    return summary, dr, err
+    if err != nil {
+      return Summary{}, dr, err
+    }
+    targetSat, err := FetchMovementTargetAllSum(ctx, s.db)
+    if err != nil {
+      return Summary{}, dr, err
+    }
+    summary.MovementTargetSat = targetSat
+    summary.MovementPct = movementPct(summary.Totals, targetSat)
+    return summary, dr, nil
   }
   summary, err := FetchSummaryRange(ctx, s.db, dr.StartDate, dr.EndDate)
-  return summary, dr, err
+  if err != nil {
+    return Summary{}, dr, err
+  }
+  targetSat, err := FetchMovementTargetRangeSum(ctx, s.db, dr.StartDate, dr.EndDate)
+  if err != nil {
+    return Summary{}, dr, err
+  }
+  summary.MovementTargetSat = targetSat
+  summary.MovementPct = movementPct(summary.Totals, targetSat)
+  return summary, dr, nil
 }
 
 func (s *Service) CustomRange(ctx context.Context, startDate, endDate time.Time) ([]Row, error) {
@@ -91,7 +109,17 @@ func (s *Service) CustomRange(ctx context.Context, startDate, endDate time.Time)
 }
 
 func (s *Service) CustomSummary(ctx context.Context, startDate, endDate time.Time) (Summary, error) {
-  return FetchSummaryRange(ctx, s.db, startDate, endDate)
+  summary, err := FetchSummaryRange(ctx, s.db, startDate, endDate)
+  if err != nil {
+    return Summary{}, err
+  }
+  targetSat, err := FetchMovementTargetRangeSum(ctx, s.db, startDate, endDate)
+  if err != nil {
+    return Summary{}, err
+  }
+  summary.MovementTargetSat = targetSat
+  summary.MovementPct = movementPct(summary.Totals, targetSat)
+  return summary, nil
 }
 
 func (s *Service) Live(ctx context.Context, now time.Time, loc *time.Location, lookbackHours int) (TimeRange, Metrics, error) {
@@ -123,6 +151,68 @@ func (s *Service) Live(ctx context.Context, now time.Time, loc *time.Location, l
   s.liveMu.Unlock()
 
   return tr, metrics, nil
+}
+
+func (s *Service) MovementLive(ctx context.Context, now time.Time, loc *time.Location) (MovementLive, error) {
+  if loc == nil {
+    loc = time.Local
+  }
+  reportDate := dateOnly(now, loc)
+  targetSat, err := s.EnsureMovementTargetForDate(ctx, reportDate, loc)
+  if err != nil {
+    return MovementLive{}, err
+  }
+  tr, metrics, err := s.Live(ctx, now, loc, 0)
+  if err != nil {
+    return MovementLive{}, err
+  }
+  routed := routedVolumeSat(metrics)
+  pct := 0.0
+  if targetSat > 0 {
+    pct = (routed / float64(targetSat)) * 100
+  }
+  return MovementLive{
+    Date: reportDate,
+    Start: tr.StartLocal,
+    End: tr.EndLocal,
+    Timezone: loc.String(),
+    TargetSat: targetSat,
+    RoutedVolumeSat: routed,
+    MovementPct: pct,
+  }, nil
+}
+
+func (s *Service) CaptureMovementTargetForDate(ctx context.Context, reportDate time.Time, loc *time.Location) (int64, error) {
+  if s.lnd == nil {
+    return 0, nil
+  }
+  if loc == nil {
+    loc = time.Local
+  }
+  targetDate := dateOnly(reportDate, loc)
+  targetSat, err := s.computeOutboundTarget(ctx)
+  if err != nil {
+    return 0, err
+  }
+  if err := UpsertMovementTargetDaily(ctx, s.db, targetDate, targetSat); err != nil {
+    return 0, err
+  }
+  return targetSat, nil
+}
+
+func (s *Service) EnsureMovementTargetForDate(ctx context.Context, reportDate time.Time, loc *time.Location) (int64, error) {
+  if loc == nil {
+    loc = time.Local
+  }
+  targetDate := dateOnly(reportDate, loc)
+  targetSat, ok, err := FetchMovementTargetDaily(ctx, s.db, targetDate)
+  if err != nil {
+    return 0, err
+  }
+  if ok {
+    return targetSat, nil
+  }
+  return s.CaptureMovementTargetForDate(ctx, targetDate, loc)
 }
 
 func shouldAttachBalances(reportDate time.Time, loc *time.Location) bool {
@@ -157,4 +247,33 @@ func (s *Service) attachBalances(ctx context.Context, metrics Metrics) Metrics {
   metrics.LightningBalanceSat = &lightning
   metrics.TotalBalanceSat = &total
   return metrics
+}
+
+func (s *Service) computeOutboundTarget(ctx context.Context) (int64, error) {
+  if s.lnd == nil {
+    return 0, nil
+  }
+  channels, err := s.lnd.ListChannels(ctx)
+  if err != nil {
+    return 0, err
+  }
+  var total int64
+  for _, ch := range channels {
+    total += ch.LocalBalanceSat
+  }
+  return total, nil
+}
+
+func movementPct(metrics Metrics, targetSat int64) float64 {
+  if targetSat <= 0 {
+    return 0
+  }
+  return (routedVolumeSat(metrics) / float64(targetSat)) * 100
+}
+
+func routedVolumeSat(metrics Metrics) float64 {
+  if metrics.RoutedVolumeMsat != 0 {
+    return float64(metrics.RoutedVolumeMsat) / 1000
+  }
+  return float64(metrics.RoutedVolumeSat)
 }

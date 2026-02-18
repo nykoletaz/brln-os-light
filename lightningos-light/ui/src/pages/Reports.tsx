@@ -15,7 +15,16 @@ import {
   XAxis,
   YAxis
 } from 'recharts'
-import { getReportsConfig, getReportsLive, getReportsRange, getReportsSummary, updateReportsConfig } from '../api'
+import {
+  getReportsConfig,
+  getReportsCustom,
+  getReportsLive,
+  getReportsMovementLive,
+  getReportsRange,
+  getReportsSummary,
+  getReportsSummaryCustom,
+  updateReportsConfig
+} from '../api'
 import { getLocale } from '../i18n'
 
 type ReportSeriesItem = {
@@ -55,6 +64,8 @@ type SummaryResponse = {
   days: number
   totals: ReportMetrics
   averages: ReportMetrics
+  movement_target_sats?: number
+  movement_pct?: number
 }
 
 type LiveResponse = ReportMetrics & {
@@ -63,15 +74,25 @@ type LiveResponse = ReportMetrics & {
   timezone: string
 }
 
+type MovementLiveResponse = {
+  date: string
+  start: string
+  end: string
+  timezone: string
+  outbound_target_sats: number
+  routed_volume_sats: number
+  movement_pct: number
+}
+
 type ReportsConfig = {
   live_timeout_sec?: number | null
   live_lookback_hours?: number | null
   run_timeout_sec?: number | null
 }
 
-type RangeKey = 'd-1' | 'month' | '3m' | '6m' | '12m' | 'all'
+type RangeKey = 'd-1' | 'date' | 'month' | '3m' | '6m' | '12m' | 'all'
 
-const rangeOptions: RangeKey[] = ['d-1', 'month', '3m', '6m', '12m', 'all']
+const rangeOptions: RangeKey[] = ['d-1', 'date', 'month', '3m', '6m', '12m', 'all']
 
 const COLORS = {
   net: '#34d399',
@@ -87,9 +108,20 @@ export default function Reports() {
   const { t, i18n } = useTranslation()
   const locale = getLocale(i18n.language)
   const [range, setRange] = useState<RangeKey>('d-1')
+  const [customDate, setCustomDate] = useState(() => {
+    const value = new Date()
+    value.setDate(value.getDate() - 1)
+    const year = value.getFullYear()
+    const month = String(value.getMonth() + 1).padStart(2, '0')
+    const day = String(value.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  })
   const [series, setSeries] = useState<ReportSeriesItem[]>([])
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
   const [live, setLive] = useState<LiveResponse | null>(null)
+  const [movementLive, setMovementLive] = useState<MovementLiveResponse | null>(null)
+  const [movementLoading, setMovementLoading] = useState(true)
+  const [movementError, setMovementError] = useState('')
   const [seriesLoading, setSeriesLoading] = useState(true)
   const [seriesError, setSeriesError] = useState('')
   const [liveLoading, setLiveLoading] = useState(true)
@@ -175,7 +207,14 @@ export default function Reports() {
     setSeriesLoading(true)
     setSeriesError('')
 
-    Promise.all([getReportsRange(range), getReportsSummary(range)])
+    const rangeRequest = range === 'date'
+      ? getReportsCustom(customDate, customDate)
+      : getReportsRange(range)
+    const summaryRequest = range === 'date'
+      ? getReportsSummaryCustom(customDate, customDate)
+      : getReportsSummary(range)
+
+    Promise.all([rangeRequest, summaryRequest])
       .then(([rangeResp, summaryResp]) => {
         if (!active) return
         const typedRange = rangeResp as SeriesResponse
@@ -197,7 +236,7 @@ export default function Reports() {
     return () => {
       active = false
     }
-  }, [range])
+  }, [customDate, range, t])
 
   useEffect(() => {
     let active = true
@@ -226,6 +265,33 @@ export default function Reports() {
       window.clearInterval(timer)
     }
   }, [])
+
+  useEffect(() => {
+    let active = true
+    const loadMovement = () => {
+      setMovementLoading(true)
+      setMovementError('')
+      getReportsMovementLive()
+        .then((data) => {
+          if (!active) return
+          setMovementLive(data as MovementLiveResponse)
+        })
+        .catch((err) => {
+          if (!active) return
+          setMovementError(err instanceof Error ? err.message : t('reports.dailyMovementUnavailable'))
+        })
+        .finally(() => {
+          if (!active) return
+          setMovementLoading(false)
+        })
+    }
+    loadMovement()
+    const timer = window.setInterval(loadMovement, 60000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [t])
 
   useEffect(() => {
     let active = true
@@ -298,6 +364,13 @@ export default function Reports() {
   }, [live, t])
 
   const hasBalances = chartData.some((item) => item.onchain !== null || item.lightning !== null || item.total !== null)
+  const movementPct = movementLive?.movement_pct ?? 0
+  const hasMovementTarget = (movementLive?.outbound_target_sats ?? 0) > 0
+  const movementProgress = Math.max(0, Math.min(100, movementPct))
+  const movementTone = !hasMovementTarget ? 'bg-slate-500' : movementPct >= 75 ? 'bg-emerald-500' : movementPct >= 50 ? 'bg-amber-400' : 'bg-rose-500'
+  const summaryMovementPct = summary?.movement_pct ?? 0
+  const summaryMovementTarget = summary?.movement_target_sats ?? 0
+  const summaryMovementTone = summaryMovementPct >= 75 ? 'bg-emerald-500' : summaryMovementPct >= 50 ? 'bg-amber-400' : 'bg-rose-500'
 
   return (
     <section className="space-y-6">
@@ -383,6 +456,17 @@ export default function Reports() {
               </button>
             ))}
           </div>
+          {range === 'date' && (
+            <label className="block text-sm text-fog/70">
+              {t('reports.selectDate')}
+              <input
+                className="input-field mt-2"
+                type="date"
+                value={customDate}
+                onChange={(e) => setCustomDate(e.target.value)}
+              />
+            </label>
+          )}
           {seriesLoading && series.length === 0 && <p className="text-sm text-fog/60">{t('reports.loadingRange')}</p>}
           {seriesError && <p className="text-sm text-brass">{seriesError}</p>}
           {!seriesLoading && !seriesError && summary && (
@@ -404,11 +488,48 @@ export default function Reports() {
                 <p className="text-fog">{t('reports.forwards')} {formatter.format(summary.totals.forward_count)}</p>
                 <p className="text-fog">{t('reports.rebalances')} {formatter.format(summary.totals.rebalance_count)}</p>
                 <p className="text-fog">{t('reports.routedVolume')} {formatSats(summary.totals.routed_volume_sats)}</p>
+                {summaryMovementTarget > 0 ? (
+                  <p className="mt-1 flex items-center gap-2 text-fog">
+                    <span className={`inline-block h-2.5 w-2.5 rounded-full ${summaryMovementTone}`} />
+                    <span>
+                      {t('reports.movementProgress', {
+                        routed: formatSats(summary.totals.routed_volume_sats),
+                        target: formatSats(summaryMovementTarget),
+                        percent: formatter.format(summaryMovementPct)
+                      })}
+                    </span>
+                  </p>
+                ) : (
+                  <p className="mt-1 text-fog/70">{t('reports.movementProgressUnavailable')}</p>
+                )}
               </div>
               <p className="text-xs text-fog/50">{t('reports.basedOnDays', { count: summary.days })}</p>
             </div>
           )}
         </div>
+      </div>
+
+      <div className="section-card space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold">{t('reports.dailyMovementGoal')}</h3>
+          <span className="text-xs text-fog/60">{t('reports.liveRange')}</span>
+        </div>
+        {movementLoading && !movementLive && <p className="text-sm text-fog/60">{t('reports.loadingMovement')}</p>}
+        {movementError && <p className="text-sm text-brass">{movementError}</p>}
+        {!movementLoading && !movementError && movementLive && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-fog/70">
+              <span>{t('reports.routedVolume')} {formatSats(movementLive.routed_volume_sats)}</span>
+              <span>{t('reports.outboundTarget')} {formatSats(movementLive.outbound_target_sats)}</span>
+              <span>{t('reports.progressPct', { value: formatter.format(movementPct) })}</span>
+            </div>
+            <div className="h-3 w-full rounded-full bg-white/10 overflow-hidden">
+              <div className={`h-full ${movementTone}`} style={{ width: `${movementProgress}%` }} />
+            </div>
+            {!hasMovementTarget && <p className="text-xs text-fog/50">{t('reports.movementProgressUnavailable')}</p>}
+            <p className="text-xs text-fog/50">{t('reports.lastUpdated', { time: formatDateLong(movementLive.end) })}</p>
+          </div>
+        )}
       </div>
 
       <div className="section-card space-y-4">

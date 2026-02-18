@@ -531,6 +531,8 @@
     "basedOnDays": "Baseado em {{count}} dia(s) armazenado(s).",
     "cost": "Custo",
     "daily": "Diário",
+    "dailyMovementGoal": "Meta de movimento diário",
+    "dailyMovementUnavailable": "Meta diária indisponível",
     "forwardCount": "Contagem de Forward",
     "forwards": "Forwards",
     "historicalRange": "Intervalo histórico",
@@ -541,13 +543,19 @@
     "liveResults": "Resultados ao vivo",
     "liveUnavailable": "Relatório ao vivo indisponível",
     "loadingLive": "Carregando métricas ao vivo...",
+    "loadingMovement": "Carregando meta diária...",
     "loadingRange": "Carregando intervalo...",
+    "movementProgress": "Movimento {{routed}} / {{target}} ({{percent}}%)",
+    "movementProgressUnavailable": "Meta de movimento indisponível para este período.",
     "net": "Líquido",
     "netRoutingProfit": "Lucro líquido de roteamento",
     "noData": "Sem dados para este intervalo.",
     "onchain": "On-chain",
+    "outboundTarget": "Meta outbound",
+    "progressPct": "Progresso {{value}}%",
     "range": {
       "d-1": "D-1",
+      "date": "Data",
       "month": "Mês",
       "3m": "3 meses",
       "6m": "6 meses",
@@ -559,6 +567,7 @@
     "revenue": "Receita",
     "revenueVsCost": "Receita vs custo",
     "routedVolume": "Volume roteado",
+    "selectDate": "Selecionar data",
     "settings": {
       "liveLookback": "Janela ao vivo (horas)",
       "liveLookbackHint": "Reduza a janela ao vivo em nodes grandes. Deixe vazio para o dia inteiro.",
@@ -1435,5 +1444,3 @@
     }
   }
 }
-
-

@@ -2,8 +2,10 @@ package reports
 
 import (
   "context"
+  "errors"
   "time"
 
+  "github.com/jackc/pgx/v5"
   "github.com/jackc/pgx/v5/pgtype"
   "github.com/jackc/pgx/v5/pgxpool"
 )
@@ -28,6 +30,13 @@ create table if not exists reports_daily (
   onchain_balance_sats bigint null,
   lightning_balance_sats bigint null,
   total_balance_sats bigint null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists reports_movement_daily (
+  report_date date primary key,
+  outbound_target_sats bigint not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -105,6 +114,70 @@ on conflict (report_date) do update set
 `
 
   return query, args
+}
+
+func UpsertMovementTargetDaily(ctx context.Context, db *pgxpool.Pool, reportDate time.Time, outboundTargetSat int64) error {
+  if db == nil {
+    return nil
+  }
+  _, err := db.Exec(ctx, `
+insert into reports_movement_daily (report_date, outbound_target_sats)
+values ($1, $2)
+on conflict (report_date) do update set
+  outbound_target_sats = excluded.outbound_target_sats,
+  updated_at = now()
+`, normalizeReportDate(reportDate), outboundTargetSat)
+  return err
+}
+
+func FetchMovementTargetDaily(ctx context.Context, db *pgxpool.Pool, reportDate time.Time) (int64, bool, error) {
+  if db == nil {
+    return 0, false, nil
+  }
+  var target int64
+  err := db.QueryRow(ctx, `
+select outbound_target_sats
+from reports_movement_daily
+where report_date = $1
+`, normalizeReportDate(reportDate)).Scan(&target)
+  if err != nil {
+    if isNotFound(err) {
+      return 0, false, nil
+    }
+    return 0, false, err
+  }
+  return target, true, nil
+}
+
+func FetchMovementTargetRangeSum(ctx context.Context, db *pgxpool.Pool, startDate, endDate time.Time) (int64, error) {
+  if db == nil {
+    return 0, nil
+  }
+  var total int64
+  err := db.QueryRow(ctx, `
+select coalesce(sum(outbound_target_sats), 0)
+from reports_movement_daily
+where report_date >= $1 and report_date <= $2
+`, normalizeReportDate(startDate), normalizeReportDate(endDate)).Scan(&total)
+  if err != nil {
+    return 0, err
+  }
+  return total, nil
+}
+
+func FetchMovementTargetAllSum(ctx context.Context, db *pgxpool.Pool) (int64, error) {
+  if db == nil {
+    return 0, nil
+  }
+  var total int64
+  err := db.QueryRow(ctx, `
+select coalesce(sum(outbound_target_sats), 0)
+from reports_movement_daily
+`).Scan(&total)
+  if err != nil {
+    return 0, err
+  }
+  return total, nil
 }
 
 func FetchRange(ctx context.Context, db *pgxpool.Pool, startDate, endDate time.Time) ([]Row, error) {
@@ -357,4 +430,8 @@ func fillMsatFromSat(metrics *Metrics) {
   if metrics.RoutedVolumeMsat == 0 && metrics.RoutedVolumeSat != 0 {
     metrics.RoutedVolumeMsat = metrics.RoutedVolumeSat * 1000
   }
+}
+
+func isNotFound(err error) bool {
+  return errors.Is(err, pgx.ErrNoRows)
 }

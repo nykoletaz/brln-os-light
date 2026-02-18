@@ -62,30 +62,9 @@ func (s *Server) handleReportsCustom(w http.ResponseWriter, r *http.Request) {
     return
   }
 
-  fromStr := strings.TrimSpace(r.URL.Query().Get("from"))
-  toStr := strings.TrimSpace(r.URL.Query().Get("to"))
-  if fromStr == "" || toStr == "" {
-    writeError(w, http.StatusBadRequest, "from and to are required")
-    return
-  }
-
   loc := s.reportsLocation()
-  startDate, err := reports.ParseDate(fromStr, loc)
-  if err != nil {
-    writeError(w, http.StatusBadRequest, "from must be YYYY-MM-DD")
-    return
-  }
-  endDate, err := reports.ParseDate(toStr, loc)
-  if err != nil {
-    writeError(w, http.StatusBadRequest, "to must be YYYY-MM-DD")
-    return
-  }
-  if err := reports.ValidateCustomRange(startDate, endDate); err != nil {
-    if strings.Contains(err.Error(), "large") {
-      writeError(w, http.StatusBadRequest, fmt.Sprintf("range too large (max %d days)", reports.CustomRangeDaysLimit()))
-    } else {
-      writeError(w, http.StatusBadRequest, "invalid range")
-    }
+  startDate, endDate, ok := parseCustomRange(w, r, loc)
+  if !ok {
     return
   }
 
@@ -102,6 +81,43 @@ func (s *Server) handleReportsCustom(w http.ResponseWriter, r *http.Request) {
     Range: "custom",
     Timezone: reportsTimezoneLabel(loc),
     Series: mapSeries(items),
+  })
+}
+
+func (s *Server) handleReportsSummaryCustom(w http.ResponseWriter, r *http.Request) {
+  svc, errMsg := s.reportsService()
+  if svc == nil {
+    msg := strings.TrimSpace(errMsg)
+    if msg == "" {
+      msg = "reports unavailable"
+    }
+    writeError(w, http.StatusServiceUnavailable, msg)
+    return
+  }
+
+  loc := s.reportsLocation()
+  startDate, endDate, ok := parseCustomRange(w, r, loc)
+  if !ok {
+    return
+  }
+
+  ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+  defer cancel()
+
+  summary, err := svc.CustomSummary(ctx, startDate, endDate)
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, "failed to load report summary")
+    return
+  }
+
+  writeJSON(w, http.StatusOK, reportSummaryResponse{
+    Range: "custom",
+    Timezone: reportsTimezoneLabel(loc),
+    Days: summary.Days,
+    Totals: metricsPayload(summary.Totals),
+    Averages: metricsPayload(summary.Averages),
+    MovementTargetSat: summary.MovementTargetSat,
+    MovementPct: summary.MovementPct,
   })
 }
 
@@ -141,6 +157,8 @@ func (s *Server) handleReportsSummary(w http.ResponseWriter, r *http.Request) {
     Days: summary.Days,
     Totals: metricsPayload(summary.Totals),
     Averages: metricsPayload(summary.Averages),
+    MovementTargetSat: summary.MovementTargetSat,
+    MovementPct: summary.MovementPct,
   })
 }
 
@@ -171,6 +189,38 @@ func (s *Server) handleReportsLive(w http.ResponseWriter, r *http.Request) {
   payload.Timezone = reportsTimezoneLabel(loc)
 
   writeJSON(w, http.StatusOK, payload)
+}
+
+func (s *Server) handleReportsMovementLive(w http.ResponseWriter, r *http.Request) {
+  svc, errMsg := s.reportsService()
+  if svc == nil {
+    msg := strings.TrimSpace(errMsg)
+    if msg == "" {
+      msg = "reports unavailable"
+    }
+    writeError(w, http.StatusServiceUnavailable, msg)
+    return
+  }
+
+  ctx, cancel := context.WithTimeout(r.Context(), reportsLiveTimeout())
+  defer cancel()
+
+  loc := s.reportsLocation()
+  movement, err := svc.MovementLive(ctx, time.Now(), loc)
+  if err != nil {
+    writeError(w, http.StatusServiceUnavailable, "daily movement unavailable")
+    return
+  }
+
+  writeJSON(w, http.StatusOK, reportMovementLiveResponse{
+    Date: movement.Date.Format("2006-01-02"),
+    Start: movement.Start.Format(time.RFC3339),
+    End: movement.End.Format(time.RFC3339),
+    Timezone: reportsTimezoneLabel(loc),
+    OutboundTargetSat: movement.TargetSat,
+    RoutedVolumeSat: movement.RoutedVolumeSat,
+    MovementPct: movement.MovementPct,
+  })
 }
 
 func reportsLiveTimeout() time.Duration {
@@ -236,6 +286,18 @@ type reportSummaryResponse struct {
   Days int64 `json:"days"`
   Totals reportMetricsPayload `json:"totals"`
   Averages reportMetricsPayload `json:"averages"`
+  MovementTargetSat int64 `json:"movement_target_sats"`
+  MovementPct float64 `json:"movement_pct"`
+}
+
+type reportMovementLiveResponse struct {
+  Date string `json:"date"`
+  Start string `json:"start"`
+  End string `json:"end"`
+  Timezone string `json:"timezone"`
+  OutboundTargetSat int64 `json:"outbound_target_sats"`
+  RoutedVolumeSat float64 `json:"routed_volume_sats"`
+  MovementPct float64 `json:"movement_pct"`
 }
 
 type reportMetricsPayload struct {
@@ -294,4 +356,33 @@ func metricSats(msat int64, sat int64) float64 {
     return float64(msat) / 1000
   }
   return float64(sat)
+}
+
+func parseCustomRange(w http.ResponseWriter, r *http.Request, loc *time.Location) (time.Time, time.Time, bool) {
+  fromStr := strings.TrimSpace(r.URL.Query().Get("from"))
+  toStr := strings.TrimSpace(r.URL.Query().Get("to"))
+  if fromStr == "" || toStr == "" {
+    writeError(w, http.StatusBadRequest, "from and to are required")
+    return time.Time{}, time.Time{}, false
+  }
+
+  startDate, err := reports.ParseDate(fromStr, loc)
+  if err != nil {
+    writeError(w, http.StatusBadRequest, "from must be YYYY-MM-DD")
+    return time.Time{}, time.Time{}, false
+  }
+  endDate, err := reports.ParseDate(toStr, loc)
+  if err != nil {
+    writeError(w, http.StatusBadRequest, "to must be YYYY-MM-DD")
+    return time.Time{}, time.Time{}, false
+  }
+  if err := reports.ValidateCustomRange(startDate, endDate); err != nil {
+    if strings.Contains(err.Error(), "large") {
+      writeError(w, http.StatusBadRequest, fmt.Sprintf("range too large (max %d days)", reports.CustomRangeDaysLimit()))
+    } else {
+      writeError(w, http.StatusBadRequest, "invalid range")
+    }
+    return time.Time{}, time.Time{}, false
+  }
+  return startDate, endDate, true
 }

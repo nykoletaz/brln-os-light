@@ -27,6 +27,8 @@ type Summary struct {
   Days int64
   Totals Metrics
   Averages Metrics
+  MovementTargetSat int64
+  MovementPct float64
 }
 
 type TimeRange struct {
@@ -53,4 +55,14 @@ func (tr TimeRange) EndUnixInclusive() uint64 {
 
 func isMidnight(t time.Time) bool {
   return t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 && t.Nanosecond() == 0
+}
+
+type MovementLive struct {
+  Date time.Time
+  Start time.Time
+  End time.Time
+  Timezone string
+  TargetSat int64
+  RoutedVolumeSat float64
+  MovementPct float64
 }

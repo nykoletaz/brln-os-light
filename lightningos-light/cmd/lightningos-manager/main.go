@@ -95,6 +95,9 @@ func runReports(args []string) {
   if err != nil {
     logger.Fatalf("reports-run failed: %v", err)
   }
+  if _, err := svc.CaptureMovementTargetForDate(ctx, time.Now().In(loc), loc); err != nil {
+    logger.Printf("reports: movement target capture failed: %v", err)
+  }
 
   logger.Printf(
     "reports: stored %s (revenue %d sats, cost %d sats, net %d sats)",
