@@ -17,31 +17,13 @@ LightningOS Light is a Full Lightning Node Daemon Installer, Lightning node mana
 - LND managed via systemd, gRPC on localhost
 - Seed phrase is never persisted or logged
 - Wizard for Bitcoin RPC credentials and wallet setup
-- Lightning Ops: peers, channels, and fee updates
+- Lightning Ops suite: peers/channels, Rebalance Center, Autofee, HTLC signals, and Channel Auto Heal
 - Keysend Chat: 1 sat per message + routing fees, unread indicators, 30-day retention
 - Real-time notifications (on-chain, Lightning, channels, forwards, rebalances)
 - Telegram notifications: SCB backups, financial summaries, on-demand `/scb` and `/balances`
+- Daily routing reports (timer + backfill + live API)
 - App Store: LNDg, Peerswap (psweb), Elements, Bitcoin Core
 - Bitcoin Local management (status + config) and logs viewer
-
-
-## Release notes
-### 0.2.3 Beta
-- Telegram notifications refactor: general rules card, SCB backup toggle, scheduled financial summaries, and on-demand `/scb` + `/balances` commands (auto-registered in the bot menu).
-- SCB backups include peer alias context in the Telegram caption.
-- Lightning Ops UI improvements: channel card refinements and channel balance bar.
-- Autofee HTLC Insights steps and calibration by node size/liquidity, plus scheduler/manual-run and ceiling fee/seed fixes.
-- Rebalance Center score fixes and improvements.
-- LND config upgrade fixes and PostgreSQL install fix.
-- Localization updates (UI Portuguese refinements).
-
-### 0.2.2 Beta
-- New HTLC Manager with hysteresis and minute-based runs, plus multiple improvements.
-- Rebalance Center enhancements: manual restart flows, pre-probe routing, watchdogs, ROI logic improvements, and details view.
-- Integrated Autofee: mirror brln-autofee, per-channel enablement, 0-fee support, rebalance cost fallback, results search, last-run persistence, tag trend, step-cap per channel, relax mode, and dry-run filtering.
-- Channel Auto Heal update and Tor peers checker.
-- Wallet activity cleanup fix (remove balances from wallet history).
-- LND upgrade fixes and health check follow-bitcoin toggle.
 
 ## Repository layout
 - `cmd/lightningos-manager`: Go backend (API + static UI)
@@ -159,9 +141,12 @@ Keysend chat is available in the UI and targets only online peers.
 
 Telegram notifications:
 - Configure in the UI: Notifications -> Telegram.
+- UI includes a general rules card for operational defaults.
 - SCB backup on channel open/close (toggle).
 - Scheduled financial summary (hourly to 12-hour intervals).
 - On-demand commands: `/scb` (backup) and `/balances` (summary).
+- `/scb` and `/balances` are auto-registered in the Telegram bot menu.
+- SCB backup messages include peer alias context in the caption.
 - Bot token comes from @BotFather and chat id from @userinfobot.
 - Direct chat only; leaving both fields empty disables Telegram.
 
@@ -200,6 +185,14 @@ API endpoints:
 - `GET /api/reports/custom?from=YYYY-MM-DD&to=YYYY-MM-DD` (max 730 days)
 - `GET /api/reports/summary?range=...`
 - `GET /api/reports/live` (today 00:00 local → now, cached ~60s)
+
+## Lightning Ops (feature map)
+- Channel management: peer/channel controls, policy updates, and channel card/balance refinements.
+- Rebalance Center: manual + auto rebalances with score-based targeting, watchdogs, pre-probing, ROI guardrails, and optional manual auto-restart.
+- Autofee: per-channel fee automation with cost anchors, Amboss seeding, HTLC signal integration, calibration by node size/liquidity, scheduler/manual runs, and detailed run history.
+- HTLC Manager: hysteresis-based HTLC telemetry used by Autofee and liquidity decisions.
+- Channel Auto Heal + Tor peers checker: operational guardrails for peer/channel reliability.
+- Health checks: optional follow-bitcoin checks for LND/node health workflows.
 
 ## Rebalance Center
 Rebalance Center is an inbound (local/outbound) liquidity optimizer for LND. It can run manual rebalances per channel or fully automated scans that enqueue rebalances based on ROI and budget constraints. A rebalance only proceeds when **outgoing fee > peer fee** so you never pay more than the peer charge without a positive spread. Costs are tracked from notifications (fee msat) and aggregated into live cost + daily auto/manual spending.
@@ -428,6 +421,10 @@ Run the registry sanity tests:
 ```bash
 go test ./internal/server -run TestValidateAppRegistry
 ```
+
+## Changelog
+Release-by-release notes are tracked in GitHub Releases:
+- https://github.com/jvxis/brln-os-light/releases
 
 ## Development
 See `DEVELOPMENT.md` for local dev setup and build instructions.
