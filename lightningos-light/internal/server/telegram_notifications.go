@@ -745,17 +745,25 @@ func (s *Server) buildTelegramBalanceSummary(ctx context.Context) (string, error
   if metrics, err := reportSummaryMetrics(ctx, svc, reports.RangeD1, now, loc); err == nil {
     d1Line = "📅 " + formatReportLine("D-1", metrics)
   }
-  liveLine := "📈 Live: unavailable"
-  if metrics, err := reportLiveMetrics(ctx, svc, now, loc); err == nil {
-    liveLine = "📈 " + formatReportLine("Live", metrics)
-  }
-  monthLine := "🗓️ Month: unavailable"
-  if metrics, err := reportSummaryMetrics(ctx, svc, reports.RangeMonth, now, loc); err == nil {
-    monthLine = "🗓️ " + formatReportLine("Month", metrics)
-  }
+	liveLine := "📈 Live: unavailable"
+	if metrics, err := reportLiveMetrics(ctx, svc, now, loc); err == nil {
+		liveLine = "📈 " + formatReportLine("Live", metrics)
+	}
+	goalLine := "🎯 Goal: unavailable"
+	if movement, err := reportLiveMovement(ctx, svc, now, loc); err == nil && movement.TargetSat > 0 {
+		goalLine = fmt.Sprintf("🎯 Goal: %s %s %s",
+			movementToneEmoji(movement.MovementPct),
+			renderProgressBar(movement.MovementPct, 10),
+			formatProgressPercent(movement.MovementPct),
+		)
+	}
+	monthLine := "🗓️ Month: unavailable"
+	if metrics, err := reportSummaryMetrics(ctx, svc, reports.RangeMonth, now, loc); err == nil {
+		monthLine = "🗓️ " + formatReportLine("Month", metrics)
+	}
 
-  lines = append(lines, d1Line, liveLine, monthLine)
-  return strings.Join(lines, "\n"), nil
+	lines = append(lines, d1Line, liveLine, goalLine, monthLine)
+	return strings.Join(lines, "\n"), nil
 }
 
 func (s *Server) buildTelegramSystemSummary(ctx context.Context) (string, error) {
@@ -861,13 +869,23 @@ func reportSummaryMetrics(ctx context.Context, svc *reports.Service, key string,
 }
 
 func reportLiveMetrics(ctx context.Context, svc *reports.Service, now time.Time, loc *time.Location) (reports.Metrics, error) {
-  liveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-  defer cancel()
-  _, metrics, err := svc.Live(liveCtx, now, loc, reportsLiveLookbackHours())
-  if err != nil {
-    return reports.Metrics{}, err
-  }
-  return metrics, nil
+	liveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	_, metrics, err := svc.Live(liveCtx, now, loc, reportsLiveLookbackHours())
+	if err != nil {
+		return reports.Metrics{}, err
+	}
+	return metrics, nil
+}
+
+func reportLiveMovement(ctx context.Context, svc *reports.Service, now time.Time, loc *time.Location) (reports.MovementLive, error) {
+	liveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	movement, err := svc.MovementLive(liveCtx, now, loc)
+	if err != nil {
+		return reports.MovementLive{}, err
+	}
+	return movement, nil
 }
 
 func formatReportLine(label string, metrics reports.Metrics) string {
@@ -952,7 +970,45 @@ func formatFloat(value float64, decimals int) string {
   if formatted == "" || formatted == "-" {
     return "0"
   }
-  return formatted
+	return formatted
+}
+
+func formatProgressPercent(value float64) string {
+	if value < 0 {
+		value = 0
+	}
+	return fmt.Sprintf("%.1f%%", value)
+}
+
+func renderProgressBar(value float64, segments int) string {
+	if segments <= 0 {
+		segments = 10
+	}
+	clamped := value
+	if clamped < 0 {
+		clamped = 0
+	}
+	if clamped > 100 {
+		clamped = 100
+	}
+	filled := int(math.Round((clamped / 100) * float64(segments)))
+	if filled < 0 {
+		filled = 0
+	}
+	if filled > segments {
+		filled = segments
+	}
+	return "[" + strings.Repeat("#", filled) + strings.Repeat("-", segments-filled) + "]"
+}
+
+func movementToneEmoji(value float64) string {
+	if value >= 75 {
+		return "🟢"
+	}
+	if value >= 50 {
+		return "🟡"
+	}
+	return "🔴"
 }
 
 func containsAlert(alerts []string, value string) bool {
