@@ -138,6 +138,18 @@ export default function Reports() {
 
   const formatSats = (value: number) => `${formatter.format(value)} sats`
   const formatCompact = (value: number) => compactFormatter.format(value)
+  const formatInputDate = (value: Date) => {
+    const year = value.getFullYear()
+    const month = String(value.getMonth() + 1).padStart(2, '0')
+    const day = String(value.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+  const isTodaySelection = (dateValue: string, serverToday?: string) => {
+    if (serverToday && serverToday.trim()) {
+      return dateValue === serverToday
+    }
+    return dateValue === formatInputDate(new Date())
+  }
   const parseChartNumber = (value: number | string) => {
     if (typeof value === 'number') return value
     const raw = String(value).trim()
@@ -203,16 +215,23 @@ export default function Reports() {
   }
 
   useEffect(() => {
+    const selectedToday = range === 'date' && isTodaySelection(customDate, movementLive?.date)
+    if (selectedToday) {
+      setSeriesError('')
+      if (!live) {
+        setSeriesLoading(true)
+        setSeries([])
+        setSummary(null)
+      }
+      return
+    }
+
     let active = true
     setSeriesLoading(true)
     setSeriesError('')
 
-    const rangeRequest = range === 'date'
-      ? getReportsCustom(customDate, customDate)
-      : getReportsRange(range)
-    const summaryRequest = range === 'date'
-      ? getReportsSummaryCustom(customDate, customDate)
-      : getReportsSummary(range)
+    const rangeRequest = range === 'date' ? getReportsCustom(customDate, customDate) : getReportsRange(range)
+    const summaryRequest = range === 'date' ? getReportsSummaryCustom(customDate, customDate) : getReportsSummary(range)
 
     Promise.all([rangeRequest, summaryRequest])
       .then(([rangeResp, summaryResp]) => {
@@ -236,7 +255,48 @@ export default function Reports() {
     return () => {
       active = false
     }
-  }, [customDate, range, t])
+  }, [customDate, movementLive?.date, range, t])
+
+  useEffect(() => {
+    const selectedToday = range === 'date' && isTodaySelection(customDate, movementLive?.date)
+    if (!selectedToday || !live) return
+
+    const liveMetrics: ReportMetrics = {
+      forward_fee_revenue_sats: live.forward_fee_revenue_sats,
+      rebalance_fee_cost_sats: live.rebalance_fee_cost_sats,
+      net_routing_profit_sats: live.net_routing_profit_sats,
+      forward_count: live.forward_count,
+      rebalance_count: live.rebalance_count,
+      routed_volume_sats: live.routed_volume_sats,
+      onchain_balance_sats: live.onchain_balance_sats ?? null,
+      lightning_balance_sats: live.lightning_balance_sats ?? null,
+      total_balance_sats: live.total_balance_sats ?? null
+    }
+
+    setSeries([{
+      date: customDate,
+      forward_fee_revenue_sats: live.forward_fee_revenue_sats,
+      rebalance_fee_cost_sats: live.rebalance_fee_cost_sats,
+      net_routing_profit_sats: live.net_routing_profit_sats,
+      forward_count: live.forward_count,
+      rebalance_count: live.rebalance_count,
+      routed_volume_sats: live.routed_volume_sats,
+      onchain_balance_sats: live.onchain_balance_sats ?? null,
+      lightning_balance_sats: live.lightning_balance_sats ?? null,
+      total_balance_sats: live.total_balance_sats ?? null
+    }])
+    setSummary({
+      range: 'custom',
+      timezone: live.timezone,
+      days: 1,
+      totals: liveMetrics,
+      averages: liveMetrics,
+      movement_target_sats: movementLive?.outbound_target_sats ?? 0,
+      movement_pct: movementLive?.movement_pct ?? 0
+    })
+    setSeriesError('')
+    setSeriesLoading(false)
+  }, [customDate, live, movementLive, range])
 
   useEffect(() => {
     let active = true
