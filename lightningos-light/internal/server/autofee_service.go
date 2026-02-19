@@ -1985,8 +1985,10 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
     htlcForwardSoftMinFailsFloor,
   )
   // Policy/liquidity rates are measured against link-fail population only.
-  // Keep a dedicated minimum link-fail gate to avoid overreacting to tiny samples.
-  minLinkFails := maxInt(minPolicyFails, minLiquidityFails)
+  // Keep per-signal gates to avoid overreacting to tiny samples while preserving
+  // the configured sensitivity for each signal.
+  minPolicyLinkFails := maxInt(1, minPolicyFails)
+  minLiquidityLinkFails := maxInt(1, minLiquidityFails)
   policyRateThreshold := applyHTLCGlobalRateFactor(e.profile.HTLCPolicyFailRate, htlcGlobalRateFactor, htlcGlobalPolicyRateFloor)
   liquidityRateThreshold := applyHTLCGlobalRateFactor(e.profile.HTLCLiquidityFailRate, htlcGlobalRateFactor, htlcGlobalLiquidityRateFloor)
   forwardRateThreshold := applyHTLCGlobalRateFactor(
@@ -2119,13 +2121,14 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
     liqRate := float64(liqFails) / float64(linkBase)
     fwdRate := float64(fwdFails) / float64(total)
     sampleLow := total < minAttempts
-    linkFailGateMet := lnkFails >= minLinkFails
+    policyLinkGateMet := lnkFails >= minPolicyLinkFails
+    liquidityLinkGateMet := lnkFails >= minLiquidityLinkFails
     policyHot := !sampleLow &&
-      linkFailGateMet &&
+      policyLinkGateMet &&
       polFails >= minPolicyFails &&
       polRate >= policyRateThreshold
     liquidityHot := !sampleLow &&
-      linkFailGateMet &&
+      liquidityLinkGateMet &&
       liqFails >= minLiquidityFails &&
       liqRate >= liquidityRateThreshold
     forwardHot := !sampleLow &&
