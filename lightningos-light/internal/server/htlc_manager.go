@@ -30,9 +30,9 @@ const (
   htlcManagerMinIntervalMinutes = 1
   htlcManagerMaxIntervalMinutes = 48 * 60
   htlcManagerLogCapacity = 300
-  htlcManagerFailedCapacity = 500
+  htlcManagerFailedCapacity = 10000
   htlcManagerDefaultLogLimit = 100
-  htlcManagerMaxLogLimit = 500
+  htlcManagerMaxLogLimit = 10000
   htlcManagerFailedStreamRetry = 5 * time.Second
 )
 
