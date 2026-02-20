@@ -287,6 +287,7 @@ export default function LightningOps() {
   const [pendingChannels, setPendingChannels] = useState<PendingChannel[]>([])
   const [status, setStatus] = useState('')
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [profitFilter, setProfitFilter] = useState<'all' | 'profitable' | 'neutral' | 'deficit'>('all')
   const [search, setSearch] = useState('')
   const [minCapacity, setMinCapacity] = useState('')
   const [sortBy, setSortBy] = useState<'capacity' | 'local' | 'remote' | 'alias'>('local')
@@ -1549,7 +1550,7 @@ export default function LightningOps() {
     }
   }, [feeChannelPoint, feeScopeAll])
 
-  const filteredChannels = useMemo(() => {
+  const baseFilteredChannels = useMemo(() => {
     let list = channels
     if (filter === 'active') {
       list = list.filter((ch) => ch.active)
@@ -1574,6 +1575,30 @@ export default function LightningOps() {
     if (minCap > 0) {
       list = list.filter((ch) => ch.capacity_sat >= minCap)
     }
+    return list
+  }, [channels, filter, minCapacity, search, showPrivate])
+
+  const profitCounts = useMemo(() => {
+    const counts = { profitable: 0, neutral: 0, deficit: 0 }
+    baseFilteredChannels.forEach((ch) => {
+      const value = ch.profit_fee_7d_sat
+      if (typeof value !== 'number' || Number.isNaN(value)) return
+      if (value > 0) counts.profitable += 1
+      else if (value < 0) counts.deficit += 1
+      else counts.neutral += 1
+    })
+    return counts
+  }, [baseFilteredChannels])
+
+  const filteredChannels = useMemo(() => {
+    let list = baseFilteredChannels
+    if (profitFilter === 'profitable') {
+      list = list.filter((ch) => typeof ch.profit_fee_7d_sat === 'number' && ch.profit_fee_7d_sat > 0)
+    } else if (profitFilter === 'neutral') {
+      list = list.filter((ch) => typeof ch.profit_fee_7d_sat === 'number' && ch.profit_fee_7d_sat === 0)
+    } else if (profitFilter === 'deficit') {
+      list = list.filter((ch) => typeof ch.profit_fee_7d_sat === 'number' && ch.profit_fee_7d_sat < 0)
+    }
     const sorted = [...list]
     const direction = sortDir === 'desc' ? -1 : 1
     sorted.sort((a, b) => {
@@ -1595,7 +1620,7 @@ export default function LightningOps() {
       return (aVal - bVal) * direction
     })
     return sorted
-  }, [channels, filter, minCapacity, search, showPrivate, sortBy, sortDir])
+  }, [baseFilteredChannels, profitFilter, sortBy, sortDir])
 
   const pendingOpen = useMemo(() => pendingChannels.filter((ch) => ch.status === 'opening'), [pendingChannels])
   const pendingClose = useMemo(() => pendingChannels.filter((ch) => ch.status !== 'opening'), [pendingChannels])
@@ -2471,6 +2496,15 @@ export default function LightningOps() {
             <button className={filter === 'all' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('all')}>{t('common.all')}</button>
             <button className={filter === 'active' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('active')}>{t('common.active')}</button>
             <button className={filter === 'inactive' ? 'btn-primary' : 'btn-secondary'} onClick={() => setFilter('inactive')}>{t('common.inactive')}</button>
+            <button className={profitFilter === 'profitable' ? 'btn-primary' : 'btn-secondary'} onClick={() => setProfitFilter((prev) => (prev === 'profitable' ? 'all' : 'profitable'))}>
+              {t('lightningOps.profitPositive')}: {profitCounts.profitable}
+            </button>
+            <button className={profitFilter === 'neutral' ? 'btn-primary' : 'btn-secondary'} onClick={() => setProfitFilter((prev) => (prev === 'neutral' ? 'all' : 'neutral'))}>
+              {t('lightningOps.profitNeutral')}: {profitCounts.neutral}
+            </button>
+            <button className={profitFilter === 'deficit' ? 'btn-primary' : 'btn-secondary'} onClick={() => setProfitFilter((prev) => (prev === 'deficit' ? 'all' : 'deficit'))}>
+              {t('lightningOps.profitNegative')}: {profitCounts.deficit}
+            </button>
           </div>
         </div>
 
