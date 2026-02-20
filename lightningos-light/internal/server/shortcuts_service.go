@@ -21,6 +21,7 @@ var (
   ErrShortcutInvalidEmoji = errors.New("invalid emoji")
   ErrShortcutExists = errors.New("shortcut already exists")
   ErrShortcutNotFound = errors.New("shortcut not found")
+  ErrShortcutProtected = errors.New("default shortcut cannot be removed")
 )
 
 type Shortcut struct {
@@ -31,6 +32,7 @@ type Shortcut struct {
   IconType string `json:"icon_type"`
   IconValue string `json:"icon_value"`
   SortOrder int `json:"sort_order"`
+  Protected bool `json:"protected"`
 }
 
 type shortcutSeed struct {
@@ -153,6 +155,7 @@ order by sort_order asc, id asc
     ); err != nil {
       return nil, err
     }
+    item.Protected = isProtectedShortcutIconType(item.IconType)
     items = append(items, item)
   }
   return items, rows.Err()
@@ -184,6 +187,7 @@ func (s *ShortcutsService) Create(ctx context.Context, rawURL, rawEmoji string) 
     IconType: shortcutIconTypeEmoji,
     IconValue: emoji,
     SortOrder: sortOrder,
+    Protected: false,
   }
 
   err = s.db.QueryRow(ctx, `
@@ -207,6 +211,16 @@ func (s *ShortcutsService) Delete(ctx context.Context, id int64) error {
   }
   if id <= 0 {
     return ErrShortcutNotFound
+  }
+  var iconType string
+  if err := s.db.QueryRow(ctx, `select icon_type from ui_shortcuts where id = $1`, id).Scan(&iconType); err != nil {
+    if errors.Is(err, pgx.ErrNoRows) {
+      return ErrShortcutNotFound
+    }
+    return err
+  }
+  if isProtectedShortcutIconType(iconType) {
+    return ErrShortcutProtected
   }
   result, err := s.db.Exec(ctx, `delete from ui_shortcuts where id = $1`, id)
   if err != nil {
@@ -267,4 +281,8 @@ func shortcutNameFromURL(rawURL string) string {
     return host[:64]
   }
   return host
+}
+
+func isProtectedShortcutIconType(iconType string) bool {
+  return strings.EqualFold(strings.TrimSpace(iconType), shortcutIconTypeImage)
 }

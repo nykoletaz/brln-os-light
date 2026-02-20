@@ -93,6 +93,10 @@ func (s *Server) handleShortcutsDelete(w http.ResponseWriter, r *http.Request) {
       writeError(w, http.StatusNotFound, err.Error())
       return
     }
+    if errors.Is(err, ErrShortcutProtected) {
+      writeError(w, http.StatusForbidden, err.Error())
+      return
+    }
     writeError(w, http.StatusInternalServerError, err.Error())
     return
   }

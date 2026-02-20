@@ -49,3 +49,12 @@ func TestShortcutNameFromURL(t *testing.T) {
     t.Fatalf("unexpected name: %s", got)
   }
 }
+
+func TestIsProtectedShortcutIconType(t *testing.T) {
+  if !isProtectedShortcutIconType("image") {
+    t.Fatalf("expected image icon type to be protected")
+  }
+  if isProtectedShortcutIconType("emoji") {
+    t.Fatalf("expected emoji icon type to be removable")
+  }
+}
