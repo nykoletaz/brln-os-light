@@ -245,6 +245,9 @@ type AutofeeResultItem = {
   htlc_node_factor?: number
   htlc_liquidity_factor?: number
   htlc_threshold_factor?: number
+  low_out_thresh?: number
+  low_out_protect_thresh?: number
+  low_out_factor?: number
   amboss?: number
   missing?: number
   err?: number
@@ -596,6 +599,13 @@ export default function LightningOps() {
       revfloorThr,
       revfloorMin
     })
+    if (
+      typeof item.low_out_factor === 'number' &&
+      typeof item.low_out_thresh === 'number' &&
+      typeof item.low_out_protect_thresh === 'number'
+    ) {
+      line += ` | low_out x${item.low_out_factor.toFixed(2)} t<${(item.low_out_thresh * 100).toFixed(1)}% p<${(item.low_out_protect_thresh * 100).toFixed(1)}%`
+    }
     if (
       typeof item.htlc_node_factor === 'number' &&
       typeof item.htlc_liquidity_factor === 'number' &&
