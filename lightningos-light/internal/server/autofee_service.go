@@ -56,6 +56,15 @@ const (
   defaultSoftenMinOutRatio = 0.45
   defaultSoftenRequirePosChanMargin = true
   defaultSoftenMaxDropToPegFrac = 0.95
+  stagnationOutRatioMin = 0.30
+  stagnationNoForwardRoundsPhase1 = 2
+  stagnationNoForwardRoundsPhase2 = 4
+  stagnationOutrateTriggerMult = 1.20
+  stagnationRebalTriggerMult = 1.15
+  stagnationOutrateHeadroom = 1.05
+  stagnationRebalHeadroom = 1.08
+  stagnationSeedBlendPhase1 = 0.20
+  stagnationSeedBlendPhase2 = 0.10
 )
 
 func normalizeRebalCostMode(value string) string {
@@ -219,6 +228,9 @@ type autofeeLogItem struct {
   HTLCForwardFails int `json:"htlc_forward_fails,omitempty"`
   HTLCUnclassifiedFails int `json:"htlc_unclassified_fails,omitempty"`
   HTLCWindowMinChannel int `json:"htlc_window_min_channel,omitempty"`
+  StagnationPhase int `json:"stagnation_phase,omitempty"`
+  StagnationRounds int `json:"stagnation_rounds,omitempty"`
+  StagnationCap int `json:"stagnation_cap,omitempty"`
 }
 
 type autofeeProfile struct {
@@ -1602,6 +1614,8 @@ type explorerState struct {
   FwdsAtStart int `json:"fwds_at_start"`
   LastExitTs int64 `json:"last_exit_ts"`
   Seen bool `json:"seen"`
+  StagnationNoFwdRounds int `json:"stagnation_no_fwd_rounds,omitempty"`
+  StagnationPhase int `json:"stagnation_phase,omitempty"`
 }
 
 func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string) error {
@@ -2295,6 +2309,17 @@ func applyHTLCGlobalRateFactor(base float64, factor float64, floor float64) floa
   return scaled
 }
 
+func blendTargetWithSeed(base int, seed float64, weight float64) int {
+  if base <= 0 || seed <= 0 || weight <= 0 {
+    return base
+  }
+  w := weight
+  if w > 1 {
+    w = 1
+  }
+  return int(math.Round((1.0-w)*float64(base) + w*seed))
+}
+
 func shouldHoldUpOnRecentRebalance(classLabel string, outRatio float64, lowOutProtectThresh float64, recentRebalanceCount int) bool {
   if recentRebalanceCount <= 0 {
     return false
@@ -2775,6 +2800,9 @@ type decision struct {
   HTLCLiquidityFails int
   HTLCUnclassifiedFails int
   HTLCWindowMin int
+  StagnationPhase int
+  StagnationRounds int
+  StagnationCap int
   Apply bool
   Error error
   State *autofeeChannelState
@@ -2870,6 +2898,12 @@ func formatAutofeeDecisionLine(d *decision, dryRun bool, isError bool) (string, 
     line = line + fmt.Sprintf(" | htlc%dm a=%d p=%d l=%d f=%d u=%d",
       maxInt(1, d.HTLCWindowMin), d.HTLCAttempts, d.HTLCPolicyFails, d.HTLCLiquidityFails, d.HTLCForwardFails, d.HTLCUnclassifiedFails)
   }
+  if d.StagnationPhase > 0 {
+    line = line + fmt.Sprintf(" | stagnation p%d r%d", d.StagnationPhase, maxInt(0, d.StagnationRounds))
+    if d.StagnationCap > 0 {
+      line = line + fmt.Sprintf(" cap≤%d", d.StagnationCap)
+    }
+  }
   return strings.TrimSpace(line), category
 }
 
@@ -2928,6 +2962,9 @@ func buildAutofeeChannelLogEntry(d *decision, category string, dryRun bool, err 
     HTLCLiquidityFails: d.HTLCLiquidityFails,
     HTLCUnclassifiedFails: d.HTLCUnclassifiedFails,
     HTLCWindowMinChannel: d.HTLCWindowMin,
+    StagnationPhase: d.StagnationPhase,
+    StagnationRounds: d.StagnationRounds,
+    StagnationCap: d.StagnationCap,
   }
   if err != nil {
     payload.Error = err.Error()
@@ -2992,6 +3029,15 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   classLabel, classConf := classifyChannel(biasEma, outRatio, inb.Count, fwd.Count, st.ClassLabel, st.ClassConf)
   st.ClassLabel = classLabel
   st.ClassConf = classConf
+
+  stagnationClassEligible := strings.EqualFold(classLabel, "sink")
+  recentForwards1d := int(fwd1d.Count)
+  if stagnationClassEligible && outRatio >= stagnationOutRatioMin && recentForwards1d == 0 {
+    st.ExplorerState.StagnationNoFwdRounds++
+  } else {
+    st.ExplorerState.StagnationNoFwdRounds = 0
+    st.ExplorerState.StagnationPhase = 0
+  }
 
   superSourceActive := false
   superSourceLike := false
@@ -3306,6 +3352,75 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
 
+  stagnationRounds := st.ExplorerState.StagnationNoFwdRounds
+  stagnationActive := false
+  stagnationPhase := 0
+  stagnationTargetCap := 0
+  stagnationFloorCap := 0
+  if stagnationClassEligible && outRatio >= stagnationOutRatioMin && recentForwards1d == 0 {
+    outRef := outPpm7d
+    if outRef <= 0 && st.LastOutrate > 0 {
+      outRef = st.LastOutrate
+    }
+    rebalRef := 0
+    if perCost > 0 {
+      rebalRef = perCost
+    } else if st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour {
+      rebalRef = st.LastRebalCost
+    } else if rebalGlobalPpm > 0 {
+      rebalRef = rebalGlobalPpm
+    }
+
+    if stagnationRounds >= stagnationNoForwardRoundsPhase1 && outRef > 0 {
+      trigger := int(math.Ceil(float64(outRef) * stagnationOutrateTriggerMult))
+      if localPpm > trigger {
+        phase1Target := int(math.Ceil(float64(outRef) * stagnationOutrateHeadroom))
+        phase1Target = blendTargetWithSeed(phase1Target, seed, stagnationSeedBlendPhase1)
+        phase1Target = clampInt(phase1Target, e.cfg.MinPpm, e.cfg.MaxPpm)
+        if phase1Target < target {
+          target = phase1Target
+        }
+        stagnationActive = true
+        stagnationPhase = 1
+        stagnationTargetCap = phase1Target
+        stagnationFloorCap = phase1Target
+      }
+    }
+
+    if stagnationRounds >= stagnationNoForwardRoundsPhase2 && rebalRef > 0 {
+      trigger := int(math.Ceil(float64(rebalRef) * stagnationRebalTriggerMult))
+      if localPpm > trigger {
+        phase2Target := int(math.Ceil(float64(rebalRef) * stagnationRebalHeadroom))
+        phase2Target = blendTargetWithSeed(phase2Target, seed, stagnationSeedBlendPhase2)
+        phase2Target = clampInt(phase2Target, e.cfg.MinPpm, e.cfg.MaxPpm)
+        if phase2Target < target {
+          target = phase2Target
+        }
+        stagnationActive = true
+        stagnationPhase = 2
+        stagnationTargetCap = phase2Target
+        stagnationFloorCap = phase2Target
+      }
+    }
+  }
+  if stagnationActive {
+    st.ExplorerState.StagnationPhase = stagnationPhase
+    tags = append(tags, "stagnation")
+    if stagnationPhase == 2 {
+      tags = append(tags, "normalize-rebal")
+    } else {
+      tags = append(tags, "normalize-out")
+    }
+    if stagnationRounds > 0 {
+      tags = append(tags, fmt.Sprintf("stagnation-r%d", stagnationRounds))
+    }
+    if stagnationTargetCap > 0 {
+      tags = append(tags, fmt.Sprintf("stagnation-cap-%d", stagnationTargetCap))
+    }
+  } else {
+    st.ExplorerState.StagnationPhase = 0
+  }
+
   capRefPpm := 0
   if perCost > 0 {
     capRefPpm = perCost
@@ -3398,7 +3513,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
 
   globalNegLockApplied := false
   lockSkipTag := ""
-  if negMarginGlobal {
+  if negMarginGlobal && !stagnationActive {
     hasRecentRebal := perCost > 0 || (st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour)
     hasRecentOutrate := (outPpm7d > 0 && fwdCount >= 4) || (st.LastOutrate > 0 && !st.LastOutrateTs.IsZero() && e.now.Sub(st.LastOutrateTs) <= 21*24*time.Hour)
     canLockGlobally := hasRecentRebal || hasRecentOutrate
@@ -3433,6 +3548,8 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     } else if target < localPpm && !discoveryHit {
       lockSkipTag = "lock-skip-no-chan-rebal"
     }
+  } else if negMarginGlobal && stagnationActive {
+    tags = append(tags, "stagnation-neg-override")
   }
 
   if target > localPpm {
@@ -3560,6 +3677,12 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
 
+  if stagnationActive && !superSourceActive && stagnationFloorCap > 0 && floor > stagnationFloorCap {
+    floor = stagnationFloorCap
+    floorSrc = "stagnation"
+    tags = append(tags, "stagnation-floor")
+  }
+
   if superSourceActive {
     floor = e.cfg.MinPpm
     floorSrc = "super-source"
@@ -3635,7 +3758,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
 
   // Final safety lock: never reduce below current ppm while margin is negative.
   // This runs after all ceilings/floors/step caps to avoid late-stage overrides.
-  if marginPpm7d < 0 && finalPpm < localPpm {
+  if marginPpm7d < 0 && finalPpm < localPpm && !stagnationActive {
     finalPpm = localPpm
     if !containsTag(tags, "no-down-neg-margin") {
       tags = append(tags, "no-down-neg-margin")
@@ -3746,6 +3869,14 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
   predictionCode, predictionCooldownHours := buildAutofeePrediction(outRatio, marginPpm7d, target, localPpm, finalPpm, fwdCount, negMarginGlobal, discoveryHit, cooldownRemaining)
+  logStagnationPhase := 0
+  logStagnationRounds := 0
+  logStagnationCap := 0
+  if stagnationActive {
+    logStagnationPhase = stagnationPhase
+    logStagnationRounds = stagnationRounds
+    logStagnationCap = stagnationTargetCap
+  }
 
   tags = append(tags, seedTags...)
   return &decision{
@@ -3777,6 +3908,9 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     HTLCLiquidityFails: htlcLiquidityFails,
     HTLCUnclassifiedFails: htlcUnclassifiedFails,
     HTLCWindowMin: htlcWindowMin,
+    StagnationPhase: logStagnationPhase,
+    StagnationRounds: logStagnationRounds,
+    StagnationCap: logStagnationCap,
     Apply: apply && finalPpm != localPpm,
     State: st,
   }
@@ -3791,12 +3925,16 @@ func (e *autofeeEngine) evalExplorer(st *autofeeChannelState, outRatio float64, 
       daysSince = e.now.Sub(st.LastTs).Hours() / 24.0
     }
     if daysSince >= 7 && outRatio >= 0.50 && fwdCount <= 5 {
+      stagnationNoFwdRounds := st.ExplorerState.StagnationNoFwdRounds
+      stagnationPhase := st.ExplorerState.StagnationPhase
       st.ExplorerState = explorerState{
         Active: true,
         StartedTs: nowTs,
         Rounds: 0,
         FwdsAtStart: fwdCount,
         Seen: true,
+        StagnationNoFwdRounds: stagnationNoFwdRounds,
+        StagnationPhase: stagnationPhase,
       }
       return true
     }
@@ -4279,6 +4417,16 @@ func formatAutofeeTags(d *decision) string {
       add("🔁rebal-recent")
     case t == "rebal-recent-noup":
       add("🛑rebal-noup")
+    case t == "stagnation":
+      add("🧪stagnation")
+    case t == "normalize-out":
+      add("🎯norm-out")
+    case t == "normalize-rebal":
+      add("🎯norm-rebal")
+    case t == "stagnation-floor":
+      add("🧯stagnation-floor")
+    case t == "stagnation-neg-override":
+      add("🧯stagnation-neg")
     case t == "htlc-policy-hot":
       add("🧾policy-hot")
     case t == "htlc-liquidity-hot":

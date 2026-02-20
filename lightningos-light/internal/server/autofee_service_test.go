@@ -60,3 +60,17 @@ func TestShouldHoldUpOnRecentRebalance(t *testing.T) {
     t.Fatalf("expected hold-up=false without recent rebalance")
   }
 }
+
+func TestBlendTargetWithSeed(t *testing.T) {
+  base := 1000
+  blended := blendTargetWithSeed(base, 800, 0.20)
+  if blended != 960 {
+    t.Fatalf("unexpected blend value: got %d want 960", blended)
+  }
+  if keep := blendTargetWithSeed(base, 0, 0.20); keep != base {
+    t.Fatalf("expected base when seed is missing: got %d want %d", keep, base)
+  }
+  if keep := blendTargetWithSeed(base, 900, 0); keep != base {
+    t.Fatalf("expected base when weight is zero: got %d want %d", keep, base)
+  }
+}

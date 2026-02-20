@@ -140,7 +140,7 @@
     "add": "Add shortcut",
     "newShortcut": "New shortcut",
     "nameLabel": "App or service name",
-    "namePlaceholder": "BRLN Services",
+    "namePlaceholder": "App or service name",
     "urlLabel": "URL",
     "emojiLabel": "Emoji icon",
     "emojiPickerToggle": "Open emoji picker",
