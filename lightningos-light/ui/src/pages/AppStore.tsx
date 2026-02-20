@@ -7,6 +7,7 @@ import elementsIcon from '../assets/apps/elements.png'
 import peerswapIcon from '../assets/apps/peerswap.png'
 import robosatsIcon from '../assets/apps/robosats.svg'
 import depixIcon from '../assets/apps/depix.svg'
+import lnbitsIcon from '../assets/apps/lnbits.svg'
 
 type AppInfo = {
   id: string
@@ -28,7 +29,8 @@ const iconMap: Record<string, string> = {
   elements: elementsIcon,
   peerswap: peerswapIcon,
   robosats: robosatsIcon,
-  depixbuy: depixIcon
+  depixbuy: depixIcon,
+  lnbits: lnbitsIcon
 }
 
 const internalRoutes: Record<string, string> = {
