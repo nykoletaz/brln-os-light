@@ -26,6 +26,7 @@ export default function Shortcuts() {
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState('')
   const [showForm, setShowForm] = useState(false)
+  const [formName, setFormName] = useState('')
   const [formURL, setFormURL] = useState('')
   const [formEmoji, setFormEmoji] = useState(defaultEmoji)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
@@ -51,6 +52,10 @@ export default function Shortcuts() {
   }, [])
 
   const handleCreate = async () => {
+    if (!formName.trim()) {
+      setStatus(t('shortcuts.nameRequired'))
+      return
+    }
     if (!formURL.trim()) {
       setStatus(t('shortcuts.urlRequired'))
       return
@@ -62,7 +67,8 @@ export default function Shortcuts() {
     setSaving(true)
     setStatus('')
     try {
-      await createShortcut({ url: formURL, emoji: formEmoji })
+      await createShortcut({ name: formName, url: formURL, emoji: formEmoji })
+      setFormName('')
       setFormURL('')
       setFormEmoji(defaultEmoji)
       setShowEmojiPicker(false)
@@ -118,7 +124,16 @@ export default function Shortcuts() {
       {showForm && (
         <div className="section-card space-y-4">
           <h3 className="text-lg font-semibold">{t('shortcuts.newShortcut')}</h3>
-          <div className="grid gap-3 lg:grid-cols-[1fr_160px_auto] lg:items-end">
+          <div className="grid gap-3 lg:grid-cols-4 lg:items-end">
+            <label className="space-y-2">
+              <span className="text-sm text-fog/70">{t('shortcuts.nameLabel')}</span>
+              <input
+                className="input-field"
+                placeholder={t('shortcuts.namePlaceholder')}
+                value={formName}
+                onChange={(event) => setFormName(event.target.value)}
+              />
+            </label>
             <label className="space-y-2">
               <span className="text-sm text-fog/70">{t('shortcuts.urlLabel')}</span>
               <input
@@ -199,11 +214,11 @@ export default function Shortcuts() {
                   x
                 </button>
               ) : (
-                <span className="absolute right-3 top-3 rounded-full border border-white/15 px-2 py-1 text-[10px] uppercase tracking-[0.1em] text-fog/60">
+                <span className="absolute right-3 top-3 z-20 rounded-full border border-white/15 bg-ink/80 px-2 py-1 text-[10px] uppercase tracking-[0.1em] text-fog/60">
                   {t('shortcuts.defaultBadge')}
                 </span>
               )}
-              <a href={item.url} target="_blank" rel="noreferrer" className={`block ${canDelete ? 'pr-10' : ''}`}>
+              <a href={item.url} target="_blank" rel="noreferrer" className={`block ${canDelete ? 'pr-10' : 'pr-16'}`}>
                 {item.icon_type === 'image' ? (
                   <div className="mb-4 h-16 w-full overflow-hidden rounded-2xl border border-white/15 bg-ink/40 px-3 py-2">
                     <img src={item.icon_value} alt={item.name} className="h-full w-full object-contain object-left" />

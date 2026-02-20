@@ -17,6 +17,7 @@ const (
 )
 
 var (
+  ErrShortcutInvalidName = errors.New("invalid name")
   ErrShortcutInvalidURL = errors.New("invalid url")
   ErrShortcutInvalidEmoji = errors.New("invalid emoji")
   ErrShortcutExists = errors.New("shortcut already exists")
@@ -161,12 +162,16 @@ order by sort_order asc, id asc
   return items, rows.Err()
 }
 
-func (s *ShortcutsService) Create(ctx context.Context, rawURL, rawEmoji string) (Shortcut, error) {
+func (s *ShortcutsService) Create(ctx context.Context, rawName, rawURL, rawEmoji string) (Shortcut, error) {
   if s == nil || s.db == nil {
     return Shortcut{}, errors.New("shortcuts db unavailable")
   }
 
   normalizedURL, err := normalizeShortcutURL(rawURL)
+  if err != nil {
+    return Shortcut{}, err
+  }
+  name, err := normalizeShortcutName(rawName)
   if err != nil {
     return Shortcut{}, err
   }
@@ -182,7 +187,7 @@ func (s *ShortcutsService) Create(ctx context.Context, rawURL, rawEmoji string) 
 
   item := Shortcut{
     URL: normalizedURL,
-    Name: shortcutNameFromURL(normalizedURL),
+    Name: name,
     Description: "",
     IconType: shortcutIconTypeEmoji,
     IconValue: emoji,
@@ -285,4 +290,15 @@ func shortcutNameFromURL(rawURL string) string {
 
 func isProtectedShortcutIconType(iconType string) bool {
   return strings.EqualFold(strings.TrimSpace(iconType), shortcutIconTypeImage)
+}
+
+func normalizeShortcutName(raw string) (string, error) {
+  value := strings.TrimSpace(raw)
+  if value == "" {
+    return "", ErrShortcutInvalidName
+  }
+  if len([]rune(value)) > 80 {
+    return "", ErrShortcutInvalidName
+  }
+  return value, nil
 }

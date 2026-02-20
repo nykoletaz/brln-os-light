@@ -42,6 +42,7 @@ func (s *Server) handleShortcutsPost(w http.ResponseWriter, r *http.Request) {
   }
 
   var req struct {
+    Name string `json:"name"`
     URL string `json:"url"`
     Emoji string `json:"emoji"`
   }
@@ -53,10 +54,10 @@ func (s *Server) handleShortcutsPost(w http.ResponseWriter, r *http.Request) {
   ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
   defer cancel()
 
-  item, err := svc.Create(ctx, req.URL, req.Emoji)
+  item, err := svc.Create(ctx, req.Name, req.URL, req.Emoji)
   if err != nil {
     switch {
-    case errors.Is(err, ErrShortcutInvalidURL), errors.Is(err, ErrShortcutInvalidEmoji):
+    case errors.Is(err, ErrShortcutInvalidName), errors.Is(err, ErrShortcutInvalidURL), errors.Is(err, ErrShortcutInvalidEmoji):
       writeError(w, http.StatusBadRequest, err.Error())
     case errors.Is(err, ErrShortcutExists):
       writeError(w, http.StatusConflict, err.Error())

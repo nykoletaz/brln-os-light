@@ -43,6 +43,25 @@ func TestNormalizeShortcutEmoji(t *testing.T) {
   })
 }
 
+func TestNormalizeShortcutName(t *testing.T) {
+  t.Run("accepts valid name", func(t *testing.T) {
+    got, err := normalizeShortcutName("My Service")
+    if err != nil {
+      t.Fatalf("unexpected error: %v", err)
+    }
+    if got != "My Service" {
+      t.Fatalf("unexpected name: %s", got)
+    }
+  })
+
+  t.Run("rejects empty", func(t *testing.T) {
+    _, err := normalizeShortcutName("   ")
+    if !errors.Is(err, ErrShortcutInvalidName) {
+      t.Fatalf("expected ErrShortcutInvalidName, got %v", err)
+    }
+  })
+}
+
 func TestShortcutNameFromURL(t *testing.T) {
   got := shortcutNameFromURL("https://www.services.br-ln.com/path")
   if got != "services.br-ln.com" {
