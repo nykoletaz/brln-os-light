@@ -2673,7 +2673,7 @@ export default function LightningOps() {
             </div>
           </div>
         {filteredChannels.length ? (
-          <div className="max-h-[520px] overflow-y-auto pr-2">
+          <div className="max-h-[680px] overflow-y-auto pr-2">
             <div className="grid gap-3">
               {filteredChannels.map((ch) => {
                 const localDisabled = ch.local_disabled ?? isLocalChanDisabled(ch.chan_status_flags)
@@ -2743,7 +2743,7 @@ export default function LightningOps() {
                         </label>
                       </div>
                     </div>
-                    <div className="mt-4 grid gap-3 xl:grid-cols-[1.4fr_1fr]">
+                    <div className="mt-3 grid gap-2 xl:grid-cols-[1.45fr_1fr]">
                       <div className="space-y-2">
                         <div className="flex items-center justify-between gap-3 text-xs text-fog/70">
                           <span>{t('lightningOps.localLabel', { value: ch.local_balance_sat })}</span>
@@ -2764,29 +2764,31 @@ export default function LightningOps() {
                           <span className="w-12 text-left text-fog/70">{remotePctLabel}</span>
                         </div>
                       </div>
-                      <div className="rounded-xl border border-white/10 bg-ink/70 p-3">
+                      <div className="rounded-xl border border-white/10 bg-ink/70 p-2.5">
                         <p className="text-[10px] uppercase tracking-wide text-fog/60">{t('lightningOps.economic7d')}</p>
-                        <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
-                          <div>
-                            <p className="text-fog/50">{t('lightningOps.outPpm7d')}</p>
-                            <p className="text-fog">{formatPpmValue(ch.out_ppm7d)}</p>
-                          </div>
-                          <div>
-                            <p className="text-fog/50">{t('lightningOps.rebalPpm7d')}</p>
-                            <p className="text-fog">{formatPpmValue(ch.rebal_ppm7d)}</p>
-                          </div>
-                          <div className="col-span-2">
-                            <p className="text-fog/50">{t('lightningOps.marginPpm7d')}</p>
-                            <p className={typeof marginPpm7d === 'number' && marginPpm7d < 0 ? 'text-ember' : 'text-fog'}>
+                        <div className="mt-1 grid grid-cols-1 gap-y-0.5 text-[11px] sm:grid-cols-3 sm:gap-x-3 sm:gap-y-0">
+                          <p className="whitespace-nowrap">
+                            <span className="text-fog/50">{t('lightningOps.outPpm7d')}:</span>{' '}
+                            <span className="text-fog">{formatPpmValue(ch.out_ppm7d)}</span>
+                          </p>
+                          <p className="whitespace-nowrap">
+                            <span className="text-fog/50">{t('lightningOps.rebalPpm7d')}:</span>{' '}
+                            <span className="text-fog">{formatPpmValue(ch.rebal_ppm7d)}</span>
+                          </p>
+                          <p className="whitespace-nowrap">
+                            <span className="text-fog/50">{t('lightningOps.marginPpm7d')}:</span>{' '}
+                            <span className={typeof marginPpm7d === 'number' && marginPpm7d < 0 ? 'text-ember' : 'text-fog'}>
                               {typeof marginPpm7d === 'number' ? `${marginPpm7d >= 0 ? '+' : ''}${Math.round(marginPpm7d)} ppm` : '-'}
-                            </p>
-                          </div>
+                            </span>
+                          </p>
                         </div>
-                        <div className="mt-2 flex items-center justify-between gap-2">
-                          <span className="text-[11px] text-fog/60">{t('lightningOps.profit7d')}</span>
-                          <span className={typeof ch.profit_fee_7d_sat === 'number' && ch.profit_fee_7d_sat < 0 ? 'text-[11px] text-ember' : 'text-[11px] text-fog'}>
-                            {formatSatSigned(ch.profit_fee_7d_sat)}
-                          </span>
+                        <div className="mt-1.5 flex items-center justify-between gap-2">
+                          <p className="whitespace-nowrap text-[11px]">
+                            <span className="text-fog/60">{t('lightningOps.profit7d')}:</span>{' '}
+                            <span className={typeof ch.profit_fee_7d_sat === 'number' && ch.profit_fee_7d_sat < 0 ? 'text-ember' : 'text-fog'}>
+                              {formatSatSigned(ch.profit_fee_7d_sat)}
+                            </span>
+                          </p>
                           <span className={`rounded-full px-2 py-0.5 text-[10px] ${profitMeta.className}`}>{profitMeta.label}</span>
                         </div>
                       </div>
