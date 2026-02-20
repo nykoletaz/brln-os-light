@@ -1350,6 +1350,119 @@ func (s *Server) handleLNChannels(w http.ResponseWriter, r *http.Request) {
         }
       }
     }
+
+    forwardFeeMsat := make(map[uint64]int64)
+    forwardAmtMsat := make(map[uint64]int64)
+    forwardRows, err := s.db.Query(dbCtx, `
+      select coalesce(chan_id_out, channel_id) as chan_id,
+        coalesce(sum(
+          case
+            when fee_msat > 0 then fee_msat
+            when fee_sat > 0 then fee_sat * 1000
+            when amount_in_msat > 0 and amount_out_msat > 0 and amount_in_msat > amount_out_msat then amount_in_msat - amount_out_msat
+            else 0
+          end
+        ), 0),
+        coalesce(sum(case when amount_out_msat > 0 then amount_out_msat else amount_sat * 1000 end), 0)
+      from notifications
+      where type='forward' and occurred_at >= now() - interval '7 day'
+        and coalesce(chan_id_out, channel_id) is not null
+      group by coalesce(chan_id_out, channel_id)
+    `)
+    if err != nil {
+      s.logger.Printf("channel economics forward lookup failed: %v", err)
+    } else {
+      for forwardRows.Next() {
+        var channelID int64
+        var fee int64
+        var amt int64
+        if err := forwardRows.Scan(&channelID, &fee, &amt); err != nil {
+          s.logger.Printf("channel economics forward scan failed: %v", err)
+          continue
+        }
+        if channelID <= 0 {
+          continue
+        }
+        cid := uint64(channelID)
+        forwardFeeMsat[cid] = fee
+        forwardAmtMsat[cid] = amt
+      }
+      if err := forwardRows.Err(); err != nil {
+        s.logger.Printf("channel economics forward rows failed: %v", err)
+      }
+      forwardRows.Close()
+    }
+
+    rebalFeeMsat := make(map[uint64]int64)
+    rebalAmtMsat := make(map[uint64]int64)
+    rebalRows, err := s.db.Query(dbCtx, `
+      select coalesce(rebal_target_chan_id, rebal_source_chan_id, channel_id) as chan_id,
+        coalesce(sum(case when fee_msat > 0 then fee_msat else fee_sat * 1000 end), 0),
+        coalesce(sum(
+          case
+            when amount_sat > 0 then amount_sat * 1000
+            when amount_out_msat > 0 then amount_out_msat
+            else 0
+          end
+        ), 0)
+      from notifications
+      where type='rebalance' and occurred_at >= now() - interval '7 day'
+        and coalesce(rebal_target_chan_id, rebal_source_chan_id, channel_id) is not null
+      group by coalesce(rebal_target_chan_id, rebal_source_chan_id, channel_id)
+    `)
+    if err != nil {
+      s.logger.Printf("channel economics rebalance lookup failed: %v", err)
+    } else {
+      for rebalRows.Next() {
+        var channelID int64
+        var fee int64
+        var amt int64
+        if err := rebalRows.Scan(&channelID, &fee, &amt); err != nil {
+          s.logger.Printf("channel economics rebalance scan failed: %v", err)
+          continue
+        }
+        if channelID <= 0 {
+          continue
+        }
+        cid := uint64(channelID)
+        rebalFeeMsat[cid] = fee
+        rebalAmtMsat[cid] = amt
+      }
+      if err := rebalRows.Err(); err != nil {
+        s.logger.Printf("channel economics rebalance rows failed: %v", err)
+      }
+      rebalRows.Close()
+    }
+
+    for i := range channels {
+      chID := channels[i].ChannelID
+      fwdFeeMsat := forwardFeeMsat[chID]
+      fwdAmt := forwardAmtMsat[chID]
+      rebFeeMsat := rebalFeeMsat[chID]
+      rebAmt := rebalAmtMsat[chID]
+
+      hasForward := fwdFeeMsat > 0 || fwdAmt > 0
+      hasRebal := rebFeeMsat > 0 || rebAmt > 0
+      if !hasForward && !hasRebal {
+        continue
+      }
+
+      if hasForward {
+        outPpm := ppmMsat(fwdFeeMsat, fwdAmt)
+        channels[i].OutPpm7d = &outPpm
+        fwdSat := msatToSatCeil(fwdFeeMsat)
+        channels[i].ForwardFee7dSat = &fwdSat
+      }
+      if hasRebal {
+        rebPpm := ppmMsat(rebFeeMsat, rebAmt)
+        channels[i].RebalPpm7d = &rebPpm
+        rebSat := msatToSatCeil(rebFeeMsat)
+        channels[i].RebalFee7dSat = &rebSat
+      }
+
+      profitSat := msatToSatCeil(fwdFeeMsat) - msatToSatCeil(rebFeeMsat)
+      channels[i].ProfitFee7dSat = &profitSat
+    }
   }
 
   active := 0

@@ -20,6 +20,11 @@ type Channel = {
   peer_fee_rate_ppm?: number
   peer_base_msat?: number
   class_label?: string
+  out_ppm7d?: number
+  rebal_ppm7d?: number
+  forward_fee_7d_sat?: number
+  rebal_fee_7d_sat?: number
+  profit_fee_7d_sat?: number
 }
 
 type PendingChannel = {
@@ -855,6 +860,31 @@ export default function LightningOps() {
       default:
         return ''
     }
+  }
+
+  const formatPpmValue = (value?: number) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+    return `${Math.round(value)} ppm`
+  }
+
+  const formatSatSigned = (value?: number) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return '-'
+    const rounded = Math.round(value)
+    const prefix = rounded > 0 ? '+' : ''
+    return `${prefix}${rounded} sats`
+  }
+
+  const profitBadge = (profitSat?: number) => {
+    if (typeof profitSat !== 'number' || Number.isNaN(profitSat)) {
+      return { label: t('lightningOps.profitUnknown'), className: 'bg-white/10 text-fog/70' }
+    }
+    if (profitSat > 0) {
+      return { label: t('lightningOps.profitPositive'), className: 'bg-glow/20 text-glow' }
+    }
+    if (profitSat < 0) {
+      return { label: t('lightningOps.profitNegative'), className: 'bg-ember/20 text-ember' }
+    }
+    return { label: t('lightningOps.profitNeutral'), className: 'bg-sky/20 text-sky-200' }
   }
 
   const formatAutofeePrediction = (item: AutofeeResultItem) => {
@@ -2662,9 +2692,13 @@ export default function LightningOps() {
                 const remotePct = Math.max(0, Math.min(100, remotePctRaw))
                 const localPctLabel = `${localPct.toFixed(0)}%`
                 const remotePctLabel = `${remotePct.toFixed(0)}%`
+                const marginPpm7d = typeof ch.out_ppm7d === 'number' && typeof ch.rebal_ppm7d === 'number'
+                  ? ch.out_ppm7d - ch.rebal_ppm7d
+                  : undefined
+                const profitMeta = profitBadge(ch.profit_fee_7d_sat)
                 const cardClass = localDisabled && ch.active
-                  ? 'rounded-2xl border border-ember/40 bg-ember/10 p-4'
-                  : 'rounded-2xl border border-white/10 bg-ink/60 p-4'
+                  ? 'rounded-2xl border border-ember/40 bg-ember/10 p-5 min-h-[170px]'
+                  : 'rounded-2xl border border-white/10 bg-ink/60 p-5 min-h-[170px]'
                 return (
                   <div key={ch.channel_point} className={cardClass}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -2709,24 +2743,52 @@ export default function LightningOps() {
                         </label>
                       </div>
                     </div>
-                    <div className="mt-3 space-y-2">
-                      <div className="flex items-center justify-between gap-3 text-xs text-fog/70">
-                        <span>{t('lightningOps.localLabel', { value: ch.local_balance_sat })}</span>
-                        <span>{t('lightningOps.remoteLabel', { value: ch.remote_balance_sat })}</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-[11px]">
-                        <span className="w-12 text-right text-glow">{localPctLabel}</span>
-                        <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-white/10">
-                          <div
-                            className="absolute inset-y-0 left-0 bg-glow/70"
-                            style={{ width: `${localPct}%` }}
-                          />
-                          <div
-                            className="absolute inset-y-0 right-0 bg-white/35"
-                            style={{ width: `${remotePct}%` }}
-                          />
+                    <div className="mt-4 grid gap-3 xl:grid-cols-[1.4fr_1fr]">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-3 text-xs text-fog/70">
+                          <span>{t('lightningOps.localLabel', { value: ch.local_balance_sat })}</span>
+                          <span>{t('lightningOps.remoteLabel', { value: ch.remote_balance_sat })}</span>
                         </div>
-                        <span className="w-12 text-left text-fog/70">{remotePctLabel}</span>
+                        <div className="flex items-center gap-2 text-[11px]">
+                          <span className="w-12 text-right text-glow">{localPctLabel}</span>
+                          <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+                            <div
+                              className="absolute inset-y-0 left-0 bg-glow/70"
+                              style={{ width: `${localPct}%` }}
+                            />
+                            <div
+                              className="absolute inset-y-0 right-0 bg-white/35"
+                              style={{ width: `${remotePct}%` }}
+                            />
+                          </div>
+                          <span className="w-12 text-left text-fog/70">{remotePctLabel}</span>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-ink/70 p-3">
+                        <p className="text-[10px] uppercase tracking-wide text-fog/60">{t('lightningOps.economic7d')}</p>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                          <div>
+                            <p className="text-fog/50">{t('lightningOps.outPpm7d')}</p>
+                            <p className="text-fog">{formatPpmValue(ch.out_ppm7d)}</p>
+                          </div>
+                          <div>
+                            <p className="text-fog/50">{t('lightningOps.rebalPpm7d')}</p>
+                            <p className="text-fog">{formatPpmValue(ch.rebal_ppm7d)}</p>
+                          </div>
+                          <div className="col-span-2">
+                            <p className="text-fog/50">{t('lightningOps.marginPpm7d')}</p>
+                            <p className={typeof marginPpm7d === 'number' && marginPpm7d < 0 ? 'text-ember' : 'text-fog'}>
+                              {typeof marginPpm7d === 'number' ? `${marginPpm7d >= 0 ? '+' : ''}${Math.round(marginPpm7d)} ppm` : '-'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                          <span className="text-[11px] text-fog/60">{t('lightningOps.profit7d')}</span>
+                          <span className={typeof ch.profit_fee_7d_sat === 'number' && ch.profit_fee_7d_sat < 0 ? 'text-[11px] text-ember' : 'text-[11px] text-fog'}>
+                            {formatSatSigned(ch.profit_fee_7d_sat)}
+                          </span>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] ${profitMeta.className}`}>{profitMeta.label}</span>
+                        </div>
                       </div>
                     </div>
                     <div className="mt-3 grid gap-3 lg:grid-cols-6 text-xs text-fog/70">

@@ -1744,6 +1744,11 @@ type ChannelInfo struct {
   PeerFeeRatePpm *int64 `json:"peer_fee_rate_ppm,omitempty"`
   PeerBaseMsat *int64 `json:"peer_base_msat,omitempty"`
   ClassLabel string `json:"class_label,omitempty"`
+  OutPpm7d *int `json:"out_ppm7d,omitempty"`
+  RebalPpm7d *int `json:"rebal_ppm7d,omitempty"`
+  ForwardFee7dSat *int64 `json:"forward_fee_7d_sat,omitempty"`
+  RebalFee7dSat *int64 `json:"rebal_fee_7d_sat,omitempty"`
+  ProfitFee7dSat *int64 `json:"profit_fee_7d_sat,omitempty"`
 }
 
 type PeerInfo struct {
