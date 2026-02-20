@@ -1,5 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="LNbits">
-  <rect width="128" height="128" rx="24" fill="#111111"/>
-  <circle cx="64" cy="64" r="42" fill="#f7931a"/>
-  <path d="M52 35h24l-12 23h16L52 93l10-26H48z" fill="#111111"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="LNbits">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2a2a2a"/>
+      <stop offset="100%" stop-color="#1b1b1b"/>
+    </linearGradient>
+    <linearGradient id="bolt" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ff00d4"/>
+      <stop offset="100%" stop-color="#ff00a8"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" fill="url(#bg)"/>
+  <path
+    d="M118 44H175L124 112H160L79 216L112 140H86Z"
+    fill="url(#bolt)"
+  />
 </svg>
