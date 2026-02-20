@@ -538,6 +538,32 @@ const (
   htlcForwardSoftMinFailsFloor = 2
 )
 
+var htlcPolicyFailureTokens = []string{
+  "FEE INSUFFICIENT",
+  "INCORRECT CLTV EXPIRY",
+  "AMOUNT BELOW MINIMUM",
+  "EXPIRY TOO SOON",
+  "EXPIRY TOO FAR",
+  "FINAL INCORRECT CLTV EXPIRY",
+  "FINAL INCORRECT HTLC AMOUNT",
+  "REQUIRED NODE FEATURE MISSING",
+  "REQUIRED CHANNEL FEATURE MISSING",
+  "INVALID ONION VERSION",
+  "INVALID ONION HMAC",
+  "INVALID ONION KEY",
+  "INVALID ONION PAYLOAD",
+}
+
+var htlcLiquidityFailureTokens = []string{
+  "TEMPORARY CHANNEL FAILURE",
+  "TEMPORARY NODE FAILURE",
+  "CHANNEL DISABLED",
+  "UNKNOWN NEXT PEER",
+  "PERMANENT CHANNEL FAILURE",
+  "INSUFFICIENT BALANCE",
+  "NO ROUTE",
+}
+
 var superSourceThresholdsByProfile = map[string]superSourceThresholds{
   "conservative": {
     OutRatioMin: 0.65,
@@ -1616,6 +1642,12 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   if err != nil {
     return err
   }
+  recentRebalanceTouches := map[uint64]int{}
+  if touches, err := e.fetchRecentRebalanceTouches(ctx, e.htlcSignalWindow()); err == nil {
+    recentRebalanceTouches = touches
+  } else if e.svc.logger != nil {
+    e.svc.logger.Printf("autofee: recent rebalance touches unavailable: %v", err)
+  }
 
   totalOutFeeMsat := int64(0)
   totalOutAmtMsat := int64(0)
@@ -1676,7 +1708,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     }
 
     st := state[ch.ChannelID]
-    decision := e.evaluateChannel(ch, st, forwardStats, forwardStats1d, forwardStats7d, inboundStats, rebalStats, htlcSignals, totalOutFeeMsat, rebalGlobalPpm, negMarginGlobal)
+    decision := e.evaluateChannel(ch, st, forwardStats, forwardStats1d, forwardStats7d, inboundStats, rebalStats, recentRebalanceTouches, htlcSignals, totalOutFeeMsat, rebalGlobalPpm, negMarginGlobal)
     if decision == nil {
       continue
     }
@@ -1991,9 +2023,15 @@ func (e *autofeeEngine) buildHTLCFailureSignals(channels []lndclient.ChannelInfo
   minLiquidityLinkFails := maxInt(1, minLiquidityFails)
   policyRateThreshold := applyHTLCGlobalRateFactor(e.profile.HTLCPolicyFailRate, htlcGlobalRateFactor, htlcGlobalPolicyRateFloor)
   liquidityRateThreshold := applyHTLCGlobalRateFactor(e.profile.HTLCLiquidityFailRate, htlcGlobalRateFactor, htlcGlobalLiquidityRateFloor)
-  forwardRateThreshold := applyHTLCGlobalRateFactor(
+  forwardRateThresholdBase := applyHTLCGlobalRateFactor(
     e.profile.HTLCLiquidityFailRate*htlcForwardSoftRateFactor,
     htlcGlobalRateFactor,
+    htlcForwardSoftRateFloor,
+  )
+  // Keep forward-hot proportional to node/liquidity profile scaling too.
+  forwardRateThreshold := applyHTLCGlobalRateFactor(
+    forwardRateThresholdBase,
+    thresholdFactor,
     htlcForwardSoftRateFloor,
   )
   meta := htlcSignalMeta{
@@ -2257,6 +2295,19 @@ func applyHTLCGlobalRateFactor(base float64, factor float64, floor float64) floa
   return scaled
 }
 
+func shouldHoldUpOnRecentRebalance(classLabel string, outRatio float64, lowOutProtectThresh float64, recentRebalanceCount int) bool {
+  if recentRebalanceCount <= 0 {
+    return false
+  }
+  if !strings.EqualFold(strings.TrimSpace(classLabel), "sink") {
+    return false
+  }
+  if lowOutProtectThresh <= 0 {
+    lowOutProtectThresh = defaultLowOutProtectThresh
+  }
+  return outRatio < lowOutProtectThresh
+}
+
 func parseShortChannelID(raw string) (uint64, bool) {
   trimmed := strings.TrimSpace(raw)
   if trimmed == "" {
@@ -2290,15 +2341,8 @@ func classifyHTLCFailure(entry htlcManagerFailedEntry) (bool, bool) {
   if blob == "" {
     return false, false
   }
-  policy := containsAnyFailureToken(blob, []string{
-    "FEE INSUFFICIENT",
-    "INCORRECT CLTV EXPIRY",
-  })
-  liquidity := containsAnyFailureToken(blob, []string{
-    "TEMPORARY CHANNEL FAILURE",
-    "CHANNEL DISABLED",
-    "UNKNOWN NEXT PEER",
-  })
+  policy := containsAnyFailureToken(blob, htlcPolicyFailureTokens)
+  liquidity := containsAnyFailureToken(blob, htlcLiquidityFailureTokens)
   return policy, liquidity
 }
 
@@ -2505,6 +2549,61 @@ where type='rebalance' and occurred_at >= now() - ($1 * interval '1 day')
   }
   stats.Global.AmtMsat = stats.Global.AmtMsat * 1000
   return stats, nil
+}
+
+func (e *autofeeEngine) fetchRecentRebalanceTouches(ctx context.Context, window time.Duration) (map[uint64]int, error) {
+  touches := map[uint64]int{}
+  if window <= 0 {
+    window = time.Hour
+  }
+  seconds := int(math.Ceil(window.Seconds()))
+  if seconds < 60 {
+    seconds = 60
+  }
+
+  rows, err := e.svc.db.Query(ctx, `
+with recent_rebalances as (
+  select rebal_target_chan_id as chan_id
+  from notifications
+  where type='rebalance'
+    and occurred_at >= now() - ($1 * interval '1 second')
+    and rebal_target_chan_id is not null
+  union all
+  select rebal_source_chan_id as chan_id
+  from notifications
+  where type='rebalance'
+    and occurred_at >= now() - ($1 * interval '1 second')
+    and rebal_source_chan_id is not null
+  union all
+  select channel_id as chan_id
+  from notifications
+  where type='rebalance'
+    and occurred_at >= now() - ($1 * interval '1 second')
+    and rebal_target_chan_id is null
+    and rebal_source_chan_id is null
+    and channel_id is not null
+)
+select chan_id, count(*)
+from recent_rebalances
+group by chan_id
+`, seconds)
+  if err != nil {
+    return touches, err
+  }
+  defer rows.Close()
+
+  for rows.Next() {
+    var chanID int64
+    var count int64
+    if err := rows.Scan(&chanID, &count); err != nil {
+      return touches, err
+    }
+    if chanID <= 0 || count <= 0 {
+      continue
+    }
+    touches[uint64(chanID)] = int(count)
+  }
+  return touches, rows.Err()
 }
 
 func (e *autofeeEngine) loadState(ctx context.Context) (map[uint64]*autofeeChannelState, error) {
@@ -2840,7 +2939,7 @@ func buildAutofeeChannelLogEntry(d *decision, category string, dryRun bool, err 
 
 func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeChannelState, forwardStats map[uint64]forwardStat,
   forwardStats1d map[uint64]forwardStat, forwardStats7d map[uint64]forwardStat, inboundStats map[uint64]inboundStat,
-  rebalStats rebalStats, htlcSignals map[uint64]htlcFailureSignal, totalOutFeeMsat int64, rebalGlobalPpm int, negMarginGlobal bool) *decision {
+  rebalStats rebalStats, recentRebalanceTouches map[uint64]int, htlcSignals map[uint64]htlcFailureSignal, totalOutFeeMsat int64, rebalGlobalPpm int, negMarginGlobal bool) *decision {
 
   localPpm := 0
   if ch.FeeRatePpm != nil {
@@ -3015,6 +3114,14 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
 
   tags := []string{}
+  recentRebalanceCount := 0
+  if recentRebalanceTouches != nil {
+    recentRebalanceCount = recentRebalanceTouches[ch.ChannelID]
+  }
+  holdUpOnRecentRebalance := shouldHoldUpOnRecentRebalance(classLabel, outRatio, lowOutProtectThresh, recentRebalanceCount)
+  if recentRebalanceCount > 0 {
+    tags = append(tags, "rebal-recent")
+  }
   htlcSampleLow := false
   htlcPolicyHot := false
   htlcLiquidityHot := false
@@ -3063,6 +3170,10 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
       target = int(math.Ceil(float64(target) * (1.0 + bump)))
       tags = append(tags, fmt.Sprintf("surge+%d%%", int(bump*100)))
     }
+  }
+  if holdUpOnRecentRebalance && target > localPpm {
+    target = localPpm
+    tags = append(tags, "rebal-recent-noup")
   }
   revShare := 0.0
   if totalOutFeeMsat > 0 {
@@ -3528,6 +3639,12 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     finalPpm = localPpm
     if !containsTag(tags, "no-down-neg-margin") {
       tags = append(tags, "no-down-neg-margin")
+    }
+  }
+  if holdUpOnRecentRebalance && finalPpm > localPpm {
+    finalPpm = localPpm
+    if !containsTag(tags, "rebal-recent-noup") {
+      tags = append(tags, "rebal-recent-noup")
     }
   }
 
@@ -4158,6 +4275,10 @@ func formatAutofeeTags(d *decision) string {
       add("💎top-rev")
     case t == "neg-margin":
       add("⚠️neg-margin")
+    case t == "rebal-recent":
+      add("🔁rebal-recent")
+    case t == "rebal-recent-noup":
+      add("🛑rebal-noup")
     case t == "htlc-policy-hot":
       add("🧾policy-hot")
     case t == "htlc-liquidity-hot":
