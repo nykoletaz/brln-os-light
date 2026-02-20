@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeResults, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnHtlcManager, getLnHtlcManagerFailed, getLnHtlcManagerLogs, getLnPeers, getLnTorPeerChecker, getLnTorPeerCheckerLogs, getMempoolFees, openChannel, runAutofee, signLnMessage, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus, updateLnHtlcManager, updateLnTorPeerChecker } from '../api'
+import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeResults, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnHtlcManager, getLnHtlcManagerFailed, getLnHtlcManagerLogs, getLnPeers, getLnTorPeerChecker, getLnTorPeerCheckerLogs, getMempoolFees, openBatchChannels, openChannel, runAutofee, signLnMessage, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus, updateLnHtlcManager, updateLnTorPeerChecker } from '../api'
 
 type Channel = {
   channel_point: string
@@ -55,6 +55,15 @@ type Peer = {
   sync_type: string
   last_error: string
   last_error_time?: number
+}
+
+type BatchOpenItem = {
+  id: number
+  pubkey: string
+  host?: string
+  local_funding_sat: number
+  private: boolean
+  close_address?: string
 }
 
 type AmbossHealthStatus = {
@@ -380,6 +389,16 @@ export default function LightningOps() {
   const [openPrivate, setOpenPrivate] = useState(false)
   const [openStatus, setOpenStatus] = useState('')
   const [openChannelPoint, setOpenChannelPoint] = useState('')
+  const [batchPeer, setBatchPeer] = useState('')
+  const [batchAmount, setBatchAmount] = useState('')
+  const [batchCloseAddress, setBatchCloseAddress] = useState('')
+  const [batchPrivate, setBatchPrivate] = useState(false)
+  const [batchItems, setBatchItems] = useState<BatchOpenItem[]>([])
+  const [batchFeeRate, setBatchFeeRate] = useState('')
+  const [batchFeeStatus, setBatchFeeStatus] = useState('')
+  const [batchStatus, setBatchStatus] = useState('')
+  const [batchBusy, setBatchBusy] = useState(false)
+  const [batchChannelPoints, setBatchChannelPoints] = useState<string[]>([])
 
   const [closePoint, setClosePoint] = useState('')
   const [closeForce, setCloseForce] = useState(false)
@@ -411,6 +430,7 @@ export default function LightningOps() {
   const chanHealIntervalDirtyRef = useRef(false)
   const htlcManagerFormDirtyRef = useRef(false)
   const torPeerCheckerIntervalDirtyRef = useRef(false)
+  const batchItemIdRef = useRef(1)
   const [feeStatus, setFeeStatus] = useState('')
 
   const formatPing = (value: number) => {
@@ -1495,13 +1515,16 @@ export default function LightningOps() {
         setOpenFeeRate((prev) => (prev ? prev : fastest > 0 ? String(fastest) : prev))
         setCloseFeeHint({ fastest, hour })
         setCloseFeeRate((prev) => (prev ? prev : fastest > 0 ? String(fastest) : prev))
+        setBatchFeeRate((prev) => (prev ? prev : fastest > 0 ? String(fastest) : prev))
         setOpenFeeStatus('')
         setCloseFeeStatus('')
+        setBatchFeeStatus('')
       })
       .catch(() => {
         if (!mounted) return
         setOpenFeeStatus(t('lightningOps.feeSuggestionsUnavailable'))
         setCloseFeeStatus(t('lightningOps.feeSuggestionsUnavailable'))
+        setBatchFeeStatus(t('lightningOps.feeSuggestionsUnavailable'))
       })
     return () => {
       mounted = false
@@ -1638,6 +1661,47 @@ export default function LightningOps() {
       default:
         return status
     }
+  }
+
+  const connectedPubkeys = useMemo(() => {
+    const set = new Set<string>()
+    peers.forEach((peer) => {
+      const key = (peer.pub_key || '').trim().toLowerCase()
+      if (key) {
+        set.add(key)
+      }
+    })
+    return set
+  }, [peers])
+
+  const peerAliasMap = useMemo(() => {
+    const map = new Map<string, string>()
+    peers.forEach((peer) => {
+      const key = (peer.pub_key || '').trim().toLowerCase()
+      if (key) {
+        map.set(key, peer.alias || '')
+      }
+    })
+    return map
+  }, [peers])
+
+  const parseBatchPeerAddress = (raw: string): { pubkey: string; host?: string; error?: string } => {
+    const value = raw.trim()
+    if (!value) {
+      return { pubkey: '', error: t('lightningOps.peerAddressRequired') }
+    }
+    if (!value.includes('@')) {
+      return { pubkey: value }
+    }
+    const parts = value.split('@')
+    if (parts.length !== 2 || !parts[0]?.trim() || !parts[1]?.trim()) {
+      return { pubkey: '', error: t('lightningOps.batchOpenInvalidPeer') }
+    }
+    const host = parts[1].trim()
+    if (!host.includes(':')) {
+      return { pubkey: '', error: t('lightningOps.batchOpenInvalidPeer') }
+    }
+    return { pubkey: parts[0].trim(), host }
   }
 
   const handleConnectPeer = async () => {
@@ -2067,6 +2131,119 @@ export default function LightningOps() {
       load()
     } catch (err: any) {
       setOpenStatus(err?.message || t('lightningOps.channelOpenFailed'))
+    }
+  }
+
+  const handleBatchAddItem = async () => {
+    if (batchBusy) return
+    const parsed = parseBatchPeerAddress(batchPeer)
+    if (parsed.error) {
+      setBatchStatus(parsed.error)
+      return
+    }
+    const amount = Number(batchAmount || 0)
+    if (amount < 20000) {
+      setBatchStatus(t('lightningOps.minimumChannelSize'))
+      return
+    }
+    const pubkey = parsed.pubkey.trim()
+    const pubkeyKey = pubkey.toLowerCase()
+    if (batchItems.some((item) => item.pubkey.toLowerCase() === pubkeyKey)) {
+      setBatchStatus(t('lightningOps.batchOpenDuplicatePeer'))
+      return
+    }
+
+    try {
+      if (!connectedPubkeys.has(pubkeyKey)) {
+        if (!parsed.host) {
+          setBatchStatus(t('lightningOps.batchOpenHostRequired'))
+          return
+        }
+        setBatchStatus(t('lightningOps.batchOpenConnectingPeer'))
+        try {
+          await connectPeer({ address: `${pubkey}@${parsed.host}`, perm: false })
+        } catch (err: any) {
+          const msg = String(err?.message || '').toLowerCase()
+          const alreadyConnected = msg.includes('already connected') || msg.includes('already have a connection')
+          if (!alreadyConnected) {
+            throw err
+          }
+        }
+      }
+
+      const nextId = batchItemIdRef.current++
+      setBatchItems((prev) => [
+        ...prev,
+        {
+          id: nextId,
+          pubkey,
+          host: parsed.host,
+          local_funding_sat: amount,
+          private: batchPrivate,
+          close_address: batchCloseAddress.trim() || undefined,
+        },
+      ])
+      setBatchPeer('')
+      setBatchAmount('')
+      setBatchCloseAddress('')
+      setBatchPrivate(false)
+      setBatchStatus(t('lightningOps.batchOpenItemAdded'))
+      load()
+    } catch (err: any) {
+      setBatchStatus(err?.message || t('lightningOps.peerConnectFailed'))
+    }
+  }
+
+  const handleBatchRemoveItem = (id: number) => {
+    setBatchItems((prev) => prev.filter((item) => item.id !== id))
+  }
+
+  const handleBatchOpenChannels = async () => {
+    if (batchBusy) return
+    if (!batchItems.length) {
+      setBatchStatus(t('lightningOps.batchOpenNoItems'))
+      return
+    }
+    setBatchBusy(true)
+    setBatchStatus(t('lightningOps.batchOpenRunning'))
+    setBatchChannelPoints([])
+    try {
+      const feeRate = Number(batchFeeRate || 0)
+      const channelsPayload = batchItems.map((item) => {
+        const hasHost = Boolean(item.host?.trim())
+        const payload: any = {
+          pubkey: item.pubkey,
+          local_funding_sat: item.local_funding_sat,
+          private: item.private,
+        }
+        if (hasHost) {
+          payload.host = item.host?.trim()
+          payload.peer_address = `${item.pubkey}@${item.host?.trim()}`
+        } else {
+          payload.peer_address = item.pubkey
+        }
+        if (item.close_address?.trim()) {
+          payload.close_address = item.close_address.trim()
+        }
+        return payload
+      })
+      const res: any = await openBatchChannels({
+        channels: channelsPayload,
+        sat_per_vbyte: feeRate > 0 ? feeRate : undefined,
+      })
+      const points = Array.isArray(res?.pending_channels)
+        ? res.pending_channels
+            .map((entry: any) => String(entry?.channel_point || '').trim())
+            .filter((value: string) => value.length > 0)
+        : []
+      setBatchChannelPoints(points)
+      setBatchStatus(t('lightningOps.batchOpenSubmitted', { count: Number(res?.count || points.length || batchItems.length) }))
+      setBatchItems([])
+      load()
+    } catch (err: any) {
+      setBatchStatus(err?.message || t('lightningOps.channelOpenFailed'))
+    } finally {
+      setBatchBusy(false)
     }
   }
 
@@ -3212,6 +3389,124 @@ export default function LightningOps() {
           <button className="btn-secondary" onClick={handleUpdateFees}>{t('lightningOps.updateFees')}</button>
           {feeStatus && <p className="text-sm text-brass">{feeStatus}</p>}
         </div>
+      </div>
+
+      <div className="section-card space-y-4">
+        <div>
+          <h3 className="text-lg font-semibold">{t('lightningOps.batchOpenTitle')}</h3>
+          <p className="text-sm text-fog/60">{t('lightningOps.batchOpenSubtitle')}</p>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <input
+            className="input-field"
+            placeholder={t('lightningOps.peerAddressPlaceholder')}
+            value={batchPeer}
+            onChange={(e) => setBatchPeer(e.target.value)}
+          />
+          <input
+            className="input-field"
+            placeholder={t('lightningOps.fundingAmount')}
+            type="number"
+            min={20000}
+            value={batchAmount}
+            onChange={(e) => setBatchAmount(e.target.value)}
+          />
+        </div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <input
+            className="input-field"
+            placeholder={t('lightningOps.closeAddressOptional')}
+            type="text"
+            value={batchCloseAddress}
+            onChange={(e) => setBatchCloseAddress(e.target.value)}
+          />
+          <label className="flex items-center gap-2 text-sm text-fog/70">
+            <input type="checkbox" checked={batchPrivate} onChange={(e) => setBatchPrivate(e.target.checked)} />
+            {t('lightningOps.privateChannel')}
+          </label>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button className="btn-secondary" type="button" onClick={handleBatchAddItem} disabled={batchBusy}>
+            + {t('lightningOps.batchOpenAdd')}
+          </button>
+          <span className="text-xs text-fog/60">
+            {t('lightningOps.batchOpenItemsCount', { count: batchItems.length })}
+          </span>
+        </div>
+        {batchItems.length > 0 && (
+          <div className="rounded-2xl border border-white/10 bg-ink/60 p-3 space-y-2">
+            {batchItems.map((item) => {
+              const alias = peerAliasMap.get(item.pubkey.toLowerCase()) || item.pubkey
+              const peerRef = item.host ? `${item.pubkey}@${item.host}` : item.pubkey
+              return (
+                <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 text-xs text-fog/80 border-b border-white/5 pb-2 last:border-b-0 last:pb-0">
+                  <div className="space-y-1">
+                    <p className="text-fog">{alias}</p>
+                    <p className="text-fog/60 break-all">{peerRef}</p>
+                    <p className="text-fog/60">
+                      {t('lightningOps.batchOpenItemSummary', {
+                        amount: item.local_funding_sat.toLocaleString(),
+                        type: item.private ? t('lightningOps.privateChannel') : t('lightningOps.publicChannel'),
+                      })}
+                    </p>
+                  </div>
+                  <button className="btn-secondary text-xs px-3 py-1.5" type="button" onClick={() => handleBatchRemoveItem(item.id)} disabled={batchBusy}>
+                    {t('lightningOps.batchOpenRemove')}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <label className="text-sm text-fog/70">
+          {t('lightningOps.feeRate')}
+          <span className="ml-2 text-xs text-fog/50">
+            {t('lightningOps.feeHint', { fastest: openFeeHint?.fastest ?? '-', hour: openFeeHint?.hour ?? '-' })}
+          </span>
+        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            className="input-field flex-1 min-w-[140px]"
+            placeholder={t('common.auto')}
+            type="number"
+            min={1}
+            value={batchFeeRate}
+            onChange={(e) => setBatchFeeRate(e.target.value)}
+          />
+          <button
+            className="btn-secondary text-xs px-3 py-2"
+            type="button"
+            onClick={() => {
+              if (openFeeHint?.fastest) {
+                setBatchFeeRate(String(openFeeHint.fastest))
+              }
+            }}
+            disabled={!openFeeHint?.fastest}
+          >
+            {t('lightningOps.useFastest')}
+          </button>
+          {batchFeeStatus && <p className="text-xs text-fog/50">{batchFeeStatus}</p>}
+        </div>
+        <button className="btn-primary" onClick={handleBatchOpenChannels} disabled={batchBusy || !batchItems.length}>
+          {batchBusy ? t('lightningOps.batchOpenRunning') : t('lightningOps.batchOpenAction')}
+        </button>
+        <p className="text-xs text-fog/50">{t('lightningOps.minimumFundingNote')}</p>
+        {batchStatus && <p className="text-sm text-brass">{batchStatus}</p>}
+        {batchChannelPoints.length > 0 && (
+          <div className="text-xs text-fog/70 space-y-1">
+            {batchChannelPoints.map((point) => (
+              <a
+                key={point}
+                className="block text-emerald-200 hover:text-emerald-100 break-all"
+                href={mempoolLink(point)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t('lightningOps.fundingTx', { point })}
+              </a>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="section-card space-y-4">

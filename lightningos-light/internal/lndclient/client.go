@@ -1453,6 +1453,70 @@ func (c *Client) OpenChannel(ctx context.Context, pubkeyHex string, localFunding
   return channelPointString(resp), nil
 }
 
+func (c *Client) BatchOpenChannel(ctx context.Context, channels []BatchOpenChannelParams, satPerVbyte int64) ([]BatchOpenChannelResult, error) {
+  if len(channels) == 0 {
+    return nil, errors.New("channels required")
+  }
+
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return nil, err
+  }
+  defer conn.Close()
+
+  reqChannels := make([]*lnrpc.BatchOpenChannel, 0, len(channels))
+  for _, item := range channels {
+    pubkeyHex := strings.TrimSpace(item.PubkeyHex)
+    if pubkeyHex == "" {
+      return nil, errors.New("pubkey required")
+    }
+    pubkey, err := hex.DecodeString(pubkeyHex)
+    if err != nil {
+      return nil, fmt.Errorf("invalid pubkey hex")
+    }
+    reqItem := &lnrpc.BatchOpenChannel{
+      NodePubkey: pubkey,
+      LocalFundingAmount: item.LocalFundingSat,
+      Private: item.Private,
+    }
+    if strings.TrimSpace(item.CloseAddress) != "" {
+      reqItem.CloseAddress = strings.TrimSpace(item.CloseAddress)
+    }
+    reqChannels = append(reqChannels, reqItem)
+  }
+
+  req := &lnrpc.BatchOpenChannelRequest{
+    Channels: reqChannels,
+  }
+  if satPerVbyte > 0 {
+    req.SatPerVbyte = satPerVbyte
+  }
+
+  client := lnrpc.NewLightningClient(conn)
+  resp, err := client.BatchOpenChannel(ctx, req)
+  if err != nil {
+    return nil, err
+  }
+
+  results := make([]BatchOpenChannelResult, 0, len(resp.GetPendingChannels()))
+  for _, pending := range resp.GetPendingChannels() {
+    if pending == nil {
+      continue
+    }
+    txid := txidFromBytes(pending.GetTxid())
+    result := BatchOpenChannelResult{
+      Txid: txid,
+      OutputIndex: pending.GetOutputIndex(),
+    }
+    if txid != "" {
+      result.ChannelPoint = fmt.Sprintf("%s:%d", txid, pending.GetOutputIndex())
+    }
+    results = append(results, result)
+  }
+
+  return results, nil
+}
+
 func (c *Client) CloseChannel(ctx context.Context, channelPoint string, force bool, satPerVbyte int64) error {
   cp, err := parseChannelPoint(channelPoint)
   if err != nil {
@@ -1775,6 +1839,19 @@ type NodeDetails struct {
   PubKey string `json:"pub_key"`
   Alias string `json:"alias"`
   Addresses []NodeAddress `json:"addresses,omitempty"`
+}
+
+type BatchOpenChannelParams struct {
+  PubkeyHex string
+  LocalFundingSat int64
+  Private bool
+  CloseAddress string
+}
+
+type BatchOpenChannelResult struct {
+  ChannelPoint string `json:"channel_point,omitempty"`
+  Txid string `json:"txid,omitempty"`
+  OutputIndex uint32 `json:"output_index"`
 }
 
 type PendingChannelInfo struct {

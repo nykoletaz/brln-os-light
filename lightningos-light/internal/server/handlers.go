@@ -19,6 +19,7 @@ import (
 
   "github.com/jackc/pgx/v5/pgxpool"
 
+  "lightningos-light/internal/lndclient"
   "lightningos-light/internal/system"
 )
 
@@ -35,6 +36,8 @@ const (
   lndRPCTimeout = 15 * time.Second
   lndConnectTimeout = 30 * time.Second
   lndOpenChannelTimeout = 60 * time.Second
+  lndBatchOpenChannelTimeout = 90 * time.Second
+  batchOpenMaxChannels = 50
   lndWarmupPeriod = 90 * time.Second
 )
 
@@ -1891,6 +1894,138 @@ func (s *Server) handleLNOpenChannel(w http.ResponseWriter, r *http.Request) {
   }
 
   writeJSON(w, http.StatusOK, map[string]string{"channel_point": channelPoint})
+}
+
+func (s *Server) handleLNBatchOpenChannel(w http.ResponseWriter, r *http.Request) {
+  var req struct {
+    Channels []struct {
+      PeerAddress string `json:"peer_address"`
+      Pubkey string `json:"pubkey"`
+      Host string `json:"host"`
+      LocalFundingSat int64 `json:"local_funding_sat"`
+      CloseAddress string `json:"close_address"`
+      Private bool `json:"private"`
+    } `json:"channels"`
+    SatPerVbyte int64 `json:"sat_per_vbyte"`
+  }
+  if err := readJSON(r, &req); err != nil {
+    writeError(w, http.StatusBadRequest, "invalid json")
+    return
+  }
+  if len(req.Channels) == 0 {
+    writeError(w, http.StatusBadRequest, "channels required")
+    return
+  }
+  if len(req.Channels) > batchOpenMaxChannels {
+    writeError(w, http.StatusBadRequest, fmt.Sprintf("too many channels (max %d)", batchOpenMaxChannels))
+    return
+  }
+  if req.SatPerVbyte < 0 {
+    writeError(w, http.StatusBadRequest, "sat_per_vbyte must be zero or positive")
+    return
+  }
+
+  peersCtx, peersCancel := context.WithTimeout(r.Context(), lndRPCTimeout)
+  peers, err := s.lnd.ListPeers(peersCtx)
+  peersCancel()
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, lndDetailedErrorMessage(err))
+    return
+  }
+  connected := make(map[string]bool, len(peers))
+  for _, peer := range peers {
+    pubkey := strings.ToLower(strings.TrimSpace(peer.PubKey))
+    if pubkey != "" {
+      connected[pubkey] = true
+    }
+  }
+
+  dedupe := make(map[string]bool, len(req.Channels))
+  batch := make([]lndclient.BatchOpenChannelParams, 0, len(req.Channels))
+  for idx, item := range req.Channels {
+    localFunding := item.LocalFundingSat
+    if localFunding <= 0 {
+      writeError(w, http.StatusBadRequest, fmt.Sprintf("channels[%d].local_funding_sat must be positive", idx))
+      return
+    }
+
+    peerAddress := strings.TrimSpace(item.PeerAddress)
+    pubkey := strings.TrimSpace(item.Pubkey)
+    host := strings.TrimSpace(item.Host)
+    if peerAddress == "" && pubkey != "" && host != "" {
+      peerAddress = pubkey + "@" + host
+    } else if peerAddress == "" && pubkey != "" {
+      peerAddress = pubkey
+    }
+    if peerAddress == "" {
+      writeError(w, http.StatusBadRequest, fmt.Sprintf("channels[%d].peer_address required", idx))
+      return
+    }
+
+    if strings.Contains(peerAddress, "@") {
+      parsedPubkey, parsedHost, err := parsePeerAddress(peerAddress)
+      if err != nil {
+        writeError(w, http.StatusBadRequest, fmt.Sprintf("channels[%d]: %v", idx, err))
+        return
+      }
+      pubkey = parsedPubkey
+      host = parsedHost
+    } else if pubkey == "" {
+      pubkey = peerAddress
+    }
+
+    if pubkey == "" {
+      writeError(w, http.StatusBadRequest, fmt.Sprintf("channels[%d].pubkey required", idx))
+      return
+    }
+    if host != "" && !strings.Contains(host, ":") {
+      writeError(w, http.StatusBadRequest, fmt.Sprintf("channels[%d].host must include host:port", idx))
+      return
+    }
+
+    pubkeyKey := strings.ToLower(pubkey)
+    if dedupe[pubkeyKey] {
+      writeError(w, http.StatusBadRequest, fmt.Sprintf("duplicate pubkey in batch: %s", pubkey))
+      return
+    }
+    dedupe[pubkeyKey] = true
+
+    if !connected[pubkeyKey] {
+      if host == "" {
+        writeError(w, http.StatusBadRequest, fmt.Sprintf("peer %s is not connected; use pubkey@host:port", pubkey))
+        return
+      }
+      connectCtx, connectCancel := context.WithTimeout(r.Context(), lndConnectTimeout)
+      err := s.lnd.ConnectPeerWithTimeout(connectCtx, pubkey, host, false, uint64(lndConnectTimeout/time.Second))
+      connectCancel()
+      if err != nil && !isAlreadyConnected(err) {
+        writeError(w, http.StatusInternalServerError, peerConnectErrorMessage(err))
+        return
+      }
+      connected[pubkeyKey] = true
+    }
+
+    batch = append(batch, lndclient.BatchOpenChannelParams{
+      PubkeyHex: pubkey,
+      LocalFundingSat: localFunding,
+      Private: item.Private,
+      CloseAddress: item.CloseAddress,
+    })
+  }
+
+  openCtx, openCancel := context.WithTimeout(r.Context(), lndBatchOpenChannelTimeout)
+  defer openCancel()
+
+  results, err := s.lnd.BatchOpenChannel(openCtx, batch, req.SatPerVbyte)
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, lndDetailedErrorMessage(err))
+    return
+  }
+
+  writeJSON(w, http.StatusOK, map[string]any{
+    "pending_channels": results,
+    "count": len(results),
+  })
 }
 
 func (s *Server) handleMempoolFees(w http.ResponseWriter, r *http.Request) {
