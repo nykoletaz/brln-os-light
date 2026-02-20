@@ -92,10 +92,13 @@ func (s *Server) routes() http.Handler {
   r.Route("/api/lnops", func(r chi.Router) {
     r.Get("/channels", s.handleLNChannels)
     r.Get("/peers", s.handleLNPeers)
+    r.Get("/watchtower", s.handleLNWatchtowers)
     r.Post("/sign-message", s.handleLNSignMessage)
     r.Post("/peer", s.handleLNConnectPeer)
     r.Post("/peer/disconnect", s.handleLNDisconnectPeer)
     r.Post("/peers/boost", s.handleLNBoostPeers)
+    r.Post("/watchtower/add", s.handleLNWatchtowerAdd)
+    r.Post("/watchtower/remove", s.handleLNWatchtowerRemove)
     r.Get("/autofee/config", s.handleAutofeeConfigGet)
     r.Post("/autofee/config", s.handleAutofeeConfigPost)
     r.Get("/autofee/channels", s.handleAutofeeChannelsGet)

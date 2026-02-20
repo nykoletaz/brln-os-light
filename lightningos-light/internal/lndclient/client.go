@@ -19,6 +19,7 @@ import (
 	"lightningos-light/internal/config"
 	"lightningos-light/lnrpc"
 	"lightningos-light/lnrpc/routerrpc"
+	"lightningos-light/lnrpc/wtclientrpc"
 
   "google.golang.org/grpc"
   "google.golang.org/grpc/credentials"
@@ -1339,6 +1340,113 @@ func (c *Client) ListPeers(ctx context.Context) ([]PeerInfo, error) {
   return peers, nil
 }
 
+func (c *Client) ListWatchtowers(ctx context.Context, includeSessions bool, excludeExhaustedSessions bool) ([]WatchtowerInfo, error) {
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return nil, err
+  }
+  defer conn.Close()
+
+  client := wtclientrpc.NewWatchtowerClientClient(conn)
+  resp, err := client.ListTowers(ctx, &wtclientrpc.ListTowersRequest{
+    IncludeSessions: includeSessions,
+    ExcludeExhaustedSessions: excludeExhaustedSessions,
+  })
+  if err != nil {
+    return nil, err
+  }
+
+  towers := make([]WatchtowerInfo, 0, len(resp.GetTowers()))
+  for _, item := range resp.GetTowers() {
+    if item == nil {
+      continue
+    }
+
+    activeSessionCandidate := item.GetActiveSessionCandidate()
+    numSessions := int(item.GetNumSessions())
+    if sessionInfo := item.GetSessionInfo(); len(sessionInfo) > 0 {
+      activeSessionCandidate = false
+      numSessions = 0
+      for _, sess := range sessionInfo {
+        if sess == nil {
+          continue
+        }
+        numSessions += int(sess.GetNumSessions())
+        if sess.GetActiveSessionCandidate() {
+          activeSessionCandidate = true
+        }
+      }
+    }
+
+    towers = append(towers, WatchtowerInfo{
+      Pubkey: strings.ToLower(hex.EncodeToString(item.GetPubkey())),
+      Addresses: uniqueStrings(item.GetAddresses()),
+      ActiveSessionCandidate: activeSessionCandidate,
+      NumSessions: numSessions,
+    })
+  }
+
+  sort.Slice(towers, func(i, j int) bool {
+    return towers[i].Pubkey < towers[j].Pubkey
+  })
+
+  return towers, nil
+}
+
+func (c *Client) AddWatchtower(ctx context.Context, pubkeyHex string, address string) error {
+  pubkeyHex = strings.TrimSpace(pubkeyHex)
+  if pubkeyHex == "" {
+    return errors.New("pubkey required")
+  }
+  address = strings.TrimSpace(address)
+  if address == "" {
+    return errors.New("address required")
+  }
+
+  pubkey, err := hex.DecodeString(pubkeyHex)
+  if err != nil {
+    return fmt.Errorf("invalid pubkey hex")
+  }
+
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return err
+  }
+  defer conn.Close()
+
+  client := wtclientrpc.NewWatchtowerClientClient(conn)
+  _, err = client.AddTower(ctx, &wtclientrpc.AddTowerRequest{
+    Pubkey: pubkey,
+    Address: address,
+  })
+  return err
+}
+
+func (c *Client) RemoveWatchtower(ctx context.Context, pubkeyHex string, address string) error {
+  pubkeyHex = strings.TrimSpace(pubkeyHex)
+  if pubkeyHex == "" {
+    return errors.New("pubkey required")
+  }
+
+  pubkey, err := hex.DecodeString(pubkeyHex)
+  if err != nil {
+    return fmt.Errorf("invalid pubkey hex")
+  }
+
+  conn, err := c.dial(ctx, true)
+  if err != nil {
+    return err
+  }
+  defer conn.Close()
+
+  client := wtclientrpc.NewWatchtowerClientClient(conn)
+  _, err = client.RemoveTower(ctx, &wtclientrpc.RemoveTowerRequest{
+    Pubkey: pubkey,
+    Address: strings.TrimSpace(address),
+  })
+  return err
+}
+
 func (c *Client) ConnectPeer(ctx context.Context, pubkey string, host string, perm bool) error {
   return c.ConnectPeerWithTimeout(ctx, pubkey, host, perm, defaultConnectPeerTimeoutSec)
 }
@@ -1828,6 +1936,13 @@ type PeerInfo struct {
   SyncType string `json:"sync_type"`
   LastError string `json:"last_error"`
   LastErrorTime int64 `json:"last_error_time,omitempty"`
+}
+
+type WatchtowerInfo struct {
+  Pubkey string `json:"pubkey"`
+  Addresses []string `json:"addresses,omitempty"`
+  ActiveSessionCandidate bool `json:"active_session_candidate"`
+  NumSessions int `json:"num_sessions"`
 }
 
 type NodeAddress struct {

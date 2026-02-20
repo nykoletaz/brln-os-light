@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeResults, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnHtlcManager, getLnHtlcManagerFailed, getLnHtlcManagerLogs, getLnPeers, getLnTorPeerChecker, getLnTorPeerCheckerLogs, getMempoolFees, openBatchChannels, openChannel, runAutofee, signLnMessage, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus, updateLnHtlcManager, updateLnTorPeerChecker } from '../api'
+import { addLnWatchtower, boostPeers, closeChannel, connectPeer, disconnectPeer, getAmbossHealth, getAutofeeChannels, getAutofeeConfig, getAutofeeResults, getAutofeeStatus, getBitcoinLocalStatus, getLnChanHeal, getLnChannelFees, getLnChannels, getLnHtlcManager, getLnHtlcManagerFailed, getLnHtlcManagerLogs, getLnPeers, getLnTorPeerChecker, getLnTorPeerCheckerLogs, getLnWatchtowers, getMempoolFees, openBatchChannels, openChannel, removeLnWatchtower, runAutofee, signLnMessage, updateAmbossHealth, updateAutofeeChannels, updateAutofeeConfig, updateChannelFees, updateLnChanHeal, updateLnChannelStatus, updateLnHtlcManager, updateLnTorPeerChecker } from '../api'
 
 type Channel = {
   channel_point: string
@@ -55,6 +55,13 @@ type Peer = {
   sync_type: string
   last_error: string
   last_error_time?: number
+}
+
+type Watchtower = {
+  pubkey: string
+  addresses: string[]
+  active_session_candidate: boolean
+  num_sessions: number
 }
 
 type BatchOpenItem = {
@@ -311,6 +318,10 @@ export default function LightningOps() {
   const [peers, setPeers] = useState<Peer[]>([])
   const [peerListStatus, setPeerListStatus] = useState('')
   const [peerActionStatus, setPeerActionStatus] = useState('')
+  const [watchtowers, setWatchtowers] = useState<Watchtower[]>([])
+  const [watchtowerAddress, setWatchtowerAddress] = useState('')
+  const [watchtowerStatus, setWatchtowerStatus] = useState('')
+  const [watchtowerBusy, setWatchtowerBusy] = useState(false)
 
   const [amboss, setAmboss] = useState<AmbossHealthStatus | null>(null)
   const [ambossStatus, setAmbossStatus] = useState('')
@@ -1206,14 +1217,16 @@ export default function LightningOps() {
   const load = async () => {
     setStatus(t('lightningOps.loadingChannels'))
     setPeerListStatus(t('lightningOps.loadingPeers'))
+    setWatchtowerStatus(t('lightningOps.watchtowerLoading'))
     setAmbossStatus(t('lightningOps.ambossHealthLoading'))
     setChanHealStatus(t('lightningOps.chanHealLoading'))
     setHtlcManagerStatus(t('lightningOps.htlcManagerLoading'))
     setTorPeerCheckerStatus(t('lightningOps.torPeerLoading'))
     setAutofeeMessage(t('lightningOps.autofeeLoading'))
-    const [channelsResult, peersResult, ambossResult, chanHealResult, htlcManagerResult, htlcManagerLogsResult, htlcManagerFailedResult, torPeerCheckerResult, torPeerCheckerLogsResult, bitcoinLocalResult, autofeeConfigResult, autofeeStatusResult, autofeeChannelsResult, autofeeResultsResult] = await Promise.allSettled([
+    const [channelsResult, peersResult, watchtowerResult, ambossResult, chanHealResult, htlcManagerResult, htlcManagerLogsResult, htlcManagerFailedResult, torPeerCheckerResult, torPeerCheckerLogsResult, bitcoinLocalResult, autofeeConfigResult, autofeeStatusResult, autofeeChannelsResult, autofeeResultsResult] = await Promise.allSettled([
       getLnChannels(),
       getLnPeers(),
+      getLnWatchtowers(),
       getAmbossHealth(),
       getLnChanHeal(),
       getLnHtlcManager(),
@@ -1242,6 +1255,14 @@ export default function LightningOps() {
     } else {
       const message = (peersResult.reason as any)?.message || t('lightningOps.loadPeersFailed')
       setPeerListStatus(message)
+    }
+    if (watchtowerResult.status === 'fulfilled') {
+      const res = watchtowerResult.value as any
+      setWatchtowers(Array.isArray(res?.towers) ? res.towers : [])
+      setWatchtowerStatus('')
+    } else {
+      const message = (watchtowerResult.reason as any)?.message || t('lightningOps.watchtowerLoadFailed')
+      setWatchtowerStatus(message)
     }
     if (ambossResult.status === 'fulfilled') {
       setAmboss(ambossResult.value as AmbossHealthStatus)
@@ -1389,6 +1410,18 @@ export default function LightningOps() {
           setStatus(err?.message || t('lightningOps.loadChannelsFailed'))
         })
     }
+    const fetchWatchtowers = () => {
+      getLnWatchtowers()
+        .then((res: any) => {
+          if (!mounted) return
+          setWatchtowers(Array.isArray(res?.towers) ? res.towers : [])
+          setWatchtowerStatus('')
+        })
+        .catch((err: any) => {
+          if (!mounted) return
+          setWatchtowerStatus(err?.message || t('lightningOps.watchtowerLoadFailed'))
+        })
+    }
     const fetchAmboss = () => {
       getAmbossHealth()
         .then((data) => {
@@ -1493,6 +1526,7 @@ export default function LightningOps() {
         })
     }
     const timer = window.setInterval(() => {
+      fetchWatchtowers()
       fetchAmboss()
       fetchChanHeal()
       fetchHtlcManager()
@@ -1702,6 +1736,62 @@ export default function LightningOps() {
       return { pubkey: '', error: t('lightningOps.batchOpenInvalidPeer') }
     }
     return { pubkey: parts[0].trim(), host }
+  }
+
+  const parseWatchtowerAddress = (raw: string): { pubkey: string; host: string; error?: string } => {
+    const value = raw.trim()
+    if (!value.includes('@')) {
+      return { pubkey: '', host: '', error: t('lightningOps.watchtowerInvalidAddress') }
+    }
+    const parts = value.split('@')
+    if (parts.length !== 2 || !parts[0]?.trim() || !parts[1]?.trim()) {
+      return { pubkey: '', host: '', error: t('lightningOps.watchtowerInvalidAddress') }
+    }
+    const host = parts[1].trim()
+    if (!host.includes(':')) {
+      return { pubkey: '', host: '', error: t('lightningOps.watchtowerInvalidAddress') }
+    }
+    return { pubkey: parts[0].trim(), host }
+  }
+
+  const handleAddWatchtower = async () => {
+    if (watchtowerBusy) return
+    const parsed = parseWatchtowerAddress(watchtowerAddress)
+    if (parsed.error) {
+      setWatchtowerStatus(parsed.error)
+      return
+    }
+
+    setWatchtowerBusy(true)
+    setWatchtowerStatus(t('lightningOps.watchtowerAdding'))
+    try {
+      await addLnWatchtower({ address: `${parsed.pubkey}@${parsed.host}` })
+      setWatchtowerAddress('')
+      setWatchtowerStatus(t('lightningOps.watchtowerAdded'))
+      load()
+    } catch (err: any) {
+      setWatchtowerStatus(err?.message || t('lightningOps.watchtowerActionFailed'))
+    } finally {
+      setWatchtowerBusy(false)
+    }
+  }
+
+  const handleRemoveWatchtower = async (pubkey: string) => {
+    if (watchtowerBusy) return
+    const confirmed = window.confirm(t('lightningOps.watchtowerRemoveConfirm'))
+    if (!confirmed) return
+
+    setWatchtowerBusy(true)
+    setWatchtowerStatus(t('lightningOps.watchtowerRemoving'))
+    try {
+      await removeLnWatchtower({ pubkey })
+      setWatchtowerStatus(t('lightningOps.watchtowerRemoved'))
+      load()
+    } catch (err: any) {
+      setWatchtowerStatus(err?.message || t('lightningOps.watchtowerActionFailed'))
+    } finally {
+      setWatchtowerBusy(false)
+    }
   }
 
   const handleConnectPeer = async () => {
@@ -3510,6 +3600,48 @@ export default function LightningOps() {
       </div>
 
       <div className="section-card space-y-4">
+        <div>
+          <h3 className="text-lg font-semibold">{t('lightningOps.watchtowerTitle')}</h3>
+          <p className="text-sm text-fog/60">{t('lightningOps.watchtowerSubtitle')}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            className="input-field flex-1 min-w-[220px]"
+            placeholder={t('lightningOps.watchtowerAddressPlaceholder')}
+            value={watchtowerAddress}
+            onChange={(e) => setWatchtowerAddress(e.target.value)}
+          />
+          <button className="btn-secondary" type="button" onClick={handleAddWatchtower} disabled={watchtowerBusy}>
+            + {t('lightningOps.watchtowerAdd')}
+          </button>
+        </div>
+        <p className="text-xs text-fog/60">{t('lightningOps.watchtowerCount', { count: watchtowers.length })}</p>
+        {watchtowers.length > 0 ? (
+          <div className="rounded-2xl border border-white/10 bg-ink/60 p-3 space-y-2">
+            {watchtowers.map((tower) => (
+              <div key={tower.pubkey} className="flex flex-wrap items-center justify-between gap-3 text-xs text-fog/80 border-b border-white/5 pb-2 last:border-b-0 last:pb-0">
+                <div className="space-y-1">
+                  <p className="text-fog break-all">{tower.pubkey}</p>
+                  <p className="text-fog/60 break-all">
+                    {Array.isArray(tower.addresses) && tower.addresses.length > 0 ? tower.addresses.join(' | ') : t('common.na')}
+                  </p>
+                  <p className="text-fog/60">
+                    {t('lightningOps.watchtowerSessions', { count: Number(tower.num_sessions || 0) })} | {tower.active_session_candidate ? t('common.enabled') : t('common.disabled')}
+                  </p>
+                </div>
+                <button className="btn-secondary text-xs px-3 py-1.5" type="button" onClick={() => handleRemoveWatchtower(tower.pubkey)} disabled={watchtowerBusy}>
+                  {t('lightningOps.watchtowerRemove')}
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-fog/50">{t('lightningOps.watchtowerNoItems')}</p>
+        )}
+        {watchtowerStatus && <p className="text-sm text-brass">{watchtowerStatus}</p>}
+      </div>
+
+      <div className="section-card space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-semibold">{t('lightningOps.htlcManagerTitle')}</h3>
@@ -4033,3 +4165,4 @@ export default function LightningOps() {
     </section>
   )
 }
+

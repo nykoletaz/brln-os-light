@@ -118,6 +118,11 @@ export const payInvoice = (payload: { payment_request: string; channel_point?: s
 
 export const getLnChannels = () => request('/api/lnops/channels')
 export const getLnPeers = () => request('/api/lnops/peers')
+export const getLnWatchtowers = () => request('/api/lnops/watchtower')
+export const addLnWatchtower = (payload: { address: string }) =>
+  request('/api/lnops/watchtower/add', { method: 'POST', body: JSON.stringify(payload) })
+export const removeLnWatchtower = (payload: { pubkey: string; address?: string }) =>
+  request('/api/lnops/watchtower/remove', { method: 'POST', body: JSON.stringify(payload) })
 export const signLnMessage = (payload: { message: string }) =>
   request('/api/lnops/sign-message', { method: 'POST', body: JSON.stringify(payload) })
 export const getLnChanHeal = () => request('/api/lnops/channel/auto-heal')

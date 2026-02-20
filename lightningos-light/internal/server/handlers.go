@@ -1511,6 +1511,101 @@ func (s *Server) handleLNPeers(w http.ResponseWriter, r *http.Request) {
   writeJSON(w, http.StatusOK, map[string]any{"peers": peers})
 }
 
+func (s *Server) handleLNWatchtowers(w http.ResponseWriter, r *http.Request) {
+  includeSessions := false
+  excludeExhaustedSessions := false
+  if raw := strings.TrimSpace(r.URL.Query().Get("include_sessions")); raw != "" {
+    includeSessions = raw == "1" || strings.EqualFold(raw, "true")
+  }
+  if raw := strings.TrimSpace(r.URL.Query().Get("exclude_exhausted_sessions")); raw != "" {
+    excludeExhaustedSessions = raw == "1" || strings.EqualFold(raw, "true")
+  }
+
+  ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
+  defer cancel()
+
+  towers, err := s.lnd.ListWatchtowers(ctx, includeSessions, excludeExhaustedSessions)
+  if err != nil {
+    writeError(w, http.StatusInternalServerError, watchtowerRPCErrorMessage(err))
+    return
+  }
+
+  writeJSON(w, http.StatusOK, map[string]any{"towers": towers})
+}
+
+func (s *Server) handleLNWatchtowerAdd(w http.ResponseWriter, r *http.Request) {
+  var req struct {
+    Address string `json:"address"`
+  }
+  if err := readJSON(r, &req); err != nil {
+    writeError(w, http.StatusBadRequest, "invalid json")
+    return
+  }
+
+  pubkey, host, err := parsePeerAddress(req.Address)
+  if err != nil {
+    writeError(w, http.StatusBadRequest, "address must be pubkey@host:port")
+    return
+  }
+  if !strings.Contains(host, ":") {
+    writeError(w, http.StatusBadRequest, "address must be pubkey@host:port")
+    return
+  }
+
+  ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
+  defer cancel()
+
+  if err := s.lnd.AddWatchtower(ctx, pubkey, host); err != nil {
+    writeError(w, http.StatusInternalServerError, watchtowerRPCErrorMessage(err))
+    return
+  }
+
+  writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleLNWatchtowerRemove(w http.ResponseWriter, r *http.Request) {
+  var req struct {
+    Pubkey string `json:"pubkey"`
+    Address string `json:"address"`
+  }
+  if err := readJSON(r, &req); err != nil {
+    writeError(w, http.StatusBadRequest, "invalid json")
+    return
+  }
+
+  pubkey := strings.TrimSpace(req.Pubkey)
+  address := strings.TrimSpace(req.Address)
+  if strings.Contains(address, "@") {
+    parsedPubkey, parsedAddress, err := parsePeerAddress(address)
+    if err != nil {
+      writeError(w, http.StatusBadRequest, "address must be host:port or pubkey@host:port")
+      return
+    }
+    if pubkey == "" {
+      pubkey = parsedPubkey
+    }
+    address = parsedAddress
+  }
+  if pubkey == "" {
+    writeError(w, http.StatusBadRequest, "pubkey required")
+    return
+  }
+  if address != "" && !strings.Contains(address, ":") {
+    writeError(w, http.StatusBadRequest, "address must be host:port or pubkey@host:port")
+    return
+  }
+
+  ctx, cancel := context.WithTimeout(r.Context(), lndRPCTimeout)
+  defer cancel()
+
+  if err := s.lnd.RemoveWatchtower(ctx, pubkey, address); err != nil {
+    writeError(w, http.StatusInternalServerError, watchtowerRPCErrorMessage(err))
+    return
+  }
+
+  writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 func (s *Server) handleLNSignMessage(w http.ResponseWriter, r *http.Request) {
   var req struct {
     Message string `json:"message"`
@@ -1832,6 +1927,25 @@ func peerConnectErrorMessage(err error) string {
   }
   if msg == "" {
     msg = "Peer connection failed"
+  }
+  return msg
+}
+
+func watchtowerRPCErrorMessage(err error) string {
+  if err == nil {
+    return ""
+  }
+
+  raw := strings.ToLower(strings.TrimSpace(err.Error()))
+  if strings.Contains(raw, "unknown service wtclientrpc.watchtowerclient") ||
+    strings.Contains(raw, "unknown service") && strings.Contains(raw, "wtclientrpc.watchtowerclient") ||
+    strings.Contains(raw, "unimplemented") {
+    return "Watchtower client RPC unavailable on this LND."
+  }
+
+  msg := lndDetailedErrorMessage(err)
+  if strings.TrimSpace(msg) == "" {
+    return "Watchtower operation failed"
   }
   return msg
 }
