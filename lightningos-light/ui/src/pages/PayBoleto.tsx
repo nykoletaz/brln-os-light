@@ -255,7 +255,7 @@ export default function PayBoleto() {
           {!activation ? (
             <>
               <h3 className="text-lg font-semibold text-fog">{t('boleto.activationTitle')}</h3>
-              <p className="text-fog/70 text-sm">{t('boleto.activationDesc', { sats: '21,000' })}</p>
+              <p className="text-fog/70 text-sm">{t('boleto.activationDesc', { sats: '1,000' })}</p>
               <ul className="text-fog/60 text-sm space-y-1 list-disc list-inside">
                 <li>{t('boleto.activationStep1')}</li>
                 <li>{t('boleto.activationStep2')}</li>
