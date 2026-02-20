@@ -20,6 +20,7 @@ import LndConfig from './pages/LndConfig'
 import AppStore from './pages/AppStore'
 import Terminal from './pages/Terminal'
 import BuyDepix from './pages/BuyDepix'
+import Shortcuts from './pages/Shortcuts'
 import { getDepixConfig, getLndStatus, getWizardStatus } from './api'
 import { defaultPalette, paletteOrder, resolvePalette, resolveTheme, type PaletteKey, type ThemeMode } from './theme'
 
@@ -153,6 +154,7 @@ export default function App() {
       { key: 'notifications', label: t('nav.notifications'), element: <Notifications /> },
       { key: 'disks', label: t('nav.disks'), element: <Disks /> },
       { key: 'terminal', label: t('nav.terminal'), element: <Terminal /> },
+      { key: 'shortcuts', label: t('nav.shortcuts'), element: <Shortcuts /> },
       { key: 'logs', label: t('nav.logs'), element: <Logs /> }
     ]
   }, [depixEnabled, i18n.language, t])

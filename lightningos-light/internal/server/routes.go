@@ -74,6 +74,9 @@ func (s *Server) routes() http.Handler {
   r.Get("/api/depix/orders", s.handleDepixOrdersList)
   r.Get("/api/depix/orders/{id}", s.handleDepixOrderGet)
   r.Get("/api/terminal/status", s.handleTerminalStatus)
+  r.Get("/api/shortcuts", s.handleShortcutsGet)
+  r.Post("/api/shortcuts", s.handleShortcutsPost)
+  r.Delete("/api/shortcuts/{id}", s.handleShortcutsDelete)
 
   r.Route("/api/onchain", func(r chi.Router) {
     r.Get("/utxos", s.handleOnchainUtxos)

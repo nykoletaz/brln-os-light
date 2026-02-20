@@ -49,6 +49,10 @@ type Server struct {
   autofeeMu sync.Mutex
   autofee *AutofeeService
   autofeeErr string
+  shortcutsInitAt time.Time
+  shortcutsMu sync.Mutex
+  shortcuts *ShortcutsService
+  shortcutsErr string
   lndRestartMu sync.RWMutex
   lastLNDRestart time.Time
   walletActivityMu sync.Mutex
@@ -76,6 +80,7 @@ func (s *Server) Run() error {
   s.initTorPeerChecker()
   s.initDepix()
   s.initAutofee()
+  s.initShortcuts()
   if s.chat != nil {
     s.chat.Start()
   }

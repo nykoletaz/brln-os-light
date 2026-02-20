@@ -55,6 +55,7 @@
     "notifications": "Notificações",
     "rebalanceCenter": "Rebalance Center",
     "reports": "Relatórios",
+    "shortcuts": "Atalhos",
     "terminal": "Terminal",
     "wallet": "Carteira",
     "wizard": "Assistente"
@@ -132,6 +133,27 @@
     "subtitle": "Instale serviços opcionais sob demanda. Docker é instalado automaticamente quando necessário.",
     "title": "Loja de Apps",
     "uninstall": "Desinstalar"
+  },
+  "shortcuts": {
+    "title": "Atalhos",
+    "subtitle": "Abra apps externos com um clique dentro do LightningOS.",
+    "add": "Adicionar atalho",
+    "newShortcut": "Novo atalho",
+    "urlLabel": "URL",
+    "emojiLabel": "Emoji do icone",
+    "saveShortcut": "Salvar atalho",
+    "adding": "Adicionando...",
+    "formHint": "Use URL completa (https://...) e um emoji como icone.",
+    "openExternal": "Abrir em nova aba",
+    "remove": "Remover atalho",
+    "removeConfirm": "Remover este atalho?",
+    "urlRequired": "URL obrigatoria.",
+    "emojiRequired": "Emoji obrigatorio.",
+    "loading": "Carregando atalhos...",
+    "empty": "Sem atalhos ainda.",
+    "loadFailed": "Falha ao carregar atalhos.",
+    "createFailed": "Falha ao criar atalho.",
+    "removeFailed": "Falha ao remover atalho."
   },
   "depix": {
     "title": "Compra DePix",

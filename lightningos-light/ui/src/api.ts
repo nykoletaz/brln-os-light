@@ -368,6 +368,12 @@ export const getDepixOrders = (params: { user_key: string; limit?: number }) =>
 export const getDepixOrder = (id: number, params: { user_key: string; refresh?: boolean }) =>
   request(`/api/depix/orders/${encodeURIComponent(String(id))}${buildQuery(params)}`)
 
+export const getShortcuts = () => request('/api/shortcuts')
+export const createShortcut = (payload: { url: string; emoji: string }) =>
+  request('/api/shortcuts', { method: 'POST', body: JSON.stringify(payload) })
+export const deleteShortcut = (id: number) =>
+  request(`/api/shortcuts/${encodeURIComponent(String(id))}`, { method: 'DELETE' })
+
 export const getApps = () => request('/api/apps')
 export const getAppAdminPassword = (id: string) => request(`/api/apps/${id}/admin-password`)
 export const installApp = (id: string) => request(`/api/apps/${id}/install`, { method: 'POST' })

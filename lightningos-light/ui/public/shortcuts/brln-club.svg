@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 160" role="img" aria-label="BRLN Club">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B1020" />
+      <stop offset="100%" stop-color="#111827" />
+    </linearGradient>
+    <linearGradient id="bolt" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFB347" />
+      <stop offset="100%" stop-color="#F97316" />
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="160" rx="24" fill="url(#bg)" />
+  <text x="34" y="96" fill="#FFFFFF" font-family="Space Grotesk, Arial, sans-serif" font-size="74" font-weight="700">BR</text>
+  <polygon points="206,24 290,24 250,90 294,90 222,144 248,94 202,94" fill="url(#bolt)" />
+  <text x="306" y="96" fill="#FFFFFF" font-family="Space Grotesk, Arial, sans-serif" font-size="74" font-weight="700">LN</text>
+  <text x="332" y="136" fill="#F59E0B" font-family="Space Grotesk, Arial, sans-serif" font-size="34" font-weight="700">CLUB</text>
+</svg>
