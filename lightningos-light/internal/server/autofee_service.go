@@ -65,6 +65,13 @@ const (
   stagnationRebalHeadroom = 1.08
   stagnationSeedBlendPhase1 = 0.20
   stagnationSeedBlendPhase2 = 0.10
+  lowOutFactorDrained = 1.20
+  lowOutFactorFull = 0.85
+  lowOutFactorMin = 0.75
+  lowOutFactorMax = 1.30
+  lowOutFactorRatioAdjMax = 0.10
+  lowOutThreshMin = 0.03
+  lowOutThreshMax = 0.35
 )
 
 func normalizeRebalCostMode(value string) string {
@@ -191,6 +198,9 @@ type autofeeLogItem struct {
   HTLCNodeFactor float64 `json:"htlc_node_factor,omitempty"`
   HTLCLiquidityFactor float64 `json:"htlc_liquidity_factor,omitempty"`
   HTLCThresholdFactor float64 `json:"htlc_threshold_factor,omitempty"`
+  LowOutThresh float64 `json:"low_out_thresh,omitempty"`
+  LowOutProtectThresh float64 `json:"low_out_protect_thresh,omitempty"`
+  LowOutFactor float64 `json:"low_out_factor,omitempty"`
   Amboss int `json:"amboss,omitempty"`
   Missing int `json:"missing,omitempty"`
   Err int `json:"err,omitempty"`
@@ -1382,6 +1392,9 @@ type autofeeCalibration struct {
   HTLCGlobalCountFactor float64
   HTLCGlobalRateFactor float64
   HTLCWindowMin int
+  LowOutThresh float64
+  LowOutProtectThresh float64
+  LowOutFactor float64
 }
 
 type autofeeRunSummary struct {
@@ -1572,6 +1585,12 @@ func (e *autofeeEngine) calibrateNode(channels []lndclient.ChannelInfo, state ma
       liquidityClass = "full"
     }
   }
+  lowOutThresh, lowOutProtectThresh, lowOutFactor := effectiveLowOutThresholds(
+    e.profile.LowOutThresh,
+    e.profile.LowOutProtectThresh,
+    liquidityClass,
+    localRatio,
+  )
 
   e.calib.RevfloorBaseline = revfloorBaseline
   e.calib.RevfloorMinAbs = revfloorMinAbs
@@ -1582,6 +1601,9 @@ func (e *autofeeEngine) calibrateNode(channels []lndclient.ChannelInfo, state ma
   e.calib.LocalCapacitySat = totalLocal
   e.calib.AvgCapacitySat = avgCap
   e.calib.LocalRatio = localRatio
+  e.calib.LowOutThresh = lowOutThresh
+  e.calib.LowOutProtectThresh = lowOutProtectThresh
+  e.calib.LowOutFactor = lowOutFactor
 }
 
 type autofeeChannelState struct {
@@ -1859,9 +1881,10 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       CooldownIgnored: e.ignoreCooldown,
     }},
   }
-  calibLine := fmt.Sprintf("⚙️ calib node=%s channels=%d cap=%d avg=%d local=%d (%.0f%%) revfloor_thr=%d revfloor_min=%d liq=%s | htlc_k node=%.2f liq=%.2f total=%.2f | htlc_rate p>=%.1f%% l>=%.1f%% f>=%.1f%% | htlc_global c×%.2f r×%.2f",
+  calibLine := fmt.Sprintf("⚙️ calib node=%s channels=%d cap=%d avg=%d local=%d (%.0f%%) revfloor_thr=%d revfloor_min=%d liq=%s | low_out x%.2f t<%.1f%% p<%.1f%% | htlc_k node=%.2f liq=%.2f total=%.2f | htlc_rate p>=%.1f%% l>=%.1f%% f>=%.1f%% | htlc_global c×%.2f r×%.2f",
     e.calib.NodeClass, e.calib.ChannelCount, e.calib.TotalCapacitySat, e.calib.AvgCapacitySat,
     e.calib.LocalCapacitySat, e.calib.LocalRatio*100, e.calib.RevfloorBaseline, e.calib.RevfloorMinAbs, e.calib.LiquidityClass,
+    e.calib.LowOutFactor, e.calib.LowOutThresh*100, e.calib.LowOutProtectThresh*100,
     e.calib.HTLCNodeFactor, e.calib.HTLCLiquidityFactor, e.calib.HTLCThresholdFactor,
     e.calib.HTLCPolicyRateMin*100, e.calib.HTLCLiquidityRateMin*100,
     e.calib.HTLCForwardRateMin*100,
@@ -1893,6 +1916,9 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       HTLCNodeFactor: e.calib.HTLCNodeFactor,
       HTLCLiquidityFactor: e.calib.HTLCLiquidityFactor,
       HTLCThresholdFactor: e.calib.HTLCThresholdFactor,
+      LowOutThresh: e.calib.LowOutThresh,
+      LowOutProtectThresh: e.calib.LowOutProtectThresh,
+      LowOutFactor: e.calib.LowOutFactor,
     },
   })
   if summary.htlcAttemptsTotal > 0 {
@@ -2251,6 +2277,53 @@ func (e *autofeeEngine) htlcThresholdFactors() (float64, float64, float64) {
     thresholdFactor = 1.40
   }
   return nodeFactor, liquidityFactor, thresholdFactor
+}
+
+func effectiveLowOutThresholds(baseLow float64, baseProtect float64, liquidityClass string, localRatio float64) (float64, float64, float64) {
+  if baseLow <= 0 {
+    baseLow = defaultLowOutProtectThresh
+  }
+  if baseProtect <= 0 {
+    baseProtect = defaultLowOutProtectThresh
+  }
+
+  factor := 1.0
+  switch strings.ToLower(strings.TrimSpace(liquidityClass)) {
+  case "drained":
+    factor = lowOutFactorDrained
+  case "full":
+    factor = lowOutFactorFull
+  }
+
+  if localRatio > 0 && localRatio < 1 {
+    if localRatio < 0.25 {
+      factor += ((0.25 - localRatio) / 0.25) * lowOutFactorRatioAdjMax
+    } else if localRatio > 0.75 {
+      factor -= ((localRatio - 0.75) / 0.25) * lowOutFactorRatioAdjMax
+    }
+  }
+  if factor < lowOutFactorMin {
+    factor = lowOutFactorMin
+  }
+  if factor > lowOutFactorMax {
+    factor = lowOutFactorMax
+  }
+
+  lowOut := baseLow * factor
+  protect := baseProtect * factor
+  if lowOut < lowOutThreshMin {
+    lowOut = lowOutThreshMin
+  }
+  if lowOut > lowOutThreshMax {
+    lowOut = lowOutThreshMax
+  }
+  if protect < lowOutThreshMin {
+    protect = lowOutThreshMin
+  }
+  if protect > lowOutThreshMax {
+    protect = lowOutThreshMax
+  }
+  return lowOut, protect, factor
 }
 
 func scaleHTLCThresholdByWindow(base int, windowMin int, fallback int) int {
@@ -3089,9 +3162,15 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
   st.LastSeed = int(seed)
 
-  lowOutProtectThresh := e.profile.LowOutProtectThresh
-  if lowOutProtectThresh <= 0 {
-    lowOutProtectThresh = defaultLowOutProtectThresh
+  lowOutThresh := e.calib.LowOutThresh
+  lowOutProtectThresh := e.calib.LowOutProtectThresh
+  if lowOutThresh <= 0 || lowOutProtectThresh <= 0 {
+    lowOutThresh, lowOutProtectThresh, _ = effectiveLowOutThresholds(
+      e.profile.LowOutThresh,
+      e.profile.LowOutProtectThresh,
+      e.calib.LiquidityClass,
+      e.calib.LocalRatio,
+    )
   }
   sinkMinMargin := e.profile.SinkMinMargin
   if sinkMinMargin <= 0 {
@@ -3150,7 +3229,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
 
-  if outRatio < e.profile.LowOutThresh {
+  if outRatio < lowOutThresh {
     target = int(math.Ceil(float64(target) * 1.02))
   } else if outRatio > e.profile.HighOutThresh {
     target = int(math.Floor(float64(target) * 0.98))

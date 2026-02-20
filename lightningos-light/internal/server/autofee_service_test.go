@@ -74,3 +74,36 @@ func TestBlendTargetWithSeed(t *testing.T) {
     t.Fatalf("expected base when weight is zero: got %d want %d", keep, base)
   }
 }
+
+func TestEffectiveLowOutThresholdsDrainedVsFull(t *testing.T) {
+  lowDrained, protectDrained, factorDrained := effectiveLowOutThresholds(0.10, 0.10, "drained", 0.20)
+  lowFull, protectFull, factorFull := effectiveLowOutThresholds(0.10, 0.10, "full", 0.80)
+
+  if !(lowDrained > 0.10 && protectDrained > 0.10 && factorDrained > 1.0) {
+    t.Fatalf("expected drained calibration to increase thresholds: low=%.4f protect=%.4f factor=%.4f", lowDrained, protectDrained, factorDrained)
+  }
+  if !(lowFull < 0.10 && protectFull < 0.10 && factorFull < 1.0) {
+    t.Fatalf("expected full calibration to decrease thresholds: low=%.4f protect=%.4f factor=%.4f", lowFull, protectFull, factorFull)
+  }
+}
+
+func TestEffectiveLowOutThresholdsUsesRatioGradient(t *testing.T) {
+  lowNearBoundary, _, _ := effectiveLowOutThresholds(0.10, 0.10, "drained", 0.24)
+  lowVeryDrained, _, _ := effectiveLowOutThresholds(0.10, 0.10, "drained", 0.05)
+  if !(lowVeryDrained > lowNearBoundary) {
+    t.Fatalf("expected stronger threshold for lower local ratio: near=%.4f very=%.4f", lowNearBoundary, lowVeryDrained)
+  }
+}
+
+func TestEffectiveLowOutThresholdsFallbackAndClamp(t *testing.T) {
+  low, protect, factor := effectiveLowOutThresholds(0, 0, "drained", 0.0)
+  if low < lowOutThreshMin || low > lowOutThreshMax {
+    t.Fatalf("unexpected low threshold clamp: %.4f", low)
+  }
+  if protect < lowOutThreshMin || protect > lowOutThreshMax {
+    t.Fatalf("unexpected protect threshold clamp: %.4f", protect)
+  }
+  if factor < lowOutFactorMin || factor > lowOutFactorMax {
+    t.Fatalf("unexpected factor clamp: %.4f", factor)
+  }
+}
