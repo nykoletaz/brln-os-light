@@ -1,12 +1,21 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getBoletoConfig, createBoletoQuote, getBoletoStatus } from '../api'
+import { getBoletoConfig, activateBoleto, getActivationStatus, createBoletoQuote, getBoletoStatus } from '../api'
 import { getLocale } from '../i18n'
 
 type BoletoConfig = {
   enabled: boolean
+  activated: boolean
   feePercent: number
   provider: string
+}
+
+type ActivationData = {
+  invoice: string
+  paymentHash: string
+  sats: number
+  expiresAt: string
+  message?: string
 }
 
 type BoletoQuote = {
@@ -58,11 +67,17 @@ export default function PayBoleto() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [history, setHistory] = useState<Array<{ paymentHash: string; amountBrl: number; totalSats: number; status: string; bankName: string; createdAt: string }>>([])
 
+  // Activation state
+  const [activating, setActivating] = useState(false)
+  const [activation, setActivation] = useState<ActivationData | null>(null)
+  const [activationCopied, setActivationCopied] = useState(false)
+  const activationPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
   // Load config on mount
   useEffect(() => {
     getBoletoConfig()
       .then(setConfig)
-      .catch(() => setConfig({ enabled: false, feePercent: 6, provider: '' }))
+      .catch(() => setConfig({ enabled: false, activated: false, feePercent: 6, provider: '' }))
       .finally(() => setLoading(false))
   }, [])
 
@@ -70,8 +85,56 @@ export default function PayBoleto() {
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
+      if (activationPollRef.current) clearInterval(activationPollRef.current)
     }
   }, [])
+
+  // ─── Activation flow ────────────────────────────────────────────────
+
+  const handleActivate = useCallback(async () => {
+    setActivating(true)
+    setError('')
+    try {
+      const data = await activateBoleto()
+      setActivation(data)
+
+      // Start polling for activation payment
+      const poll = async () => {
+        try {
+          const s: any = await getActivationStatus(data.paymentHash)
+          if (s.status === 'completed' && s.apiKey) {
+            if (activationPollRef.current) clearInterval(activationPollRef.current)
+            setActivation(null)
+            setActivating(false)
+            // Refresh config (key is now saved server-side)
+            const cfg = await getBoletoConfig()
+            setConfig(cfg)
+          } else if (s.status === 'expired') {
+            if (activationPollRef.current) clearInterval(activationPollRef.current)
+            setActivation(null)
+            setActivating(false)
+            setError(t('boleto.activationExpired'))
+          }
+        } catch {
+          // continue polling
+        }
+      }
+
+      poll()
+      activationPollRef.current = setInterval(poll, 4000)
+    } catch (err: any) {
+      setError(err.message || t('boleto.activationError'))
+      setActivating(false)
+    }
+  }, [t])
+
+  const copyActivationInvoice = useCallback(() => {
+    if (!activation) return
+    navigator.clipboard.writeText(activation.invoice).then(() => {
+      setActivationCopied(true)
+      setTimeout(() => setActivationCopied(false), 2000)
+    })
+  }, [activation])
 
   const handleQuote = useCallback(async () => {
     setError('')
@@ -173,6 +236,74 @@ export default function PayBoleto() {
         <div className="section-card">
           <h2 className="text-xl font-bold text-fog mb-2">{t('boleto.title')}</h2>
           <p className="text-fog/60">{t('boleto.disabled')}</p>
+        </div>
+      </section>
+    )
+  }
+
+  // ─── Activation screen ───────────────────────────────────────────────
+
+  if (!config.activated) {
+    return (
+      <section className="space-y-6">
+        <div className="section-card">
+          <h2 className="text-xl font-bold text-fog mb-1">{t('boleto.title')}</h2>
+          <p className="text-fog/60 text-sm">{t('boleto.subtitle')}</p>
+        </div>
+
+        <div className="section-card space-y-4">
+          {!activation ? (
+            <>
+              <h3 className="text-lg font-semibold text-fog">{t('boleto.activationTitle')}</h3>
+              <p className="text-fog/70 text-sm">{t('boleto.activationDesc', { sats: '21,000' })}</p>
+              <ul className="text-fog/60 text-sm space-y-1 list-disc list-inside">
+                <li>{t('boleto.activationStep1')}</li>
+                <li>{t('boleto.activationStep2')}</li>
+                <li>{t('boleto.activationStep3')}</li>
+              </ul>
+              {error && <p className="text-red-400 text-sm">{error}</p>}
+              <button
+                className="btn-primary"
+                onClick={handleActivate}
+                disabled={activating}
+              >
+                {activating ? t('boleto.activating') : t('boleto.activateBtn')}
+              </button>
+            </>
+          ) : (
+            <>
+              <h3 className="text-lg font-semibold text-fog">{t('boleto.activationPayTitle')}</h3>
+              <p className="text-fog/70 text-sm">{t('boleto.activationPayDesc', { sats: new Intl.NumberFormat(locale).format(activation.sats) })}</p>
+
+              <div className="bg-white rounded-xl p-4 mx-auto w-fit">
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(activation.invoice)}`}
+                  alt="QR Code"
+                  className="w-[220px] h-[220px]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-fog/70 mb-1">{t('boleto.invoiceLabel')}</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="input-field font-mono text-xs"
+                    value={activation.invoice}
+                    readOnly
+                  />
+                  <button className="btn-secondary whitespace-nowrap" onClick={copyActivationInvoice}>
+                    {activationCopied ? t('boleto.copied') : t('boleto.copyInvoice')}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 text-fog/60 text-sm">
+                <div className="w-3 h-3 rounded-full bg-amber-400 animate-pulse" />
+                {t('boleto.activationWaiting')}
+              </div>
+            </>
+          )}
         </div>
       </section>
     )

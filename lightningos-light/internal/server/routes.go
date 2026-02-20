@@ -74,6 +74,8 @@ func (s *Server) routes() http.Handler {
   r.Get("/api/depix/orders", s.handleDepixOrdersList)
   r.Get("/api/depix/orders/{id}", s.handleDepixOrderGet)
   r.Get("/api/boleto/config", s.handleBoletoConfig)
+  r.Post("/api/boleto/activate", s.handleBoletoActivate)
+  r.Get("/api/boleto/activate/status/{paymentHash}", s.handleBoletoActivateStatus)
   r.Post("/api/boleto/quote", s.handleBoletoQuote)
   r.Get("/api/boleto/status/{paymentHash}", s.handleBoletoStatus)
   r.Get("/api/terminal/status", s.handleTerminalStatus)

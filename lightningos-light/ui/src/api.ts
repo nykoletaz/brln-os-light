@@ -384,6 +384,10 @@ export const resetAppAdmin = (id: string) => request(`/api/apps/${id}/reset-admi
 
 // ── Boleto (Pay bills with Lightning) ────────────────────────────────
 export const getBoletoConfig = () => request('/api/boleto/config')
+export const activateBoleto = () =>
+  request('/api/boleto/activate', { method: 'POST', body: JSON.stringify({}) })
+export const getActivationStatus = (paymentHash: string) =>
+  request(`/api/boleto/activate/status/${encodeURIComponent(paymentHash)}`)
 export const createBoletoQuote = (barcode: string) =>
   request('/api/boleto/quote', { method: 'POST', body: JSON.stringify({ barcode }) })
 export const getBoletoStatus = (paymentHash: string) =>

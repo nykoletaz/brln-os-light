@@ -13,7 +13,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-const fswapNodeAPIDefault = "https://api.f-swap.com/node"
+const (
+	fswapNodeAPIDefault = "https://api.f-swap.com/node"
+	secretsEnvPath      = "/etc/lightningos/secrets.env"
+)
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -64,12 +67,7 @@ func fswapAPIBase() string {
 	return fswapNodeAPIDefault
 }
 
-func fswapNodeRequest(method, path string, body any) (*http.Response, error) {
-	apiKey := fswapNodeAPIKey()
-	if apiKey == "" {
-		return nil, fmt.Errorf("FSWAP_NODE_API_KEY not configured")
-	}
-
+func fswapRequest(method, path string, body any, apiKey string) (*http.Response, error) {
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -85,10 +83,20 @@ func fswapNodeRequest(method, path string, body any) (*http.Response, error) {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Node-Api-Key", apiKey)
+	if apiKey != "" {
+		req.Header.Set("X-Node-Api-Key", apiKey)
+	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	return client.Do(req)
+}
+
+func fswapNodeRequest(method, path string, body any) (*http.Response, error) {
+	apiKey := fswapNodeAPIKey()
+	if apiKey == "" {
+		return nil, fmt.Errorf("FSWAP_NODE_API_KEY not configured")
+	}
+	return fswapRequest(method, path, body, apiKey)
 }
 
 // ─── Handlers ───────────────────────────────────────────────────────
@@ -97,7 +105,8 @@ func fswapNodeRequest(method, path string, body any) (*http.Response, error) {
 func (s *Server) handleBoletoConfig(w http.ResponseWriter, r *http.Request) {
 	apiKey := fswapNodeAPIKey()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":    apiKey != "",
+		"enabled":    true,
+		"activated":  apiKey != "",
 		"feePercent": 6,
 		"provider":   "fswap",
 	})
@@ -164,6 +173,87 @@ func (s *Server) handleBoletoStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "Erro ao ler resposta")
 		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	w.Write(data)
+}
+
+// ─── Activation handlers ────────────────────────────────────────────
+
+// handleBoletoActivate creates an activation invoice via FSwap.
+// The node pubkey is fetched from LND automatically.
+func (s *Server) handleBoletoActivate(w http.ResponseWriter, r *http.Request) {
+	// Don't allow if already activated
+	if fswapNodeAPIKey() != "" {
+		writeError(w, http.StatusConflict, "Node já ativado")
+		return
+	}
+
+	// Get node pubkey from LND
+	ctx := r.Context()
+	status, err := s.lnd.GetStatus(ctx)
+	if err != nil || status.Pubkey == "" {
+		writeError(w, http.StatusServiceUnavailable, "Não foi possível obter pubkey do node LND")
+		return
+	}
+
+	// Call FSwap /node/activate (no API key needed)
+	resp, err := fswapRequest("POST", "/activate", map[string]string{
+		"nodePubkey": status.Pubkey,
+	}, "")
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "Erro ao conectar com FSwap: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "Erro ao ler resposta")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	w.Write(data)
+}
+
+// handleBoletoActivateStatus polls activation status. When completed,
+// saves the API key to secrets.env and reloads environment.
+func (s *Server) handleBoletoActivateStatus(w http.ResponseWriter, r *http.Request) {
+	paymentHash := chi.URLParam(r, "paymentHash")
+	if paymentHash == "" || len(paymentHash) < 32 {
+		writeError(w, http.StatusBadRequest, "paymentHash inválido")
+		return
+	}
+
+	// Call FSwap /node/activate/status/:paymentHash (no API key needed)
+	resp, err := fswapRequest("GET", "/activate/status/"+paymentHash, nil, "")
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "Erro ao conectar com FSwap: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "Erro ao ler resposta")
+		return
+	}
+
+	// If activation completed, save the API key to secrets.env + process env
+	if resp.StatusCode == 200 {
+		var result struct {
+			Status string `json:"status"`
+			APIKey string `json:"apiKey"`
+		}
+		if err := json.Unmarshal(data, &result); err == nil && result.Status == "completed" && result.APIKey != "" {
+			if saveErr := writeEnvFileValue(secretsEnvPath, "FSWAP_NODE_API_KEY", result.APIKey); saveErr == nil {
+				os.Setenv("FSWAP_NODE_API_KEY", result.APIKey)
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
