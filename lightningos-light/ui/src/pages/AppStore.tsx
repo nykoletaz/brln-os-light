@@ -8,6 +8,7 @@ import peerswapIcon from '../assets/apps/peerswap.png'
 import robosatsIcon from '../assets/apps/robosats.svg'
 import depixIcon from '../assets/apps/depix.svg'
 import lnbitsIcon from '../assets/apps/lnbits.svg'
+import fswapIcon from '../assets/apps/fswap.png'
 
 type AppInfo = {
   id: string
@@ -16,6 +17,7 @@ type AppInfo = {
   installed: boolean
   status: string
   port?: number
+  external_url?: string
   admin_password_path?: string
 }
 
@@ -30,13 +32,15 @@ const iconMap: Record<string, string> = {
   peerswap: peerswapIcon,
   robosats: robosatsIcon,
   depixbuy: depixIcon,
-  lnbits: lnbitsIcon
+  lnbits: lnbitsIcon,
+  fswap: fswapIcon
 }
 
 const internalRoutes: Record<string, string> = {
   bitcoincore: 'bitcoin-local',
   elements: 'elements',
-  depixbuy: 'buy-depix'
+  depixbuy: 'buy-depix',
+  fswap: 'pay-boleto'
 }
 
 const statusStyles: Record<string, string> = {
@@ -182,8 +186,10 @@ export default function AppStore() {
               ? t('nav.elements')
               : app.id === 'depixbuy'
                 ? t('nav.buyDepix')
+              : app.id === 'fswap'
+                ? t('nav.payBoleto')
               : t('appStore.internal')
-          const openUrl = app.port ? `http://${host}:${app.port}` : ''
+          const openUrl = app.external_url || (app.port ? `http://${host}:${app.port}` : '')
           const icon = iconMap[app.id]
           return (
             <div key={app.id} className="section-card space-y-4">
@@ -246,7 +252,7 @@ export default function AppStore() {
                         {t('common.open')}
                       </a>
                     )}
-                    {!internalRoute && app.port && openUrl && (
+                    {!internalRoute && openUrl && (
                       <a className="btn-primary" href={openUrl} target="_blank" rel="noreferrer">
                         {t('common.open')}
                       </a>

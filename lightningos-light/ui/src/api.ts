@@ -381,3 +381,10 @@ export const uninstallApp = (id: string) => request(`/api/apps/${id}/uninstall`,
 export const startApp = (id: string) => request(`/api/apps/${id}/start`, { method: 'POST' })
 export const stopApp = (id: string) => request(`/api/apps/${id}/stop`, { method: 'POST' })
 export const resetAppAdmin = (id: string) => request(`/api/apps/${id}/reset-admin`, { method: 'POST' })
+
+// ── Boleto (Pay bills with Lightning) ────────────────────────────────
+export const getBoletoConfig = () => request('/api/boleto/config')
+export const createBoletoQuote = (barcode: string) =>
+  request('/api/boleto/quote', { method: 'POST', body: JSON.stringify({ barcode }) })
+export const getBoletoStatus = (paymentHash: string) =>
+  request(`/api/boleto/status/${encodeURIComponent(paymentHash)}`)

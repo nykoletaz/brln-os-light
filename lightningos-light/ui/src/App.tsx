@@ -21,7 +21,8 @@ import AppStore from './pages/AppStore'
 import Terminal from './pages/Terminal'
 import BuyDepix from './pages/BuyDepix'
 import Shortcuts from './pages/Shortcuts'
-import { getDepixConfig, getLndStatus, getWizardStatus } from './api'
+import PayBoleto from './pages/PayBoleto'
+import { getBoletoConfig, getDepixConfig, getLndStatus, getWizardStatus } from './api'
 import { defaultPalette, paletteOrder, resolvePalette, resolveTheme, type PaletteKey, type ThemeMode } from './theme'
 
 function useHashRoute() {
@@ -124,6 +125,7 @@ export default function App() {
   const [walletUnlocked, setWalletUnlocked] = useState<boolean | null>(null)
   const [walletExists, setWalletExists] = useState<boolean | null>(null)
   const [depixEnabled, setDepixEnabled] = useState(false)
+  const [boletoEnabled, setBoletoEnabled] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const refreshDepixEnabled = useCallback(async () => {
     try {
@@ -133,9 +135,20 @@ export default function App() {
       setDepixEnabled(false)
     }
   }, [])
+  const refreshBoletoEnabled = useCallback(async () => {
+    try {
+      const data: any = await getBoletoConfig()
+      setBoletoEnabled(Boolean(data?.enabled))
+    } catch {
+      setBoletoEnabled(false)
+    }
+  }, [])
   const baseRoutes = useMemo(() => {
     const depixRoute = depixEnabled
       ? [{ key: 'buy-depix', label: t('nav.buyDepix'), element: <BuyDepix /> }]
+      : []
+    const boletoRoute = boletoEnabled
+      ? [{ key: 'pay-boleto', label: t('nav.payBoleto'), element: <PayBoleto /> }]
       : []
     return [
       { key: 'dashboard', label: t('nav.dashboard'), element: <Dashboard /> },
@@ -148,6 +161,7 @@ export default function App() {
       { key: 'lnd', label: t('nav.lndConfig'), element: <LndConfig /> },
       { key: 'apps', label: t('nav.apps'), element: <AppStore /> },
       ...depixRoute,
+      ...boletoRoute,
       { key: 'bitcoin', label: t('nav.bitcoinRemote'), element: <BitcoinRemote /> },
       { key: 'bitcoin-local', label: t('nav.bitcoinLocal'), element: <BitcoinLocal /> },
       { key: 'elements', label: t('nav.elements'), element: <Elements /> },
@@ -157,7 +171,7 @@ export default function App() {
       { key: 'shortcuts', label: t('nav.shortcuts'), element: <Shortcuts /> },
       { key: 'logs', label: t('nav.logs'), element: <Logs /> }
     ]
-  }, [depixEnabled, i18n.language, t])
+  }, [depixEnabled, boletoEnabled, i18n.language, t])
   const baseRouteKeys = useMemo(() => baseRoutes.map((item) => item.key), [baseRoutes])
   const [menuConfig, setMenuConfig] = useState<MenuConfig>(() => normalizeMenuConfig(readMenuConfig(), baseRouteKeys))
 
@@ -207,13 +221,16 @@ export default function App() {
       }
     }
     void refreshDepixEnabled()
+    void refreshBoletoEnabled()
     const timer = window.setInterval(refreshDepixEnabled, 30000)
+    const boletoTimer = window.setInterval(refreshBoletoEnabled, 30000)
     window.addEventListener('apps:changed', handleAppsChanged as EventListener)
     return () => {
       window.clearInterval(timer)
+      window.clearInterval(boletoTimer)
       window.removeEventListener('apps:changed', handleAppsChanged as EventListener)
     }
-  }, [refreshDepixEnabled])
+  }, [refreshDepixEnabled, refreshBoletoEnabled])
 
   useEffect(() => {
     setMenuConfig((current) => {
