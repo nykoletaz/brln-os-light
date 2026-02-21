@@ -254,114 +254,109 @@ Configuration parameters:
 - `Critical min available sats`: minimum total source liquidity required to avoid critical mode.
 
 ## Lightning Ops: Autofee
-Autofee automatically adjusts **outbound fees** to maximize **profit first** and **movement second**. It uses your local routing and rebalance history (Postgres notifications) plus optional Amboss metrics to seed prices, then applies guardrails, cooldowns, and caps so updates are safe and explainable.
+Autofee adjusts **outbound fees** per channel with one goal hierarchy:
+1. Preserve positive unit economics (profitability).
+2. Keep channels moving (avoid liquidity lock).
+3. Keep fee updates stable and explainable.
+
+It uses local routing/rebalance history (Postgres notifications), optional Amboss seed data, HTLC failure signals, and calibrated guardrails.
 
 UI parameters:
 - `Enable autofee`: global on/off.
-- `Profile`: Conservative / Moderate / Aggressive (sets internal thresholds).
-- `Lookback window (days)`: 5 to 21 days for stats.
+- `Profile`: Conservative / Moderate / Aggressive (baseline behavior).
+- `Lookback window (days)`: 5 to 21 days (main stats window).
 - `Run interval (hours)`: minimum 1 hour.
 - `Cooldown up / down (hours)`: minimum time between fee increases / decreases.
-- `Min fee (ppm)` and `Max fee (ppm)`: hard clamps (min can be `0`).
-- `Rebalance cost mode`: `Per-channel`, `Global`, or `Blend` (controls the cost anchor used in floors/margins).
-- `Amboss fee reference`: optional seed source; requires API token.
-- `Inbound passive rebalance`: uses inbound discount for sink channels.
-- `Discovery mode`: faster lowering for idle/high-outbound channels.
-- `Explorer mode`: temporary exploration cycles; may skip cooldown on down moves.
-- `Revenue floor`: keeps a minimum floor for high-performing channels.
-- `Circuit breaker`: reduces steps if demand drops after recent increases.
-- `Extreme drain`: accelerates fee increases when a channel is chronically drained.
-- `Super source` + base fee: raises base fee when a channel is classified as super source.
-- `HTLC signal integration`: enables failed-HTLC feedback from HTLC Manager.
-- `HTLC mode`: `observe_only` (telemetry/tags only), `policy_only` (policy-side effects only), `full` (policy + liquidity effects, default).
+- `Min fee (ppm)` and `Max fee (ppm)`: hard clamps.
+- `Rebalance cost mode`: `Per-channel`, `Global`, or `Blend`.
+- `Amboss fee reference`: optional external seed source.
+- `Inbound passive rebalance`, `Discovery mode`, `Explorer mode`, `Revenue floor`, `Circuit breaker`, `Extreme drain`, `Super source`.
+- `HTLC signal integration` and `HTLC mode` (`observe_only`, `policy_only`, `full`).
+
+Decision pipeline (per channel):
+1. Build references:
+- `out_ppm7d` from main lookback.
+- `rebal_ppm7d` from selected rebalance cost mode.
+- Seed (`Amboss` -> memory/outrate/default fallbacks).
+2. Classify channel behavior (`sink`, `source`, `router`, `unknown`) and liquidity state.
+3. Compute a raw target using seed, out ratio, trend/margin rules, HTLC pressure, and profitability heuristics.
+4. Apply mode-specific controls (discovery/explorer/stagnation/profit-protect/global locks).
+5. Build floor stack (`rebal`, `rebal-sink`, `outrate`, `peg`, `revfloor`, `stagnation`, `no-signal`).
+6. Apply step caps and cooldown, then decide `apply` vs `keep`.
+
+Data windows and fallback rules:
+- Main run window: configurable `lookback` (5-21d).
+- Extra windows always computed:
+- `1d`: short-term movement/stagnation checks.
+- `7d`: canonical `out_ppm7d` reference.
+- `21d`: fallback only when recent data is missing and quality thresholds are met.
+- 21d outrate fallback requires:
+- at least `5` forwards and
+- outbound amount >= `max(50k sats, 0.5% of channel capacity)`.
+- 21d rebal fallback requires rebalanced amount >= `max(30k sats, 0.3% of channel capacity)`.
+- If no valid out/rebal signal is available and channel is idle, Autofee avoids blind fee increases (`no-signal-noup`).
 
 HTLC signal behavior:
-- Signal window is aligned to Autofee cadence: `max(run_interval, 60m)`.
-- Minimum sample/fail thresholds are scaled by the active HTLC window and calibrated by node size + liquidity class.
-- Summary line includes: `htlc_liq_hot`, `htlc_policy_hot`, `htlc_low_sample`, `htlc_window`.
-- Per-channel line includes counters when present: `htlc<window>m a=<attempts> p=<policy_fails> l=<liquidity_fails>`.
+- Signal window follows cadence: `max(run_interval, 60m)`.
+- Sample/failure thresholds are auto-scaled by node size + node liquidity class.
+- Summary line shows: `htlc_liq_hot`, `htlc_policy_hot`, `htlc_forward_hot`, `htlc_low_sample`, `htlc_window`.
+- Per-channel line may show: `htlc<window>m a=<attempts> p=<policy_fails> l=<liquidity_fails> f=<forward_fails> u=<unclassified>`.
 
 Automatic calibration:
-- Each run computes a node classification and liquidity status to auto-scale thresholds.
-- Node size classes (based on total capacity and channel count):
-  - `small`: < 50M sats or < 20 channels
-  - `medium`: < 200M sats or < 60 channels
-  - `large`: < 1.5B sats or < 150 channels
-  - `extra large`: everything above
-- Liquidity classes (based on local ratio):
-  - `drained`: local ratio < 25%
-  - `balanced`: 25% to 75%
-  - `full`: local ratio > 75%
-- The calibration line in Autofee Results shows these classes plus calibrated `revfloor` thresholds.
+- Node size class (`small`, `medium`, `large`, `xl`) from total capacity + channel count.
+- Node liquidity class (`drained`, `balanced`, `full`) from local ratio.
+- Calib line prints: `low_out x<factor> t<...> p<...>`.
+- This adjusts low-out thresholds dynamically (for example, less aggressive in balanced nodes, stronger protection when drained).
 
 Autofee Results lines:
-- Header: run type and timestamp.
-- Summary: counts for up/down/flat and skip reasons.
-- Seed: Amboss and fallback usage.
-- Calibration: node size, liquidity, and calibrated thresholds.
-- Per-channel lines: decision, target, floors, margins, and tags.
-- Results filters: you can show the last N runs and optionally filter by a local time range.
+- Header: run type + timestamp.
+- Summary: up/down/flat + skip counters.
+- Seed line: Amboss/fallback usage.
+- Calibration line: node class, liquidity class, low_out factors, revfloor thresholds, HTLC global factors.
+- Per-channel line: `set/keep`, `target`, `out_ratio`, `out_ppm7d`, `rebal_ppm7d`, `seed`, `floor`, `margin`, `rev_share`, tags, HTLC counters, forecast.
 
 Tag glossary (Autofee Results):
-- `sink`, `source`, `router`, `unknown`: class labels.
-- `discovery`: channel in discovery mode.
-- `discovery-hard`: discovery harddrop triggered (no baseline + idle).
-- `explorer`: explorer mode active.
-- `cooldown-skip`: cooldown skipped on a down move due to explorer.
-- `surge+X%`: surge bump applied.
-- `top-rev`: top-revenue-share bump applied.
-- `neg-margin`: negative-margin protection bump.
-- `negm+X%`: additional negative-margin uplift.
-- `revfloor`: revenue floor applied.
-- `outrate-floor`: outrate floor applied.
-- `peg`: peg to observed outrate.
-- `peg-grace`: peg applied inside grace window.
-- `peg-demand`: peg applied due to strong demand vs seed.
-- `circuit-breaker`: circuit breaker reduced the step.
-- `extreme-drain`: extreme-drain step boost path used.
-- `extreme-drain-turbo`: extra extreme-drain turbo uplift.
-- `cooldown`: cooldown blocked an update.
-- `cooldown-profit`: cooldown held a profitable down move.
-- `hold-small`: change below minimum delta/percent.
-- `same-ppm`: target equals current ppm.
-- `no-down-low`: down move blocked while deeply drained.
-- `no-down-neg-margin`: down move blocked while margin is negative.
-- `sink-floor`: extra floor margin applied to sink channels.
-- `trend-up`, `trend-down`, `trend-flat`: next-move directional hint.
-- `stepcap`: step cap applied.
-- `stepcap-lock`: step cap lock applied.
-- `floor-lock`: floor lock applied.
-- `global-neg-lock`: global negative-margin lock applied.
-- `lock-skip-no-chan-rebal`: lock skipped because there is no channel rebalance history.
-- `lock-skip-sink-profit`: lock skipped in sink profitability path.
-- `profit-protect-lock`: profit-protection lock applied.
-- `profit-protect-relax`: profit-protection relaxed.
-- `super-source`: channel classified as super source.
-- `super-source-like`: router-like super-source classification.
-- `inb-<n>`: inbound discount applied.
-- `htlc-policy-hot`: high policy-failure HTLC signal.
-- `htlc-liquidity-hot`: high liquidity-failure HTLC signal.
-- `htlc-sample-low`: HTLC sample too small for hot classification.
-- `htlc-neutral-lock`: both HTLC hot signals present and neutral lock path used.
-- `htlc-liq+X%`: liquidity-hot bump applied.
-- `htlc-policy+X%`: policy-hot bump applied.
-- `htlc-liq-nodown`: down move blocked by liquidity-hot signal.
-- `htlc-policy-nodown`: down move blocked by policy-hot signal.
-- `htlc-neutral-nodown`: down move blocked by combined HTLC lock.
-- `htlc-step-boost`: HTLC hot-signal step-cap boost.
-- `seed:amboss`: Amboss seed used.
-- `seed:amboss-missing`: Amboss token missing.
-- `seed:amboss-empty`: Amboss returned no data.
-- `seed:amboss-error`: Amboss fetch error.
-- `seed:med`: Amboss median blended in.
-- `seed:vol-<n>%`: volatility penalty applied.
-- `seed:ratio<factor>`: out/in ratio adjustment applied.
-- `seed:outrate`: seed from recent outrate.
-- `seed:mem`: seed from memory.
-- `seed:default`: default seed fallback.
-- `seed:guard`: seed jump guard applied.
-- `seed:p95cap`: seed capped at Amboss p95.
-- `seed:absmax`: absolute seed cap applied.
+- Channel role and trend:
+- `sink`, `source`, `router`, `unknown`, `trend-up`, `trend-down`, `trend-flat`.
+- Movement controls:
+- `stepcap`, `stepcap-lock`, `floor-lock`, `hold-small`, `same-ppm`, `cooldown`, `cooldown-profit`, `cooldown-skip`, `rebal-recent`, `rebal-recent-noup`.
+- Profit and margin controls:
+- `neg-margin`, `negm+X%`, `no-down-low`, `no-down-neg-margin`, `global-neg-lock`, `lock-skip-no-chan-rebal`, `lock-skip-sink-profit`, `profit-protect-lock`, `profit-protect-relax`.
+- Outrate/floor controls:
+- `outrate-floor`, `peg`, `peg-grace`, `peg-demand`, `revfloor`, `sink-floor`.
+- Adaptive controls:
+- `circuit-breaker`, `extreme-drain`, `extreme-drain-turbo`.
+- Stagnation and anti-lock controls:
+- `stagnation`, `stagnation-rN`, `stagnation-cap-<ppm>`, `normalize-out`, `normalize-rebal`, `stagnation-floor`, `stagnation-floor-relax`, `stagnation-neg-override`, `stagnation-pressure`, `peg-paused-stagnation`.
+- Low-out/no-signal controls:
+- `low-out-slow-up`, `low-out-noflow-cap`, `no-signal-noup`, `no-signal-floor-relax`.
+- Discovery/explorer:
+- `discovery`, `discovery-hard`, `explorer`.
+- HTLC signals:
+- `htlc-policy-hot`, `htlc-liquidity-hot`, `htlc-forward-hot`, `htlc-sample-low`, `htlc-neutral-lock`, `htlc-liq+X%`, `htlc-policy+X%`, `htlc-liq-nodown`, `htlc-policy-nodown`, `htlc-neutral-nodown`, `htlc-step-boost`.
+- Super-source and inbound:
+- `super-source`, `super-source-like`, `inb-<n>`.
+- Seed and fallback provenance:
+- `seed:amboss`, `seed:amboss-missing`, `seed:amboss-empty`, `seed:amboss-error`, `seed:med`, `seed:vol-<n>%`, `seed:ratio<factor>`, `seed:outrate`, `seed:mem`, `seed:default`, `seed:guard`, `seed:p95cap`, `seed:absmax`, `out-fallback-21d`, `rebal-fallback-21d`.
+
+Reading examples:
+- Example A (healthy profitable sink):
+```text
+keep 844 ppm | target 844 | out_ratio 0.21 | out_ppm7d~625 | rebal_ppm7d~513 | floor>=657(peg) | margin~61 | ... outrate-floor peg peg-demand ...
+```
+Meaning: channel is moving and profitable, floor remains anchored to market/rebalance references, no forced change.
+
+- Example B (high local ratio, idle, no quality signal):
+```text
+keep 1500 ppm | target 1500 | out_ratio 0.24 | out_ppm7d~0 | rebal_ppm7d~0 | ... low-out-slow-up no-signal-noup no-signal-floor-relax ...
+```
+Meaning: Autofee detected missing reliable signal and avoided blind upward repricing.
+
+- Example C (stagnation pressure on high local ratio):
+```text
+keep 1461 ppm | target 1139 | out_ratio 0.35 | ... stagnation normalize-out stagnation-r5 stagnation-cap-1139 stagnation-floor peg-paused-stagnation ...
+```
+Meaning: stagnation logic is actively trying to normalize down while preventing conflicting peg pressure.
 
 ## Web terminal (optional)
 LightningOS Light can expose a protected web terminal using GoTTY.
@@ -449,3 +444,5 @@ cd ..
 sudo rm -rf /opt/lightningos/ui/*
 sudo cp -a ui/dist/. /opt/lightningos/ui/
 ```
+
+

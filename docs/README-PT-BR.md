@@ -254,114 +254,109 @@ Parâmetros de configuração:
 - `Critical min available sats`: liquidez total mínima de origem para evitar modo crítico.
 
 ## Lightning Ops: Autofee
-Autofee ajusta automaticamente **outbound fees** para maximizar **lucro primeiro** e **movimento depois**. Ele usa histórico local de roteamento e rebalance (notificações no Postgres) + métricas opcionais Amboss para seed de preço, e depois aplica guardrails, cooldowns e caps para manter updates seguros e explicáveis.
+O Autofee ajusta **outbound fees** por canal com esta prioridade:
+1. Manter economia unitaria positiva (lucro).
+2. Manter movimento do node (evitar liquidez presa).
+3. Manter updates estaveis e explicaveis.
 
-Parâmetros da UI:
+Ele usa historico local de roteamento/rebalance (notificacoes no Postgres), seed opcional da Amboss, sinais HTLC e guardrails calibrados.
+
+Parametros da UI:
 - `Enable autofee`: liga/desliga global.
-- `Profile`: Conservative / Moderate / Aggressive (define limites internos).
-- `Lookback window (days)`: 5 a 21 dias para estatísticas.
-- `Run interval (hours)`: mínimo de 1 hora.
-- `Cooldown up / down (hours)`: tempo mínimo entre aumentos/reduções de fee.
-- `Min fee (ppm)` e `Max fee (ppm)`: clamps rígidos (mínimo pode ser `0`).
-- `Rebalance cost mode`: `Per-channel`, `Global` ou `Blend` (controla a âncora de custo usada em floors/margens).
-- `Amboss fee reference`: seed opcional; requer token de API.
-- `Inbound passive rebalance`: usa desconto inbound para canais sink.
-- `Discovery mode`: redução mais rápida para canais ociosos/alto outbound.
-- `Explorer mode`: ciclos temporários de exploração; pode pular cooldown em movimentos de queda.
-- `Revenue floor`: mantém floor mínimo para canais de alta performance.
-- `Circuit breaker`: reduz steps se demanda cair após aumentos recentes.
-- `Extreme drain`: acelera aumento de fee quando canal está cronicamente drenado.
-- `Super source` + base fee: aumenta base fee quando canal é classificado como super source.
-- `HTLC signal integration`: habilita feedback de falhas HTLC do HTLC Manager.
-- `HTLC mode`: `observe_only` (só telemetria/tags), `policy_only` (só efeitos de policy), `full` (policy + efeitos de liquidez, padrão).
+- `Profile`: Conservative / Moderate / Aggressive.
+- `Lookback window (days)`: 5 a 21 dias (janela principal).
+- `Run interval (hours)`: minimo 1 hora.
+- `Cooldown up / down (hours)`: tempo minimo entre aumentos/reducoes.
+- `Min fee (ppm)` e `Max fee (ppm)`: limites rigidos.
+- `Rebalance cost mode`: `Per-channel`, `Global` ou `Blend`.
+- `Amboss fee reference`: seed externo opcional.
+- `Inbound passive rebalance`, `Discovery mode`, `Explorer mode`, `Revenue floor`, `Circuit breaker`, `Extreme drain`, `Super source`.
+- `HTLC signal integration` e `HTLC mode` (`observe_only`, `policy_only`, `full`).
+
+Pipeline de decisao (por canal):
+1. Monta referencias:
+- `out_ppm7d` da janela principal.
+- `rebal_ppm7d` do modo de custo selecionado.
+- Seed (`Amboss` -> fallback para memoria/outrate/default).
+2. Classifica comportamento (`sink`, `source`, `router`, `unknown`) e estado de liquidez.
+3. Calcula target bruto com seed, out ratio, tendencia/margem, pressao HTLC e heuristicas de lucro.
+4. Aplica controles de discovery/explorer/stagnation/profit-protect/locks globais.
+5. Monta pilha de floor (`rebal`, `rebal-sink`, `outrate`, `peg`, `revfloor`, `stagnation`, `no-signal`).
+6. Aplica step cap e cooldown, e decide `apply` ou `keep`.
+
+Janelas de dados e regras de fallback:
+- Janela principal: `lookback` configuravel (5-21d).
+- Janelas extras sempre calculadas:
+- `1d`: movimento recente e estagnacao.
+- `7d`: referencia canonica de `out_ppm7d`.
+- `21d`: fallback apenas quando falta dado recente e ha qualidade minima.
+- Fallback de outrate 21d exige:
+- pelo menos `5` forwards e
+- volume outbound >= `max(50k sats, 0.5% da capacidade do canal)`.
+- Fallback de rebal 21d exige volume rebalanceado >= `max(30k sats, 0.3% da capacidade)`.
+- Se nao houver sinal valido de out/rebal e o canal estiver ocioso, o Autofee evita subida cega (`no-signal-noup`).
 
 Comportamento de sinais HTLC:
-- Janela de sinal alinhada à cadência do Autofee: `max(run_interval, 60m)`.
-- Limites mínimos de amostra/falha são escalados pela janela HTLC ativa e calibrados por tamanho do nó + classe de liquidez.
-- Linha de resumo inclui: `htlc_liq_hot`, `htlc_policy_hot`, `htlc_low_sample`, `htlc_window`.
-- Linha por canal inclui contadores quando presentes: `htlc<window>m a=<attempts> p=<policy_fails> l=<liquidity_fails>`.
+- Janela de sinal segue a cadencia: `max(run_interval, 60m)`.
+- Limites minimos de amostra/falha sao autoescalados por tamanho do node e classe de liquidez.
+- Linha de resumo mostra: `htlc_liq_hot`, `htlc_policy_hot`, `htlc_forward_hot`, `htlc_low_sample`, `htlc_window`.
+- Linha por canal pode mostrar: `htlc<window>m a=<attempts> p=<policy_fails> l=<liquidity_fails> f=<forward_fails> u=<unclassified>`.
 
-Calibração automática:
-- Cada execução calcula classificação do nó e status de liquidez para autoescalar limites.
-- Classes de tamanho do nó (capacidade total + quantidade de canais):
-  - `small`: < 50M sats ou < 20 canais
-  - `medium`: < 200M sats ou < 60 canais
-  - `large`: < 1.5B sats ou < 150 canais
-  - `extra large`: acima disso
-- Classes de liquidez (local ratio):
-  - `drained`: local ratio < 25%
-  - `balanced`: 25% a 75%
-  - `full`: local ratio > 75%
-- A linha de calibração em Autofee Results mostra essas classes + limites `revfloor` calibrados.
+Calibracao automatica:
+- Classe de tamanho do node (`small`, `medium`, `large`, `xl`) por capacidade total e numero de canais.
+- Classe de liquidez do node (`drained`, `balanced`, `full`) por local ratio.
+- Linha de calibracao mostra: `low_out x<factor> t<...> p<...>`.
+- Isso ajusta dinamicamente os thresholds de low-out (menos agressivo em node balanced, mais protetor em node drained).
 
 Linhas de Autofee Results:
-- Header: tipo de execução e timestamp.
-- Summary: contagens de up/down/flat e motivos de skip.
-- Seed: uso de Amboss e fallback.
-- Calibration: tamanho do nó, liquidez e limites calibrados.
-- Linhas por canal: decisão, alvo, floors, margens e tags.
-- Filtros de resultado: exibir últimas N execuções e filtrar opcionalmente por intervalo de tempo local.
+- Header: tipo da execucao + timestamp.
+- Summary: contadores de up/down/flat e skips.
+- Seed line: uso de Amboss/fallbacks.
+- Calibration line: classes do node, low_out, revfloor, fatores globais HTLC.
+- Linha por canal: `set/keep`, `target`, `out_ratio`, `out_ppm7d`, `rebal_ppm7d`, `seed`, `floor`, `margin`, `rev_share`, tags, contadores HTLC e forecast.
 
-Glossário de tags (Autofee Results):
-- `sink`, `source`, `router`, `unknown`: rótulos de classe.
-- `discovery`: canal em discovery mode.
-- `discovery-hard`: harddrop de discovery acionado (sem baseline + ocioso).
-- `explorer`: explorer mode ativo.
-- `cooldown-skip`: cooldown ignorado em movimento de queda por causa do explorer.
-- `surge+X%`: surge bump aplicado.
-- `top-rev`: bump de top-revenue-share aplicado.
-- `neg-margin`: proteção de margem negativa aplicada.
-- `negm+X%`: uplift adicional de margem negativa.
-- `revfloor`: revenue floor aplicado.
-- `outrate-floor`: outrate floor aplicado.
-- `peg`: peg para outrate observada.
-- `peg-grace`: peg aplicado dentro da grace window.
-- `peg-demand`: peg aplicado por demanda forte vs seed.
-- `circuit-breaker`: circuit breaker reduziu o step.
-- `extreme-drain`: caminho de boost de step por extreme drain usado.
-- `extreme-drain-turbo`: uplift turbo extra de extreme drain.
-- `cooldown`: cooldown bloqueou update.
-- `cooldown-profit`: cooldown segurou queda lucrativa.
-- `hold-small`: mudança abaixo do delta/percentual mínimo.
-- `same-ppm`: target igual ao ppm atual.
-- `no-down-low`: queda bloqueada enquanto canal está fortemente drenado.
-- `no-down-neg-margin`: queda bloqueada enquanto margem está negativa.
-- `sink-floor`: margem de floor extra aplicada a canais sink.
-- `trend-up`, `trend-down`, `trend-flat`: dica direcional do próximo movimento.
-- `stepcap`: step cap aplicado.
-- `stepcap-lock`: lock de step cap aplicado.
-- `floor-lock`: floor lock aplicado.
-- `global-neg-lock`: lock global de margem negativa aplicado.
-- `lock-skip-no-chan-rebal`: lock ignorado por falta de histórico de rebalance por canal.
-- `lock-skip-sink-profit`: lock ignorado no caminho de lucratividade de sink.
-- `profit-protect-lock`: lock de proteção de lucro aplicado.
-- `profit-protect-relax`: proteção de lucro relaxada.
-- `super-source`: canal classificado como super source.
-- `super-source-like`: classificação super-source do tipo router-like.
-- `inb-<n>`: desconto inbound aplicado.
-- `htlc-policy-hot`: sinal HTLC de falhas de policy alto.
-- `htlc-liquidity-hot`: sinal HTLC de falhas de liquidez alto.
-- `htlc-sample-low`: amostra HTLC baixa demais para classificação hot.
-- `htlc-neutral-lock`: ambos sinais hot HTLC presentes e caminho de neutral lock usado.
-- `htlc-liq+X%`: bump por liquidez-hot aplicado.
-- `htlc-policy+X%`: bump por policy-hot aplicado.
-- `htlc-liq-nodown`: queda bloqueada por sinal liquidez-hot.
-- `htlc-policy-nodown`: queda bloqueada por sinal policy-hot.
-- `htlc-neutral-nodown`: queda bloqueada por lock combinado HTLC.
-- `htlc-step-boost`: boost de step-cap por sinal HTLC hot.
-- `seed:amboss`: seed Amboss usada.
-- `seed:amboss-missing`: token Amboss ausente.
-- `seed:amboss-empty`: Amboss retornou sem dados.
-- `seed:amboss-error`: erro ao buscar Amboss.
-- `seed:med`: mediana Amboss misturada.
-- `seed:vol-<n>%`: penalidade de volatilidade aplicada.
-- `seed:ratio<factor>`: ajuste por razão out/in aplicado.
-- `seed:outrate`: seed de outrate recente.
-- `seed:mem`: seed de memória.
-- `seed:default`: fallback de seed padrão.
-- `seed:guard`: guard de salto de seed aplicado.
-- `seed:p95cap`: seed limitada ao p95 da Amboss.
-- `seed:absmax`: cap absoluto de seed aplicado.
+Glossario de tags (Autofee Results):
+- Papel do canal e tendencia:
+- `sink`, `source`, `router`, `unknown`, `trend-up`, `trend-down`, `trend-flat`.
+- Controles de movimento:
+- `stepcap`, `stepcap-lock`, `floor-lock`, `hold-small`, `same-ppm`, `cooldown`, `cooldown-profit`, `cooldown-skip`, `rebal-recent`, `rebal-recent-noup`.
+- Controles de lucro e margem:
+- `neg-margin`, `negm+X%`, `no-down-low`, `no-down-neg-margin`, `global-neg-lock`, `lock-skip-no-chan-rebal`, `lock-skip-sink-profit`, `profit-protect-lock`, `profit-protect-relax`.
+- Floors/anchors de mercado:
+- `outrate-floor`, `peg`, `peg-grace`, `peg-demand`, `revfloor`, `sink-floor`.
+- Controles adaptativos:
+- `circuit-breaker`, `extreme-drain`, `extreme-drain-turbo`.
+- Estagnacao e anti-lock:
+- `stagnation`, `stagnation-rN`, `stagnation-cap-<ppm>`, `normalize-out`, `normalize-rebal`, `stagnation-floor`, `stagnation-floor-relax`, `stagnation-neg-override`, `stagnation-pressure`, `peg-paused-stagnation`.
+- Low-out e falta de sinal:
+- `low-out-slow-up`, `low-out-noflow-cap`, `no-signal-noup`, `no-signal-floor-relax`.
+- Discovery/explorer:
+- `discovery`, `discovery-hard`, `explorer`.
+- Sinais HTLC:
+- `htlc-policy-hot`, `htlc-liquidity-hot`, `htlc-forward-hot`, `htlc-sample-low`, `htlc-neutral-lock`, `htlc-liq+X%`, `htlc-policy+X%`, `htlc-liq-nodown`, `htlc-policy-nodown`, `htlc-neutral-nodown`, `htlc-step-boost`.
+- Super-source e inbound:
+- `super-source`, `super-source-like`, `inb-<n>`.
+- Seed e origem de fallback:
+- `seed:amboss`, `seed:amboss-missing`, `seed:amboss-empty`, `seed:amboss-error`, `seed:med`, `seed:vol-<n>%`, `seed:ratio<factor>`, `seed:outrate`, `seed:mem`, `seed:default`, `seed:guard`, `seed:p95cap`, `seed:absmax`, `out-fallback-21d`, `rebal-fallback-21d`.
+
+Exemplos de leitura:
+- Exemplo A (sink saudavel e lucrativo):
+```text
+keep 844 ppm | target 844 | out_ratio 0.21 | out_ppm7d~625 | rebal_ppm7d~513 | floor>=657(peg) | margin~61 | ... outrate-floor peg peg-demand ...
+```
+Leitura: canal com movimento e margem positiva, floor ancorado em mercado/custo, sem ajuste forcado.
+
+- Exemplo B (local alto, ocioso, sem sinal de qualidade):
+```text
+keep 1500 ppm | target 1500 | out_ratio 0.24 | out_ppm7d~0 | rebal_ppm7d~0 | ... low-out-slow-up no-signal-noup no-signal-floor-relax ...
+```
+Leitura: sem sinal confiavel, o algoritmo evita aumentar fee no escuro.
+
+- Exemplo C (pressao de estagnacao em local alto):
+```text
+keep 1461 ppm | target 1139 | out_ratio 0.35 | ... stagnation normalize-out stagnation-r5 stagnation-cap-1139 stagnation-floor peg-paused-stagnation ...
+```
+Leitura: modo de estagnacao tentando normalizar para baixo sem contradicao com peg.
 
 ## Terminal web (opcional)
 LightningOS Light pode expor um terminal web protegido usando GoTTY.
@@ -449,3 +444,5 @@ cd ..
 sudo rm -rf /opt/lightningos/ui/*
 sudo cp -a ui/dist/. /opt/lightningos/ui/
 ```
+
+

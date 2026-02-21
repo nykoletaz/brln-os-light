@@ -104,6 +104,22 @@ const COLORS = {
   total: '#eab308'
 }
 
+const tooltipContentStyle = {
+  background: '#0f172a',
+  borderRadius: 12,
+  border: '1px solid rgba(255,255,255,0.1)',
+  color: '#f8fafc'
+}
+
+const tooltipLabelStyle = {
+  color: '#f8fafc',
+  fontWeight: 600
+}
+
+const tooltipItemStyle = {
+  color: '#f8fafc'
+}
+
 export default function Reports() {
   const { t, i18n } = useTranslation()
   const locale = getLocale(i18n.language)
@@ -486,7 +502,9 @@ export default function Reports() {
                     <YAxis tick={{ fill: '#cbd5f5', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={formatCompact} />
                     <Tooltip
                       cursor={{ fill: 'rgba(255,255,255,0.06)' }}
-                      contentStyle={{ background: '#0f172a', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)' }}
+                      contentStyle={tooltipContentStyle}
+                      labelStyle={tooltipLabelStyle}
+                      itemStyle={tooltipItemStyle}
                       formatter={(value) => formatSats(Number(value))}
                     />
                     <Bar dataKey="value" radius={[8, 8, 8, 8]}>
@@ -669,7 +687,9 @@ export default function Reports() {
                   <YAxis tick={{ fill: '#cbd5f5', fontSize: 11 }} tickFormatter={formatCompact} axisLine={false} tickLine={false} />
                   <Tooltip
                     cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 1 }}
-                    contentStyle={{ background: '#0f172a', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)' }}
+                    contentStyle={tooltipContentStyle}
+                    labelStyle={tooltipLabelStyle}
+                    itemStyle={tooltipItemStyle}
                     formatter={(value) => formatSats(Number(value))}
                     labelFormatter={formatDateLabel}
                   />
@@ -697,7 +717,9 @@ export default function Reports() {
                   <Legend verticalAlign="top" height={24} formatter={(value) => <span className="text-xs text-fog/60">{value}</span>} />
                   <Tooltip
                     cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 1 }}
-                    contentStyle={{ background: '#0f172a', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)' }}
+                    contentStyle={tooltipContentStyle}
+                    labelStyle={tooltipLabelStyle}
+                    itemStyle={tooltipItemStyle}
                     formatter={(value) => formatSats(Number(value))}
                     labelFormatter={formatDateLabel}
                   />
@@ -727,7 +749,9 @@ export default function Reports() {
                 <Legend verticalAlign="top" height={24} formatter={(value) => <span className="text-xs text-fog/60">{value}</span>} />
                 <Tooltip
                   cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 1 }}
-                  contentStyle={{ background: '#0f172a', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)' }}
+                  contentStyle={tooltipContentStyle}
+                  labelStyle={tooltipLabelStyle}
+                  itemStyle={tooltipItemStyle}
                   formatter={(value) => formatSats(Number(value))}
                   labelFormatter={formatDateLabel}
                 />
