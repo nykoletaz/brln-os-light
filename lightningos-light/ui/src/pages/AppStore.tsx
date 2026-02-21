@@ -272,10 +272,6 @@ export default function AppStore() {
                   <>
                     <p>{t('appStore.publicPoolUiAccess', { url: publicPoolUrl })}</p>
                     <p>{t('appStore.publicPoolStratumEndpoint', { endpoint: publicPoolStratumEndpoint })}</p>
-                    <p>{t('appStore.publicPoolApiLocal')}</p>
-                    {bitcoinMode === 'remote' && <p>{t('appStore.publicPoolBitcoinModeRemote')}</p>}
-                    {bitcoinMode === 'local_app' && <p>{t('appStore.publicPoolBitcoinModeLocalApp')}</p>}
-                    {bitcoinMode === 'local_none' && <p>{t('appStore.publicPoolBitcoinModeLocalMissing')}</p>}
                     {bitcoinMode === 'local_external' && (
                       <>
                         <p>{t('appStore.publicPoolBitcoinModeLocalExternal')}</p>
@@ -283,12 +279,6 @@ export default function AppStore() {
                         <p className="font-mono text-[11px] text-fog/70">{t('appStore.publicPoolConfRpcBind')}</p>
                         <p className="font-mono text-[11px] text-fog/70">{t('appStore.publicPoolConfRpcAllow')}</p>
                       </>
-                    )}
-                    <p>{t('appStore.publicPoolUfwTitle')}</p>
-                    <p className="font-mono text-[11px] text-fog/70">{t('appStore.publicPoolUfwUi', { port: publicPoolUIPortFallback })}</p>
-                    <p className="font-mono text-[11px] text-fog/70">{t('appStore.publicPoolUfwStratum', { port: publicPoolStratumPort })}</p>
-                    {bitcoinMode === 'local_external' && (
-                      <p className="font-mono text-[11px] text-fog/70">{t('appStore.publicPoolUfwBridge')}</p>
                     )}
                   </>
                 )}
