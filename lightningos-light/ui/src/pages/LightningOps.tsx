@@ -296,6 +296,66 @@ type AutofeeResultItem = {
   htlc_window_min_channel?: number
 }
 
+type AutofeeChannelRound = {
+  run_key: string
+  timestamp?: string
+  reason?: string
+  category?: string
+  local_ppm?: number
+  new_ppm?: number
+  skip_reason?: string
+  error?: string
+}
+
+const collectAutofeeChannelRounds = (items: AutofeeResultItem[], maxPerChannel = 2): Record<number, AutofeeChannelRound[]> => {
+  const roundsByChannel: Record<number, AutofeeChannelRound[]> = {}
+  const seenRunsByChannel: Record<number, Set<string>> = {}
+  let currentRun: { key: string; timestamp?: string; reason?: string; dryRun: boolean } | null = null
+
+  items.forEach((item, index) => {
+    if (!item || typeof item !== 'object') return
+    if (item.kind === 'header') {
+      currentRun = {
+        key: `run-${index}`,
+        timestamp: item.timestamp,
+        reason: item.reason,
+        dryRun: Boolean(item.dry_run)
+      }
+      return
+    }
+    if (item.kind !== 'channel') return
+
+    const channelID = Number(item.channel_id || 0)
+    if (!Number.isFinite(channelID) || channelID <= 0) return
+    if (currentRun?.dryRun || item.dry_run) return
+
+    const runKey = currentRun?.key || `legacy-${index}`
+    if (!seenRunsByChannel[channelID]) {
+      seenRunsByChannel[channelID] = new Set<string>()
+    }
+    if (seenRunsByChannel[channelID].has(runKey)) return
+    seenRunsByChannel[channelID].add(runKey)
+
+    if (!roundsByChannel[channelID]) {
+      roundsByChannel[channelID] = []
+    }
+    if (roundsByChannel[channelID].length >= maxPerChannel) return
+
+    roundsByChannel[channelID].push({
+      run_key: runKey,
+      timestamp: currentRun?.timestamp,
+      reason: currentRun?.reason,
+      category: item.category,
+      local_ppm: item.local_ppm,
+      new_ppm: item.new_ppm,
+      skip_reason: item.skip_reason,
+      error: item.error
+    })
+  })
+
+  return roundsByChannel
+}
+
 export default function LightningOps() {
   const { t } = useTranslation()
   const [channels, setChannels] = useState<Channel[]>([])
@@ -390,6 +450,10 @@ export default function LightningOps() {
   const [autofeeResultsRuns, setAutofeeResultsRuns] = useState('4')
   const [autofeeResultsFrom, setAutofeeResultsFrom] = useState('')
   const [autofeeResultsTo, setAutofeeResultsTo] = useState('')
+  const [autofeeHistoryOpenChannelID, setAutofeeHistoryOpenChannelID] = useState<number | null>(null)
+  const [autofeeHistoryByChannel, setAutofeeHistoryByChannel] = useState<Record<number, AutofeeChannelRound[]>>({})
+  const [autofeeHistoryLoadingByChannel, setAutofeeHistoryLoadingByChannel] = useState<Record<number, boolean>>({})
+  const [autofeeHistoryErrorByChannel, setAutofeeHistoryErrorByChannel] = useState<Record<number, string>>({})
 
   const [chanStatusBusy, setChanStatusBusy] = useState<string | null>(null)
   const [chanStatusMessage, setChanStatusMessage] = useState('')
@@ -531,6 +595,38 @@ export default function LightningOps() {
     if (normalized === 'scheduled') return t('lightningOps.autofeeResultsReasonScheduled')
     if (reason) return reason.toUpperCase()
     return t('lightningOps.autofeeResultsReasonUnknown')
+  }
+
+  const formatAutofeeHistoryReason = (reason?: string) => {
+    const normalized = (reason || '').toLowerCase().trim()
+    if (normalized === 'manual') return t('lightningOps.autofeeHistoryManual')
+    if (normalized === 'scheduled') return t('lightningOps.autofeeHistoryAutomatic')
+    return t('lightningOps.autofeeHistoryUnknown')
+  }
+
+  const formatAutofeeHistoryTime = (raw?: string) => {
+    if (!raw) return t('common.na')
+    const parsed = new Date(raw)
+    if (Number.isNaN(parsed.getTime())) return t('common.na')
+    return parsed.toLocaleString()
+  }
+
+  const formatAutofeeHistoryOutcome = (round: AutofeeChannelRound) => {
+    if (round.error) {
+      return t('lightningOps.autofeeHistoryOutcomeError')
+    }
+    const local = Math.round(Number(round.local_ppm || 0))
+    const next = Math.round(Number(round.new_ppm ?? local))
+    if (next > local) {
+      return t('lightningOps.autofeeHistoryOutcomeUp', { from: local, to: next })
+    }
+    if (next < local) {
+      return t('lightningOps.autofeeHistoryOutcomeDown', { from: local, to: next })
+    }
+    if (round.skip_reason === 'cooldown') {
+      return t('lightningOps.autofeeHistoryOutcomeCooldown', { value: next })
+    }
+    return t('lightningOps.autofeeHistoryOutcomeKeep', { value: next })
   }
 
   const formatSatsCompact = (value?: number) => {
@@ -1058,6 +1154,43 @@ export default function LightningOps() {
     return payload
   }
 
+  const recentAutofeeRoundsByChannel = useMemo(() => {
+    return collectAutofeeChannelRounds(autofeeResultItems, 2)
+  }, [autofeeResultItems])
+
+  const handleAutofeeHistoryToggle = async (channelID: number, enabled: boolean) => {
+    if (!enabled) return
+    const isOpen = autofeeHistoryOpenChannelID === channelID
+    setAutofeeHistoryOpenChannelID(isOpen ? null : channelID)
+    if (isOpen) return
+
+    const cached = autofeeHistoryByChannel[channelID]
+    if (Array.isArray(cached) && cached.length > 0) return
+    if (autofeeHistoryLoadingByChannel[channelID]) return
+
+    const fromCurrent = recentAutofeeRoundsByChannel[channelID] || []
+    if (fromCurrent.length >= 2) {
+      setAutofeeHistoryByChannel((prev) => ({ ...prev, [channelID]: fromCurrent.slice(0, 2) }))
+      setAutofeeHistoryErrorByChannel((prev) => ({ ...prev, [channelID]: '' }))
+      return
+    }
+
+    setAutofeeHistoryByChannel((prev) => ({ ...prev, [channelID]: fromCurrent.slice(0, 2) }))
+    setAutofeeHistoryErrorByChannel((prev) => ({ ...prev, [channelID]: '' }))
+    setAutofeeHistoryLoadingByChannel((prev) => ({ ...prev, [channelID]: true }))
+    try {
+      const payload = await getAutofeeResults({ runs: 20 }) as any
+      const items = Array.isArray(payload?.items) ? (payload.items as AutofeeResultItem[]) : []
+      const fromExpanded = collectAutofeeChannelRounds(items, 2)
+      setAutofeeHistoryByChannel((prev) => ({ ...prev, [channelID]: fromExpanded[channelID] || [] }))
+      setAutofeeHistoryErrorByChannel((prev) => ({ ...prev, [channelID]: '' }))
+    } catch (err: any) {
+      setAutofeeHistoryErrorByChannel((prev) => ({ ...prev, [channelID]: err?.message || t('lightningOps.autofeeResultsUnavailable') }))
+    } finally {
+      setAutofeeHistoryLoadingByChannel((prev) => ({ ...prev, [channelID]: false }))
+    }
+  }
+
   const localizedAutofeeResults = useMemo(() => {
     if (!autofeeResultItems.length) {
       return formattedAutofeeResults
@@ -1107,6 +1240,12 @@ export default function LightningOps() {
     }
     return lines.length ? lines : formattedAutofeeResults
   }, [autofeeResultItems, autofeeResults.length, formattedAutofeeResults, t])
+
+  useEffect(() => {
+    setAutofeeHistoryByChannel({})
+    setAutofeeHistoryLoadingByChannel({})
+    setAutofeeHistoryErrorByChannel({})
+  }, [autofeeResultItems])
 
   const blockCadenceAvg = useMemo(() => {
     const buckets = bitcoinLocal?.block_cadence || []
@@ -2991,6 +3130,10 @@ export default function LightningOps() {
                 const statusBusy = chanStatusBusy === ch.channel_point
                 const showToggle = ch.active
                 const autofeeChecked = autofeeSettings[ch.channel_id] ?? true
+                const autofeeHistoryOpen = autofeeHistoryOpenChannelID === ch.channel_id
+                const autofeeHistoryLoading = Boolean(autofeeHistoryLoadingByChannel[ch.channel_id])
+                const autofeeHistoryError = autofeeHistoryErrorByChannel[ch.channel_id] || ''
+                const autofeeHistoryRounds = autofeeHistoryByChannel[ch.channel_id] || recentAutofeeRoundsByChannel[ch.channel_id] || []
                 const classLabel = formatChannelClassLabel(ch.class_label)
                 const isInlineFeeEditing = inlineFeeChannelPoint === ch.channel_point
                 const inlineBusy = inlineFeeLoading || inlineFeeSaving
@@ -3044,16 +3187,55 @@ export default function LightningOps() {
                             {localDisabled ? t('lightningOps.enableChannel') : t('lightningOps.disableChannel')}
                           </button>
                         )}
-                        <label className="flex items-center gap-2 text-[11px] text-fog/70">
+                        <div className="flex items-center gap-2 text-[11px] text-fog/70">
                           <input
                             type="checkbox"
                             checked={autofeeChecked}
-                            onChange={(e) => handleAutofeeChannelToggle(ch, e.target.checked)}
+                            onChange={(e) => {
+                              const enabled = e.target.checked
+                              handleAutofeeChannelToggle(ch, enabled)
+                              if (!enabled && autofeeHistoryOpenChannelID === ch.channel_id) {
+                                setAutofeeHistoryOpenChannelID(null)
+                              }
+                            }}
                           />
-                          {t('lightningOps.autofeeLabel')}
-                        </label>
+                          <button
+                            type="button"
+                            className={`underline decoration-dotted underline-offset-2 ${autofeeChecked ? 'hover:text-fog' : 'opacity-50 cursor-not-allowed'}`}
+                            onClick={() => handleAutofeeHistoryToggle(ch.channel_id, autofeeChecked)}
+                            disabled={!autofeeChecked}
+                          >
+                            {t('lightningOps.autofeeLabel')}
+                          </button>
+                        </div>
                       </div>
                     </div>
+                    {autofeeHistoryOpen && (
+                      <div className="mt-2 rounded-xl border border-white/10 bg-ink/70 p-2.5 text-[11px]">
+                        <p className="text-[10px] uppercase tracking-wide text-fog/60">{t('lightningOps.autofeeHistoryTitle')}</p>
+                        {autofeeHistoryLoading ? (
+                          <p className="mt-1 text-fog/70">{t('lightningOps.autofeeHistoryLoading')}</p>
+                        ) : autofeeHistoryError ? (
+                          <p className="mt-1 text-ember">{autofeeHistoryError}</p>
+                        ) : autofeeHistoryRounds.length ? (
+                          <div className="mt-1 space-y-1.5">
+                            {autofeeHistoryRounds.map((round) => (
+                              <div key={round.run_key} className="rounded-lg border border-white/10 bg-ink/60 px-2 py-1.5 text-fog/80">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-fog">{formatAutofeeHistoryTime(round.timestamp)}</span>
+                                  <span className="text-fog/50">|</span>
+                                  <span>{formatAutofeeHistoryReason(round.reason)}</span>
+                                  <span className="text-fog/50">|</span>
+                                  <span>{formatAutofeeHistoryOutcome(round)}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-1 text-fog/70">{t('lightningOps.autofeeHistoryEmpty')}</p>
+                        )}
+                      </div>
+                    )}
                     <div className="mt-3 grid gap-2 xl:grid-cols-[1.45fr_1fr]">
                       <div className="space-y-2">
                         <div className="flex items-center justify-between gap-3 text-xs text-fog/70">
