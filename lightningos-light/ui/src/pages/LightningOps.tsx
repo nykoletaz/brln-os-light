@@ -303,6 +303,13 @@ type AutofeeChannelRound = {
   category?: string
   local_ppm?: number
   new_ppm?: number
+  target?: number
+  floor?: number
+  floor_src?: string
+  seed?: number
+  tags?: string[]
+  prediction_code?: string
+  prediction_cooldown_hours?: number
   skip_reason?: string
   error?: string
 }
@@ -348,12 +355,84 @@ const collectAutofeeChannelRounds = (items: AutofeeResultItem[], maxPerChannel =
       category: item.category,
       local_ppm: item.local_ppm,
       new_ppm: item.new_ppm,
+      target: item.target,
+      floor: item.floor,
+      floor_src: item.floor_src,
+      seed: item.seed,
+      tags: Array.isArray(item.tags) ? [...item.tags] : [],
+      prediction_code: item.prediction_code,
+      prediction_cooldown_hours: item.prediction_cooldown_hours,
       skip_reason: item.skip_reason,
       error: item.error
     })
   })
 
   return roundsByChannel
+}
+
+const autofeeHistoryLimitingTagSet = new Set([
+  'cooldown',
+  'cooldown-profit',
+  'hold-small',
+  'same-ppm',
+  'no-down-low',
+  'no-down-neg-margin',
+  'circuit-breaker',
+  'peg',
+  'peg-grace',
+  'peg-demand',
+  'sink-floor',
+  'htlc-liq-nodown',
+  'htlc-policy-nodown',
+  'htlc-neutral-nodown',
+  'super-source',
+  'super-source-like'
+])
+
+const autofeeHistoryRelaxTagSet = new Set([
+  'discovery',
+  'discovery-hard',
+  'explorer',
+  'cooldown-skip',
+  'extreme-drain',
+  'extreme-drain-turbo',
+  'htlc-step-boost',
+  'trend-down',
+  'trend-flat'
+])
+
+const formatAutofeeHistoryTag = (tag: string) => {
+  if (!tag) return ''
+  if (tag === 'cooldown') return '⏳ cooldown'
+  if (tag === 'cooldown-profit') return '⏳ profit-hold'
+  if (tag === 'hold-small') return '🧊 hold-small'
+  if (tag === 'same-ppm') return '🟰 same-ppm'
+  if (tag === 'no-down-low') return '🚫 down-low'
+  if (tag === 'no-down-neg-margin') return '🚫 down-neg'
+  if (tag === 'circuit-breaker') return '🧯 circuit-breaker'
+  if (tag === 'peg') return '📌 peg'
+  if (tag === 'peg-grace') return '📌 peg-grace'
+  if (tag === 'peg-demand') return '📌 peg-demand'
+  if (tag === 'sink-floor') return '🧱 sink-floor'
+  if (tag === 'htlc-liq-nodown') return '🚫 liq-nodown'
+  if (tag === 'htlc-policy-nodown') return '🚫 policy-nodown'
+  if (tag === 'htlc-neutral-nodown') return '🚫 neutral-nodown'
+  if (tag === 'super-source') return '🔥 super-source'
+  if (tag === 'super-source-like') return '🔥 super-source-like'
+  if (tag === 'discovery') return '🧭 discovery'
+  if (tag === 'discovery-hard') return '🧨 harddrop'
+  if (tag === 'explorer') return '🧭 explorer'
+  if (tag === 'cooldown-skip') return '🧭 skip-cooldown'
+  if (tag === 'extreme-drain') return '⚡ extreme'
+  if (tag === 'extreme-drain-turbo') return '⚡ turbo'
+  if (tag === 'htlc-step-boost') return '⚡ htlc-step'
+  if (tag === 'trend-down') return '📉 trend-down'
+  if (tag === 'trend-flat') return '➡️ trend-flat'
+  if (tag.startsWith('htlc-liq+')) return `💧 ${tag}`
+  if (tag.startsWith('htlc-policy+')) return `🧾 ${tag}`
+  if (tag.startsWith('surge')) return `📈 ${tag}`
+  if (tag.startsWith('negm+')) return `💹 ${tag}`
+  return tag
 }
 
 export default function LightningOps() {
@@ -627,6 +706,51 @@ export default function LightningOps() {
       return t('lightningOps.autofeeHistoryOutcomeCooldown', { value: next })
     }
     return t('lightningOps.autofeeHistoryOutcomeKeep', { value: next })
+  }
+
+  const formatAutofeeHistorySignals = (round: AutofeeChannelRound) => {
+    const target = Math.round(Number(round.target || 0))
+    const floor = Math.round(Number(round.floor || 0))
+    const seed = Math.round(Number(round.seed || 0))
+    const floorSrc = round.floor_src ? ` (${round.floor_src})` : ''
+    return `🎯 ${t('lightningOps.autofeeHistoryTarget')} ${target} | 🧱 ${t('lightningOps.autofeeHistoryFloor')} ${floor}${floorSrc} | 🌱 ${t('lightningOps.autofeeHistorySeed')} ${seed}`
+  }
+
+  const splitAutofeeHistoryTags = (tags: string[] = []) => {
+    const limiting: string[] = []
+    const relaxing: string[] = []
+    const seenLimiting = new Set<string>()
+    const seenRelaxing = new Set<string>()
+
+    tags.forEach((rawTag) => {
+      const tag = (rawTag || '').trim()
+      if (!tag) return
+      const formatted = formatAutofeeHistoryTag(tag)
+      if (autofeeHistoryLimitingTagSet.has(tag) || tag.startsWith('htlc-liq+') || tag.startsWith('htlc-policy+') || tag.startsWith('surge') || tag.startsWith('negm+')) {
+        if (!seenLimiting.has(formatted)) {
+          seenLimiting.add(formatted)
+          limiting.push(formatted)
+        }
+        return
+      }
+      if (autofeeHistoryRelaxTagSet.has(tag)) {
+        if (!seenRelaxing.has(formatted)) {
+          seenRelaxing.add(formatted)
+          relaxing.push(formatted)
+        }
+      }
+    })
+
+    return { limiting, relaxing }
+  }
+
+  const formatAutofeeHistoryPrediction = (round: AutofeeChannelRound) => {
+    if (!round.prediction_code) return ''
+    return formatAutofeePrediction({
+      kind: 'channel',
+      prediction_code: round.prediction_code,
+      prediction_cooldown_hours: round.prediction_cooldown_hours
+    })
   }
 
   const formatSatsCompact = (value?: number) => {
@@ -3219,17 +3343,31 @@ export default function LightningOps() {
                           <p className="mt-1 text-ember">{autofeeHistoryError}</p>
                         ) : autofeeHistoryRounds.length ? (
                           <div className="mt-1 space-y-1.5">
-                            {autofeeHistoryRounds.map((round) => (
-                              <div key={round.run_key} className="rounded-lg border border-white/10 bg-ink/60 px-2 py-1.5 text-fog/80">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="text-fog">{formatAutofeeHistoryTime(round.timestamp)}</span>
-                                  <span className="text-fog/50">|</span>
-                                  <span>{formatAutofeeHistoryReason(round.reason)}</span>
-                                  <span className="text-fog/50">|</span>
-                                  <span>{formatAutofeeHistoryOutcome(round)}</span>
+                            {autofeeHistoryRounds.map((round) => {
+                              const prediction = formatAutofeeHistoryPrediction(round)
+                              const { limiting, relaxing } = splitAutofeeHistoryTags(round.tags || [])
+                              return (
+                                <div key={round.run_key} className="rounded-lg border border-white/10 bg-ink/60 px-2 py-1.5 text-fog/80">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-fog">{formatAutofeeHistoryTime(round.timestamp)}</span>
+                                    <span className="text-fog/50">|</span>
+                                    <span>{formatAutofeeHistoryReason(round.reason)}</span>
+                                    <span className="text-fog/50">|</span>
+                                    <span>{formatAutofeeHistoryOutcome(round)}</span>
+                                  </div>
+                                  <div className="mt-1 text-fog/70">{formatAutofeeHistorySignals(round)}</div>
+                                  {limiting.length > 0 && (
+                                    <div className="mt-1 text-ember/90">🛑 {t('lightningOps.autofeeHistoryLimitingTags')}: {limiting.join(' | ')}</div>
+                                  )}
+                                  {relaxing.length > 0 && (
+                                    <div className="mt-1 text-glow/90">🟢 {t('lightningOps.autofeeHistoryRelaxingTags')}: {relaxing.join(' | ')}</div>
+                                  )}
+                                  {prediction && (
+                                    <div className="mt-1 text-fog/70">{prediction}</div>
+                                  )}
                                 </div>
-                              </div>
-                            ))}
+                              )
+                            })}
                           </div>
                         ) : (
                           <p className="mt-1 text-fog/70">{t('lightningOps.autofeeHistoryEmpty')}</p>
