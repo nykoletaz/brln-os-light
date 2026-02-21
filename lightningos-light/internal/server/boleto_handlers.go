@@ -99,13 +99,19 @@ func fswapNodeRequest(method, path string, body any) (*http.Response, error) {
 	return fswapRequest(method, path, body, apiKey)
 }
 
+func fswapEnabled() bool {
+	installed, enabled := fswapAppState()
+	return installed && enabled
+}
+
 // ─── Handlers ───────────────────────────────────────────────────────
 
 // handleBoletoConfig returns config/availability for boleto payments
 func (s *Server) handleBoletoConfig(w http.ResponseWriter, r *http.Request) {
+	enabled := fswapEnabled()
 	apiKey := fswapNodeAPIKey()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"enabled":    true,
+		"enabled":    enabled,
 		"activated":  apiKey != "",
 		"feePercent": 6,
 		"provider":   "fswap",
@@ -114,6 +120,10 @@ func (s *Server) handleBoletoConfig(w http.ResponseWriter, r *http.Request) {
 
 // handleBoletoQuote proxies to FSwap backend to create a quote
 func (s *Server) handleBoletoQuote(w http.ResponseWriter, r *http.Request) {
+	if !fswapEnabled() {
+		writeError(w, http.StatusForbidden, "Pay Boleto is disabled")
+		return
+	}
 	if fswapNodeAPIKey() == "" {
 		writeError(w, http.StatusServiceUnavailable, "Pagamento de boletos não configurado")
 		return
@@ -151,6 +161,10 @@ func (s *Server) handleBoletoQuote(w http.ResponseWriter, r *http.Request) {
 
 // handleBoletoStatus proxies to FSwap backend to check payment status
 func (s *Server) handleBoletoStatus(w http.ResponseWriter, r *http.Request) {
+	if !fswapEnabled() {
+		writeError(w, http.StatusForbidden, "Pay Boleto is disabled")
+		return
+	}
 	if fswapNodeAPIKey() == "" {
 		writeError(w, http.StatusServiceUnavailable, "Pagamento de boletos não configurado")
 		return
@@ -185,6 +199,10 @@ func (s *Server) handleBoletoStatus(w http.ResponseWriter, r *http.Request) {
 // handleBoletoActivate creates an activation invoice via FSwap.
 // The node pubkey is fetched from LND automatically.
 func (s *Server) handleBoletoActivate(w http.ResponseWriter, r *http.Request) {
+	if !fswapEnabled() {
+		writeError(w, http.StatusForbidden, "Pay Boleto is disabled")
+		return
+	}
 	// Don't allow if already activated
 	if fswapNodeAPIKey() != "" {
 		writeError(w, http.StatusConflict, "Node já ativado")
@@ -223,6 +241,10 @@ func (s *Server) handleBoletoActivate(w http.ResponseWriter, r *http.Request) {
 // handleBoletoActivateStatus polls activation status. When completed,
 // saves the API key to secrets.env and reloads environment.
 func (s *Server) handleBoletoActivateStatus(w http.ResponseWriter, r *http.Request) {
+	if !fswapEnabled() {
+		writeError(w, http.StatusForbidden, "Pay Boleto is disabled")
+		return
+	}
 	paymentHash := chi.URLParam(r, "paymentHash")
 	if paymentHash == "" || len(paymentHash) < 32 {
 		writeError(w, http.StatusBadRequest, "paymentHash inválido")

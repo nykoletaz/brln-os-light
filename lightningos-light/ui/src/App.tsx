@@ -218,6 +218,10 @@ export default function App() {
       const detail = (event as CustomEvent<{ id?: string }>).detail
       if (detail?.id === 'depixbuy') {
         void refreshDepixEnabled()
+        return
+      }
+      if (detail?.id === 'fswap') {
+        void refreshBoletoEnabled()
       }
     }
     void refreshDepixEnabled()
