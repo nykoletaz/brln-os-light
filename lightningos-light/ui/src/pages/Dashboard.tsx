@@ -113,6 +113,27 @@ export default function Dashboard() {
   const lndInfoStale = Boolean(lnd?.info_stale && lnd?.info_known)
   const lndInfoAge = Number(lnd?.info_age_seconds || 0)
   const lndInfoStaleTooLong = lndInfoStale && lndInfoAge > 900
+  const lndUris = (() => {
+    const raw: string[] = []
+    if (Array.isArray(lnd?.uris)) {
+      for (const item of lnd.uris) {
+        if (typeof item === 'string') {
+          raw.push(item)
+        }
+      }
+    }
+    if (typeof lnd?.uri === 'string') {
+      raw.push(lnd.uri)
+    }
+    const seen = new Set<string>()
+    return raw
+      .map((item) => item.trim())
+      .filter((item) => {
+        if (!item || seen.has(item)) return false
+        seen.add(item)
+        return true
+      })
+  })()
   const postgresDatabases = Array.isArray(postgres?.databases) ? postgres.databases : []
   const systemActionIsShutdown = systemAction === 'shutdown'
   const systemActionTitle = systemActionIsShutdown
@@ -392,7 +413,7 @@ export default function Dashboard() {
                   <span className="uppercase text-[10px] text-fog/40">{t('dashboard.cached')}</span>
                 )}
               </div>
-              {(lnd?.pubkey || lnd?.uri) && (
+              {(lnd?.pubkey || lndUris.length > 0) && (
                 <div className="mt-2 space-y-1 text-xs text-fog/60">
                   {lnd?.pubkey && (
                     <div className="flex items-center justify-end gap-2">
@@ -416,18 +437,18 @@ export default function Dashboard() {
                       </button>
                     </div>
                   )}
-                  {lnd?.uri && (
-                    <div className="flex items-center justify-end gap-2">
-                      <span className="text-fog/50">{t('dashboard.uri')}</span>
+                  {lndUris.map((uri, idx) => (
+                    <div key={uri} className="flex items-center justify-end gap-2">
+                      <span className="text-fog/50">{idx === 0 ? t('dashboard.uri') : ''}</span>
                       <span
                         className="font-mono text-fog/70 max-w-[220px] truncate"
-                        title={lnd.uri}
+                        title={uri}
                       >
-                        {compactValue(lnd.uri)}
+                        {compactValue(uri)}
                       </span>
                       <button
                         className="text-fog/50 hover:text-fog"
-                        onClick={() => copyToClipboard(lnd.uri)}
+                        onClick={() => copyToClipboard(uri)}
                         title={t('dashboard.copyUri')}
                         aria-label={t('dashboard.copyUri')}
                       >
@@ -437,7 +458,7 @@ export default function Dashboard() {
                         </svg>
                       </button>
                     </div>
-                  )}
+                  ))}
                 </div>
               )}
             </div>

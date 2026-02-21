@@ -181,6 +181,7 @@ type infoSnapshot struct {
   Version string
   Pubkey string
   URI string
+  URIs []string
 }
 
 type DecodedInvoice struct {
@@ -469,6 +470,7 @@ func (c *Client) getStatusUncached(ctx context.Context) (Status, error) {
       status.WalletState = "locked"
     }
   } else {
+    uris := uniqueStrings(info.Uris)
     status.ServiceActive = true
     status.WalletState = "unlocked"
     status.SyncedToChain = info.SyncedToChain
@@ -479,8 +481,9 @@ func (c *Client) getStatusUncached(ctx context.Context) (Status, error) {
     status.InfoKnown = true
     status.InfoStale = false
     status.InfoAgeSeconds = 0
-    if len(info.Uris) > 0 {
-      status.URI = info.Uris[0]
+    status.URIs = uris
+    if len(uris) > 0 {
+      status.URI = uris[0]
     }
 
     c.statusMu.Lock()
@@ -491,6 +494,7 @@ func (c *Client) getStatusUncached(ctx context.Context) (Status, error) {
       Version: status.Version,
       Pubkey: status.Pubkey,
       URI: status.URI,
+      URIs: append([]string(nil), status.URIs...),
     }
     c.infoCacheAt = now
     c.infoCacheValid = true
@@ -503,7 +507,18 @@ func (c *Client) getStatusUncached(ctx context.Context) (Status, error) {
     status.BlockHeight = cachedInfo.BlockHeight
     status.Version = cachedInfo.Version
     status.Pubkey = cachedInfo.Pubkey
-    status.URI = cachedInfo.URI
+    status.URIs = uniqueStrings(cachedInfo.URIs)
+    if len(status.URIs) == 0 {
+      trimmedURI := strings.TrimSpace(cachedInfo.URI)
+      if trimmedURI != "" {
+        status.URIs = []string{trimmedURI}
+      }
+    }
+    if len(status.URIs) > 0 {
+      status.URI = status.URIs[0]
+    } else {
+      status.URI = strings.TrimSpace(cachedInfo.URI)
+    }
     status.InfoKnown = true
     status.InfoStale = true
     status.InfoAgeSeconds = int64(now.Sub(cachedAt).Seconds())
@@ -1886,6 +1901,7 @@ type Status struct {
   Version string
   Pubkey string
   URI string
+  URIs []string
   InfoKnown bool
   InfoStale bool
   InfoAgeSeconds int64

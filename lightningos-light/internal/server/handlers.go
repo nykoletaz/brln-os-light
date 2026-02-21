@@ -929,6 +929,7 @@ type lndStatusResponse struct {
   Version string `json:"version"`
   Pubkey string `json:"pubkey"`
   URI string `json:"uri"`
+  URIs []string `json:"uris,omitempty"`
   InfoKnown bool `json:"info_known"`
   InfoStale bool `json:"info_stale"`
   InfoAgeSeconds int64 `json:"info_age_seconds"`
@@ -958,6 +959,16 @@ func (s *Server) handleLNDStatus(w http.ResponseWriter, r *http.Request) {
   resp.Version = status.Version
   resp.Pubkey = status.Pubkey
   resp.URI = status.URI
+  resp.URIs = append([]string(nil), status.URIs...)
+  if len(resp.URIs) == 0 {
+    trimmedURI := strings.TrimSpace(resp.URI)
+    if trimmedURI != "" {
+      resp.URIs = []string{trimmedURI}
+      resp.URI = trimmedURI
+    }
+  } else if strings.TrimSpace(resp.URI) == "" {
+    resp.URI = resp.URIs[0]
+  }
   resp.InfoKnown = status.InfoKnown
   resp.InfoStale = status.InfoStale
   resp.InfoAgeSeconds = status.InfoAgeSeconds
