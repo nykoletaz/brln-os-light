@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getAppAdminPassword, getApps, getBitcoinLocalStatus, installApp, resetAppAdmin, startApp, stopApp, uninstallApp } from '../api'
+import { getAppAdminPassword, getApps, getBitcoinLocalStatus, getBitcoinSource, installApp, resetAppAdmin, startApp, stopApp, uninstallApp } from '../api'
 import lndgIcon from '../assets/apps/lndg.ico'
 import bitcoincoreIcon from '../assets/apps/bitcoincore.png'
 import elementsIcon from '../assets/apps/elements.png'
@@ -9,6 +9,7 @@ import robosatsIcon from '../assets/apps/robosats.svg'
 import depixIcon from '../assets/apps/depix.svg'
 import lnbitsIcon from '../assets/apps/lnbits.svg'
 import fswapIcon from '../assets/apps/fswap.png'
+import publicPoolIcon from '../assets/apps/public-pool.svg'
 
 type AppInfo = {
   id: string
@@ -25,6 +26,12 @@ type BitcoinLocalStatus = {
   source?: 'app' | 'external' | 'none'
 }
 
+type BitcoinSourceStatus = {
+  source?: 'local' | 'remote'
+}
+
+type BitcoinMode = 'remote' | 'local_app' | 'local_external' | 'local_none'
+
 const iconMap: Record<string, string> = {
   lndg: lndgIcon,
   bitcoincore: bitcoincoreIcon,
@@ -33,7 +40,8 @@ const iconMap: Record<string, string> = {
   robosats: robosatsIcon,
   depixbuy: depixIcon,
   lnbits: lnbitsIcon,
-  fswap: fswapIcon
+  fswap: fswapIcon,
+  publicpool: publicPoolIcon
 }
 
 const internalRoutes: Record<string, string> = {
@@ -50,6 +58,9 @@ const statusStyles: Record<string, string> = {
   not_installed: 'bg-white/10 text-fog/60 border border-white/10'
 }
 
+const publicPoolUIPortFallback = 8081
+const publicPoolStratumPort = 3333
+
 export default function AppStore() {
   const { t } = useTranslation()
   const [apps, setApps] = useState<AppInfo[]>([])
@@ -58,6 +69,7 @@ export default function AppStore() {
   const [busy, setBusy] = useState<Record<string, string>>({})
   const [copying, setCopying] = useState<Record<string, boolean>>({})
   const [hideBitcoinCore, setHideBitcoinCore] = useState(false)
+  const [bitcoinMode, setBitcoinMode] = useState<BitcoinMode>('remote')
 
   const resolveStatusLabel = (value: string) => {
     switch (value) {
@@ -87,12 +99,29 @@ export default function AppStore() {
 
   useEffect(() => {
     loadApps()
-    getBitcoinLocalStatus()
-      .then((data: BitcoinLocalStatus) => {
-        setHideBitcoinCore(data?.source === 'external')
+    Promise.all([
+      getBitcoinLocalStatus().catch(() => ({ source: 'none' } as BitcoinLocalStatus)),
+      getBitcoinSource().catch(() => ({ source: 'remote' } as BitcoinSourceStatus))
+    ])
+      .then(([localStatus, sourceStatus]) => {
+        setHideBitcoinCore(localStatus?.source === 'external')
+        if (sourceStatus?.source !== 'local') {
+          setBitcoinMode('remote')
+          return
+        }
+        if (localStatus?.source === 'app') {
+          setBitcoinMode('local_app')
+          return
+        }
+        if (localStatus?.source === 'external') {
+          setBitcoinMode('local_external')
+          return
+        }
+        setBitcoinMode('local_none')
       })
       .catch(() => {
         setHideBitcoinCore(false)
+        setBitcoinMode('remote')
       })
   }, [])
 
@@ -190,6 +219,8 @@ export default function AppStore() {
                 ? t('nav.payBoleto')
               : t('appStore.internal')
           const openUrl = app.external_url || (app.port ? `http://${host}:${app.port}` : '')
+          const publicPoolUrl = openUrl || `http://${host}:${publicPoolUIPortFallback}`
+          const publicPoolStratumEndpoint = `${host}:${publicPoolStratumPort}`
           const icon = iconMap[app.id]
           return (
             <div key={app.id} className="section-card space-y-4">
@@ -236,6 +267,30 @@ export default function AppStore() {
                       </button>
                     )}
                   </div>
+                )}
+                {app.id === 'publicpool' && (
+                  <>
+                    <p>{t('appStore.publicPoolUiAccess', { url: publicPoolUrl })}</p>
+                    <p>{t('appStore.publicPoolStratumEndpoint', { endpoint: publicPoolStratumEndpoint })}</p>
+                    <p>{t('appStore.publicPoolApiLocal')}</p>
+                    {bitcoinMode === 'remote' && <p>{t('appStore.publicPoolBitcoinModeRemote')}</p>}
+                    {bitcoinMode === 'local_app' && <p>{t('appStore.publicPoolBitcoinModeLocalApp')}</p>}
+                    {bitcoinMode === 'local_none' && <p>{t('appStore.publicPoolBitcoinModeLocalMissing')}</p>}
+                    {bitcoinMode === 'local_external' && (
+                      <>
+                        <p>{t('appStore.publicPoolBitcoinModeLocalExternal')}</p>
+                        <p className="font-mono text-[11px] text-fog/70">{t('appStore.publicPoolConfServer')}</p>
+                        <p className="font-mono text-[11px] text-fog/70">{t('appStore.publicPoolConfRpcBind')}</p>
+                        <p className="font-mono text-[11px] text-fog/70">{t('appStore.publicPoolConfRpcAllow')}</p>
+                      </>
+                    )}
+                    <p>{t('appStore.publicPoolUfwTitle')}</p>
+                    <p className="font-mono text-[11px] text-fog/70">{t('appStore.publicPoolUfwUi', { port: publicPoolUIPortFallback })}</p>
+                    <p className="font-mono text-[11px] text-fog/70">{t('appStore.publicPoolUfwStratum', { port: publicPoolStratumPort })}</p>
+                    {bitcoinMode === 'local_external' && (
+                      <p className="font-mono text-[11px] text-fog/70">{t('appStore.publicPoolUfwBridge')}</p>
+                    )}
+                  </>
                 )}
               </div>
 
