@@ -326,13 +326,15 @@ func updateLndRestOptions(lines []string, gateways []string) ([]string, bool) {
 		block = append(block, "tlsextradomain=host.docker.internal")
 	}
 
-	desiredRest := []string{"127.0.0.1:8080"}
-	for _, gateway := range uniqueGateways {
-		desiredRest = append(desiredRest, gateway+":8080")
-	}
-	for _, value := range desiredRest {
-		if !restSet[value] {
-			block = append(block, "restlisten="+value)
+	// LND already defaults to 127.0.0.1:8080 when no restlisten is configured,
+	// so only add gateway listeners required for Docker access.
+	hasWildcardRest8080 := restSet["0.0.0.0:8080"] || restSet["[::]:8080"] || restSet[":8080"] || restSet["*:8080"]
+	if !hasWildcardRest8080 {
+		for _, gateway := range uniqueGateways {
+			value := gateway + ":8080"
+			if !restSet[value] {
+				block = append(block, "restlisten="+value)
+			}
 		}
 	}
 
