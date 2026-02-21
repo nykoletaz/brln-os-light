@@ -95,6 +95,13 @@ func TestEffectiveLowOutThresholdsUsesRatioGradient(t *testing.T) {
   }
 }
 
+func TestEffectiveLowOutThresholdsBalancedBias(t *testing.T) {
+  low, protect, factor := effectiveLowOutThresholds(0.10, 0.10, "balanced", 0.26)
+  if !(low < 0.10 && protect < 0.10 && factor < 1.0) {
+    t.Fatalf("expected balanced calibration to be slightly less aggressive: low=%.4f protect=%.4f factor=%.4f", low, protect, factor)
+  }
+}
+
 func TestEffectiveLowOutThresholdsFallbackAndClamp(t *testing.T) {
   low, protect, factor := effectiveLowOutThresholds(0, 0, "drained", 0.0)
   if low < lowOutThreshMin || low > lowOutThreshMax {
@@ -105,5 +112,60 @@ func TestEffectiveLowOutThresholdsFallbackAndClamp(t *testing.T) {
   }
   if factor < lowOutFactorMin || factor > lowOutFactorMax {
     t.Fatalf("unexpected factor clamp: %.4f", factor)
+  }
+}
+
+func TestMinStagnationRecoveryOutSat(t *testing.T) {
+  smallCap := int64(1_000_000)
+  if got := minStagnationRecoveryOutSat(smallCap); got != stagnationExitMinOutSat1d {
+    t.Fatalf("unexpected min recovery for small channel: got %d want %d", got, stagnationExitMinOutSat1d)
+  }
+
+  bigCap := int64(50_000_000)
+  wantBig := int64(250_000) // 0.5% of capacity.
+  if got := minStagnationRecoveryOutSat(bigCap); got != wantBig {
+    t.Fatalf("unexpected min recovery for big channel: got %d want %d", got, wantBig)
+  }
+}
+
+func TestHasStagnationRecoveryFlow(t *testing.T) {
+  capSat := int64(10_000_000)
+  minOut := minStagnationRecoveryOutSat(capSat)
+
+  if hasStagnationRecoveryFlow(stagnationExitMinFwds1d-1, minOut, capSat) {
+    t.Fatalf("expected false when forward count is below threshold")
+  }
+  if hasStagnationRecoveryFlow(stagnationExitMinFwds1d, minOut-1, capSat) {
+    t.Fatalf("expected false when outbound volume is below threshold")
+  }
+  if !hasStagnationRecoveryFlow(stagnationExitMinFwds1d, minOut, capSat) {
+    t.Fatalf("expected true when both flow thresholds are met")
+  }
+}
+
+func TestHasOutFallback21dSignal(t *testing.T) {
+  capSat := int64(10_000_000)
+  minOut := minOutFallback21dSat(capSat)
+
+  if hasOutFallback21dSignal(outFallback21dMinFwds-1, minOut, capSat) {
+    t.Fatalf("expected false when 21d forward count is below threshold")
+  }
+  if hasOutFallback21dSignal(outFallback21dMinFwds, minOut-1, capSat) {
+    t.Fatalf("expected false when 21d outbound amount is below threshold")
+  }
+  if !hasOutFallback21dSignal(outFallback21dMinFwds, minOut, capSat) {
+    t.Fatalf("expected true when 21d fallback quality thresholds are met")
+  }
+}
+
+func TestHasRebalFallback21dSignal(t *testing.T) {
+  capSat := int64(10_000_000)
+  minAmt := minRebalFallback21dSat(capSat)
+
+  if hasRebalFallback21dSignal(minAmt-1, capSat) {
+    t.Fatalf("expected false when 21d rebalance amount is below threshold")
+  }
+  if !hasRebalFallback21dSignal(minAmt, capSat) {
+    t.Fatalf("expected true when 21d rebalance amount threshold is met")
   }
 }

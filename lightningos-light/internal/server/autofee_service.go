@@ -66,12 +66,26 @@ const (
   stagnationSeedBlendPhase1 = 0.20
   stagnationSeedBlendPhase2 = 0.10
   lowOutFactorDrained = 1.20
+  lowOutFactorBalanced = 0.95
   lowOutFactorFull = 0.85
   lowOutFactorMin = 0.75
   lowOutFactorMax = 1.30
   lowOutFactorRatioAdjMax = 0.10
   lowOutThreshMin = 0.03
   lowOutThreshMax = 0.35
+  lowOutNoFlowBumpCap = 0.08
+  lowOutNoFlowBoostMult = 1.005
+  lowOutNoFlowUpCapFrac = 0.03
+  lowOutNoFlowUpperRatio = 0.15
+  outFallback21dMinFwds = 5
+  outFallback21dMinOutSat = 50000
+  outFallback21dMinOutCapFrac = 0.005
+  rebalFallback21dMinAmtSat = 30000
+  rebalFallback21dMinAmtCapFrac = 0.003
+  stagnationHighOutRatio = 0.50
+  stagnationExitMinFwds1d = 3
+  stagnationExitMinOutSat1d = 20000
+  stagnationExitMinOutCapFrac = 0.005
 )
 
 func normalizeRebalCostMode(value string) string {
@@ -1670,6 +1684,12 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
       forwardStats7d = stats7d
     }
   }
+  forwardStats21d := map[uint64]forwardStat{}
+  if stats21d, err := e.fetchForwardStats(ctx, 21); err == nil {
+    forwardStats21d = stats21d
+  } else if e.svc.logger != nil {
+    e.svc.logger.Printf("autofee: forwardStats21d unavailable: %v", err)
+  }
   inboundStats, err := e.fetchInboundStats(ctx, e.cfg.LookbackDays)
   if err != nil {
     return err
@@ -1677,6 +1697,12 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   rebalStats, err := e.fetchRebalanceStats(ctx, e.cfg.LookbackDays)
   if err != nil {
     return err
+  }
+  rebalStats21d := rebalStats
+  if stats21d, err := e.fetchRebalanceStats(ctx, 21); err == nil {
+    rebalStats21d = stats21d
+  } else if e.svc.logger != nil {
+    e.svc.logger.Printf("autofee: rebalStats21d unavailable: %v", err)
   }
   recentRebalanceTouches := map[uint64]int{}
   if touches, err := e.fetchRecentRebalanceTouches(ctx, e.htlcSignalWindow()); err == nil {
@@ -1744,7 +1770,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
     }
 
     st := state[ch.ChannelID]
-    decision := e.evaluateChannel(ch, st, forwardStats, forwardStats1d, forwardStats7d, inboundStats, rebalStats, recentRebalanceTouches, htlcSignals, totalOutFeeMsat, rebalGlobalPpm, negMarginGlobal)
+    decision := e.evaluateChannel(ch, st, forwardStats, forwardStats1d, forwardStats7d, forwardStats21d, inboundStats, rebalStats, rebalStats21d, recentRebalanceTouches, htlcSignals, totalOutFeeMsat, rebalGlobalPpm, negMarginGlobal)
     if decision == nil {
       continue
     }
@@ -2291,6 +2317,8 @@ func effectiveLowOutThresholds(baseLow float64, baseProtect float64, liquidityCl
   switch strings.ToLower(strings.TrimSpace(liquidityClass)) {
   case "drained":
     factor = lowOutFactorDrained
+  case "balanced":
+    factor = lowOutFactorBalanced
   case "full":
     factor = lowOutFactorFull
   }
@@ -2324,6 +2352,48 @@ func effectiveLowOutThresholds(baseLow float64, baseProtect float64, liquidityCl
     protect = lowOutThreshMax
   }
   return lowOut, protect, factor
+}
+
+func minStagnationRecoveryOutSat(capacitySat int64) int64 {
+  byCap := int64(math.Ceil(float64(capacitySat) * stagnationExitMinOutCapFrac))
+  if byCap < stagnationExitMinOutSat1d {
+    byCap = stagnationExitMinOutSat1d
+  }
+  return byCap
+}
+
+func hasStagnationRecoveryFlow(forwardCount1d int, outAmt1dSat int64, capacitySat int64) bool {
+  if forwardCount1d < stagnationExitMinFwds1d {
+    return false
+  }
+  return outAmt1dSat >= minStagnationRecoveryOutSat(capacitySat)
+}
+
+func minOutFallback21dSat(capacitySat int64) int64 {
+  byCap := int64(math.Ceil(float64(capacitySat) * outFallback21dMinOutCapFrac))
+  if byCap < outFallback21dMinOutSat {
+    byCap = outFallback21dMinOutSat
+  }
+  return byCap
+}
+
+func hasOutFallback21dSignal(forwardCount21d int, outAmt21dSat int64, capacitySat int64) bool {
+  if forwardCount21d < outFallback21dMinFwds {
+    return false
+  }
+  return outAmt21dSat >= minOutFallback21dSat(capacitySat)
+}
+
+func minRebalFallback21dSat(capacitySat int64) int64 {
+  byCap := int64(math.Ceil(float64(capacitySat) * rebalFallback21dMinAmtCapFrac))
+  if byCap < rebalFallback21dMinAmtSat {
+    byCap = rebalFallback21dMinAmtSat
+  }
+  return byCap
+}
+
+func hasRebalFallback21dSignal(rebalAmt21dSat int64, capacitySat int64) bool {
+  return rebalAmt21dSat >= minRebalFallback21dSat(capacitySat)
 }
 
 func scaleHTLCThresholdByWindow(base int, windowMin int, fallback int) int {
@@ -3048,8 +3118,9 @@ func buildAutofeeChannelLogEntry(d *decision, category string, dryRun bool, err 
 // ===== evaluation =====
 
 func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeChannelState, forwardStats map[uint64]forwardStat,
-  forwardStats1d map[uint64]forwardStat, forwardStats7d map[uint64]forwardStat, inboundStats map[uint64]inboundStat,
-  rebalStats rebalStats, recentRebalanceTouches map[uint64]int, htlcSignals map[uint64]htlcFailureSignal, totalOutFeeMsat int64, rebalGlobalPpm int, negMarginGlobal bool) *decision {
+  forwardStats1d map[uint64]forwardStat, forwardStats7d map[uint64]forwardStat, forwardStats21d map[uint64]forwardStat,
+  inboundStats map[uint64]inboundStat, rebalStats rebalStats, rebalStats21d rebalStats, recentRebalanceTouches map[uint64]int,
+  htlcSignals map[uint64]htlcFailureSignal, totalOutFeeMsat int64, rebalGlobalPpm int, negMarginGlobal bool) *decision {
 
   localPpm := 0
   if ch.FeeRatePpm != nil {
@@ -3070,8 +3141,18 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   fwd := forwardStats[ch.ChannelID]
   fwd1d := forwardStats1d[ch.ChannelID]
   fwd7d := forwardStats7d[ch.ChannelID]
+  fwd21d := forwardStats21d[ch.ChannelID]
   inb := inboundStats[ch.ChannelID]
-  outPpm7d := ppmMsat(fwd.FeeMsat, fwd.AmtMsat)
+  outPpm7dRaw := ppmMsat(fwd.FeeMsat, fwd.AmtMsat)
+  outPpm7d := outPpm7dRaw
+  outPpm21d := ppmMsat(fwd21d.FeeMsat, fwd21d.AmtMsat)
+  fwdCount21d := int(fwd21d.Count)
+  outAmt21dSat := fwd21d.AmtMsat / 1000
+  outFrom21dFallback := false
+  if outPpm7d <= 0 && outPpm21d > 0 && hasOutFallback21dSignal(fwdCount21d, outAmt21dSat, ch.CapacitySat) {
+    outPpm7d = outPpm21d
+    outFrom21dFallback = true
+  }
   fwdCount := int(fwd.Count)
   fwdCount7d := int(fwd7d.Count)
 
@@ -3105,12 +3186,24 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
 
   stagnationClassEligible := strings.EqualFold(classLabel, "sink")
   recentForwards1d := int(fwd1d.Count)
-  if stagnationClassEligible && outRatio >= stagnationOutRatioMin && recentForwards1d == 0 {
-    st.ExplorerState.StagnationNoFwdRounds++
+  recoveryFlow := hasStagnationRecoveryFlow(recentForwards1d, outAmt1dSat, ch.CapacitySat)
+  weakRecentFlow := !recoveryFlow
+  if stagnationClassEligible && outRatio >= stagnationOutRatioMin {
+    if weakRecentFlow {
+      st.ExplorerState.StagnationNoFwdRounds++
+    } else if st.ExplorerState.StagnationNoFwdRounds > 0 {
+      // Hysteresis: require sustained flow to clear stagnation state.
+      st.ExplorerState.StagnationNoFwdRounds--
+      if st.ExplorerState.StagnationNoFwdRounds <= 0 {
+        st.ExplorerState.StagnationNoFwdRounds = 0
+        st.ExplorerState.StagnationPhase = 0
+      }
+    }
   } else {
     st.ExplorerState.StagnationNoFwdRounds = 0
     st.ExplorerState.StagnationPhase = 0
   }
+  highOutStagnationPressure := stagnationClassEligible && outRatio >= stagnationHighOutRatio && weakRecentFlow
 
   superSourceActive := false
   superSourceLike := false
@@ -3214,6 +3307,8 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
 
   target := int(seed) + 25
+  noFlow1d := recentForwards1d == 0 && outAmt1dSat <= 0
+  lowOutSlowUp := false
 
   if outRatio < lowOutProtectThresh {
     st.LowStreak++
@@ -3222,6 +3317,10 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
   if st.LowStreak >= 1 {
     bumpAcc := math.Min(0.25, float64(st.LowStreak)*0.05)
+    if noFlow1d && bumpAcc > lowOutNoFlowBumpCap {
+      bumpAcc = lowOutNoFlowBumpCap
+      lowOutSlowUp = true
+    }
     if target <= localPpm {
       target = int(math.Ceil(float64(localPpm) * (1.0 + bumpAcc)))
     } else {
@@ -3230,7 +3329,12 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
 
   if outRatio < lowOutThresh {
-    target = int(math.Ceil(float64(target) * 1.02))
+    upMult := 1.02
+    if noFlow1d {
+      upMult = lowOutNoFlowBoostMult
+      lowOutSlowUp = true
+    }
+    target = int(math.Ceil(float64(target) * upMult))
   } else if outRatio > e.profile.HighOutThresh {
     target = int(math.Floor(float64(target) * 0.98))
     if fwdCount == 0 && outRatio > 0.60 {
@@ -3239,6 +3343,15 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   }
 
   tags := []string{}
+  if outFrom21dFallback {
+    tags = append(tags, "out-fallback-21d")
+  }
+  if lowOutSlowUp {
+    tags = append(tags, "low-out-slow-up")
+  }
+  if highOutStagnationPressure {
+    tags = append(tags, "stagnation-pressure")
+  }
   recentRebalanceCount := 0
   if recentRebalanceTouches != nil {
     recentRebalanceCount = recentRebalanceTouches[ch.ChannelID]
@@ -3288,6 +3401,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
       tags = append(tags, "htlc-neutral-lock")
     }
   }
+  htlcPressureSignal := !htlcSampleLow && (htlcPolicyHot || htlcLiquidityHot)
   if outRatio < 0.10 {
     lack := (0.10 - outRatio) / 0.10
     bump := math.Min(e.profile.SurgeBumpMax, 0.5*lack)
@@ -3308,12 +3422,33 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     target = int(math.Ceil(float64(target) * 1.12))
     tags = append(tags, "top-rev")
   }
+  if noFlow1d &&
+    outRatio <= lowOutNoFlowUpperRatio &&
+    target > localPpm &&
+    recentRebalanceCount == 0 &&
+    !htlcPressureSignal {
+    capUp := int(math.Ceil(float64(localPpm) * (1.0 + lowOutNoFlowUpCapFrac)))
+    if capUp < localPpm+5 {
+      capUp = localPpm + 5
+    }
+    if target > capUp {
+      target = capUp
+      tags = append(tags, "low-out-noflow-cap")
+    }
+  }
 
   rebal := rebalStats.ByChannel[ch.ChannelID]
+  rebal21d := rebalStats21d.ByChannel[ch.ChannelID]
   baseCostPpm := 0
   perCost := 0
+  perCost21d := 0
+  rebalFrom21dFallback := false
   if rebal.AmtMsat > 0 {
     perCost = ppmMsat(rebal.FeeMsat, rebal.AmtMsat)
+  }
+  if rebal21d.AmtMsat > 0 && hasRebalFallback21dSignal(rebal21d.AmtMsat/1000, ch.CapacitySat) {
+    perCost21d = ppmMsat(rebal21d.FeeMsat, rebal21d.AmtMsat)
+    rebalFrom21dFallback = true
   }
 
   switch normalizeRebalCostMode(e.cfg.RebalCostMode) {
@@ -3324,6 +3459,8 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
       baseCostPpm = perCost
       st.LastRebalCost = perCost
       st.LastRebalCostTs = e.now
+    } else if perCost21d > 0 {
+      baseCostPpm = perCost21d
     } else if st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour {
       baseCostPpm = st.LastRebalCost
     } else if outPpm7d > 0 && fwdCount >= 4 {
@@ -3361,12 +3498,31 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
       baseCostPpm = blended
       st.LastRebalCost = perCost
       st.LastRebalCostTs = e.now
+    } else if perCost21d > 0 {
+      baseCostPpm = perCost21d
     } else if st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour {
       baseCostPpm = st.LastRebalCost
     }
   }
   if baseCostPpm < e.cfg.MinPpm {
     baseCostPpm = e.cfg.MinPpm
+  }
+  if rebalFrom21dFallback && perCost <= 0 {
+    tags = append(tags, "rebal-fallback-21d")
+  }
+  hasOutSignal := outPpm7dRaw > 0 || outFrom21dFallback || (st.LastOutrate > 0 && !st.LastOutrateTs.IsZero() && e.now.Sub(st.LastOutrateTs) <= 21*24*time.Hour)
+  hasRebalSignal := perCost > 0 || rebalFrom21dFallback || (st.LastRebalCost > 0 && !st.LastRebalCostTs.IsZero() && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour)
+  noSignalNoUpActive := false
+  if noFlow1d &&
+    outRatio >= lowOutNoFlowUpperRatio &&
+    target > localPpm &&
+    recentRebalanceCount == 0 &&
+    !htlcPressureSignal &&
+    !hasOutSignal &&
+    !hasRebalSignal {
+    target = localPpm
+    noSignalNoUpActive = true
+    tags = append(tags, "no-signal-noup")
   }
   marginPpm7d := outPpm7d - int(float64(baseCostPpm)*1.10)
   if marginPpm7d < 0 {
@@ -3436,7 +3592,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   stagnationPhase := 0
   stagnationTargetCap := 0
   stagnationFloorCap := 0
-  if stagnationClassEligible && outRatio >= stagnationOutRatioMin && recentForwards1d == 0 {
+  if stagnationClassEligible && outRatio >= stagnationOutRatioMin && weakRecentFlow {
     outRef := outPpm7d
     if outRef <= 0 && st.LastOutrate > 0 {
       outRef = st.LastOutrate
@@ -3444,6 +3600,8 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     rebalRef := 0
     if perCost > 0 {
       rebalRef = perCost
+    } else if perCost21d > 0 {
+      rebalRef = perCost21d
     } else if st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour {
       rebalRef = st.LastRebalCost
     } else if rebalGlobalPpm > 0 {
@@ -3563,8 +3721,12 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
 
   target = clampInt(target, e.cfg.MinPpm, e.cfg.MaxPpm)
   if marginPpm7d < 0 && target < localPpm {
-    target = localPpm
-    tags = append(tags, "no-down-neg-margin")
+    if stagnationActive || highOutStagnationPressure {
+      tags = append(tags, "stagnation-neg-override")
+    } else {
+      target = localPpm
+      tags = append(tags, "no-down-neg-margin")
+    }
   }
   capFrac := e.profile.StepCap
   minStep := 5
@@ -3592,7 +3754,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
 
   globalNegLockApplied := false
   lockSkipTag := ""
-  if negMarginGlobal && !stagnationActive {
+  if negMarginGlobal && !stagnationActive && !highOutStagnationPressure {
     hasRecentRebal := perCost > 0 || (st.LastRebalCost > 0 && e.now.Sub(st.LastRebalCostTs) <= 21*24*time.Hour)
     hasRecentOutrate := (outPpm7d > 0 && fwdCount >= 4) || (st.LastOutrate > 0 && !st.LastOutrateTs.IsZero() && e.now.Sub(st.LastOutrateTs) <= 21*24*time.Hour)
     canLockGlobally := hasRecentRebal || hasRecentOutrate
@@ -3627,7 +3789,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     } else if target < localPpm && !discoveryHit {
       lockSkipTag = "lock-skip-no-chan-rebal"
     }
-  } else if negMarginGlobal && stagnationActive {
+  } else if negMarginGlobal && (stagnationActive || highOutStagnationPressure) {
     tags = append(tags, "stagnation-neg-override")
   }
 
@@ -3677,7 +3839,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
 
   floor := int(math.Ceil(float64(baseCostPpm) * 1.10))
   floorSrc := "rebal"
-  if strings.EqualFold(classLabel, "sink") && baseCostPpm > 0 && e.profile.SinkExtraFloorMargin > 0 {
+  if strings.EqualFold(classLabel, "sink") && baseCostPpm > 0 && e.profile.SinkExtraFloorMargin > 0 && !highOutStagnationPressure {
     sinkFloor := int(math.Ceil(float64(baseCostPpm) * (1.10 + e.profile.SinkExtraFloorMargin)))
     if sinkFloor > floor {
       floor = sinkFloor
@@ -3688,6 +3850,10 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   if outPpm7d > 0 && !discoveryHit && !explorerActive {
     outrateFloorActive := true
     factor := outrateFloorFactor
+    if highOutStagnationPressure {
+      outrateFloorActive = false
+      tags = append(tags, "stagnation-floor-relax")
+    }
     if fwdCount < outrateFloorDisableBelowFwds {
       outrateFloorActive = false
     } else if fwdCount < outrateFloorLowFwds {
@@ -3702,7 +3868,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
       }
     }
   }
-  if outPpm7d > 0 && fwdCount >= 4 {
+  if outPpm7d > 0 && fwdCount >= 4 && !highOutStagnationPressure {
     peg := int(math.Ceil(float64(outPpm7d) * outratePegHeadroom))
     withinGrace := true
     if !st.LastTs.IsZero() && e.profile.OutratePegGraceHours > 0 {
@@ -3721,6 +3887,8 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
         tags = append(tags, "peg-demand")
       }
     }
+  } else if outPpm7d > 0 && fwdCount >= 4 && highOutStagnationPressure {
+    tags = append(tags, "peg-paused-stagnation")
   }
 
   if explorerActive {
@@ -3765,6 +3933,11 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   if superSourceActive {
     floor = e.cfg.MinPpm
     floorSrc = "super-source"
+  }
+  if noSignalNoUpActive && floor > localPpm {
+    floor = localPpm
+    floorSrc = "no-signal"
+    tags = append(tags, "no-signal-floor-relax")
   }
 
   // Seed is a reference for target construction, not a hard fee ceiling.
@@ -3837,7 +4010,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
 
   // Final safety lock: never reduce below current ppm while margin is negative.
   // This runs after all ceilings/floors/step caps to avoid late-stage overrides.
-  if marginPpm7d < 0 && finalPpm < localPpm && !stagnationActive {
+  if marginPpm7d < 0 && finalPpm < localPpm && !stagnationActive && !highOutStagnationPressure {
     finalPpm = localPpm
     if !containsTag(tags, "no-down-neg-margin") {
       tags = append(tags, "no-down-neg-margin")
@@ -4498,12 +4671,16 @@ func formatAutofeeTags(d *decision) string {
       add("🛑rebal-noup")
     case t == "stagnation":
       add("🧪stagnation")
+    case t == "stagnation-pressure":
+      add("🧪stagnation-pressure")
     case t == "normalize-out":
       add("🎯norm-out")
     case t == "normalize-rebal":
       add("🎯norm-rebal")
     case t == "stagnation-floor":
       add("🧯stagnation-floor")
+    case t == "stagnation-floor-relax":
+      add("🧯stagnation-floor-relax")
     case t == "stagnation-neg-override":
       add("🧯stagnation-neg")
     case t == "htlc-policy-hot":
@@ -4546,6 +4723,8 @@ func formatAutofeeTags(d *decision) string {
       add("📌peg-grace")
     case t == "peg-demand":
       add("📌peg-demand")
+    case t == "peg-paused-stagnation":
+      add("📌peg-paused")
     case t == "cooldown":
       add("⏳cooldown")
     case t == "cooldown-profit":
@@ -4556,6 +4735,18 @@ func formatAutofeeTags(d *decision) string {
       add("🧊hold-small")
     case t == "same-ppm":
       add("🟰same-ppm")
+    case t == "low-out-slow-up":
+      add("🐢low-out-up")
+    case t == "low-out-noflow-cap":
+      add("🧯noflow-up-cap")
+    case t == "out-fallback-21d":
+      add("🕰️out-21d")
+    case t == "rebal-fallback-21d":
+      add("🕰️rebal-21d")
+    case t == "no-signal-noup":
+      add("🧯no-signal-noup")
+    case t == "no-signal-floor-relax":
+      add("🧯no-signal-floor")
     case t == "no-down-low":
       add("🚫down-low")
     case t == "no-down-neg-margin":
