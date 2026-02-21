@@ -12,6 +12,7 @@ type appDefinition struct {
   Name string
   Description string
   Port int
+  ExternalURL string
 }
 
 type appInfo struct {
@@ -21,6 +22,7 @@ type appInfo struct {
   Installed bool `json:"installed"`
   Status string `json:"status"`
   Port int `json:"port"`
+  ExternalURL string `json:"external_url,omitempty"`
   AdminPasswordPath string `json:"admin_password_path,omitempty"`
 }
 
@@ -41,5 +43,6 @@ func newAppInfo(def appDefinition) appInfo {
     Installed: false,
     Status: "not_installed",
     Port: def.Port,
+    ExternalURL: def.ExternalURL,
   }
 }
