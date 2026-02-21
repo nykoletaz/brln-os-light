@@ -22,13 +22,13 @@ const (
 )
 
 var publicPoolBackendImageCandidates = []string{
-	"ghcr.io/benjamin-wilson/public-pool:latest",
-	"benjaminwilson/public-pool:latest",
+	"sethforprivacy/public-pool:latest",
+	"smolgrrr/public-pool:latest",
 }
 
 var publicPoolUIImageCandidates = []string{
-	"ghcr.io/benjamin-wilson/public-pool-ui:latest",
-	"benjaminwilson/public-pool-ui:latest",
+	"sethforprivacy/public-pool-ui:latest",
+	"smolgrrr/public-pool-ui:latest",
 }
 
 type publicPoolPaths struct {
