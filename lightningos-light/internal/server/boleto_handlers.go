@@ -244,14 +244,25 @@ func (s *Server) handleBoletoActivateStatus(w http.ResponseWriter, r *http.Reque
 	}
 
 	// If activation completed, save the API key to secrets.env + process env
+	// and strip apiKey from the response to avoid leaking credentials to the frontend
 	if resp.StatusCode == 200 {
 		var result struct {
 			Status string `json:"status"`
 			APIKey string `json:"apiKey"`
 		}
 		if err := json.Unmarshal(data, &result); err == nil && result.Status == "completed" && result.APIKey != "" {
-			if saveErr := writeEnvFileValue(secretsEnvPath, "FSWAP_NODE_API_KEY", result.APIKey); saveErr == nil {
-				os.Setenv("FSWAP_NODE_API_KEY", result.APIKey)
+			if saveErr := writeEnvFileValue(secretsEnvPath, "FSWAP_NODE_API_KEY", result.APIKey); saveErr != nil {
+				writeError(w, http.StatusInternalServerError,
+					"Ativação concluída mas falha ao persistir chave: "+saveErr.Error())
+				return
+			}
+			os.Setenv("FSWAP_NODE_API_KEY", result.APIKey)
+
+			// Strip apiKey from response — never expose credentials to the browser
+			var sanitized map[string]any
+			if err := json.Unmarshal(data, &sanitized); err == nil {
+				delete(sanitized, "apiKey")
+				data, _ = json.Marshal(sanitized)
 			}
 		}
 	}

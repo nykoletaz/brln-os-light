@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getBoletoConfig, activateBoleto, getActivationStatus, createBoletoQuote, getBoletoStatus } from '../api'
 import { getLocale } from '../i18n'
+import QRCode from 'qrcode'
 
 type BoletoConfig = {
   enabled: boolean
@@ -72,6 +73,7 @@ export default function PayBoleto() {
   const [activation, setActivation] = useState<ActivationData | null>(null)
   const [activationCopied, setActivationCopied] = useState(false)
   const activationPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [activationQr, setActivationQr] = useState<string | null>(null)
 
   // Load config on mount
   useEffect(() => {
@@ -89,6 +91,17 @@ export default function PayBoleto() {
     }
   }, [])
 
+  // Generate QR code locally instead of using external service
+  useEffect(() => {
+    if (!activation?.invoice) {
+      setActivationQr(null)
+      return
+    }
+    QRCode.toDataURL(activation.invoice, { width: 220, margin: 1 })
+      .then(setActivationQr)
+      .catch(() => setActivationQr(null))
+  }, [activation?.invoice])
+
   // ─── Activation flow ────────────────────────────────────────────────
 
   const handleActivate = useCallback(async () => {
@@ -102,10 +115,11 @@ export default function PayBoleto() {
       const poll = async () => {
         try {
           const s: any = await getActivationStatus(data.paymentHash)
-          if (s.status === 'completed' && s.apiKey) {
+          if (s.status === 'completed') {
             if (activationPollRef.current) clearInterval(activationPollRef.current)
             setActivation(null)
             setActivating(false)
+            setActivationQr(null)
             // Refresh config (key is now saved server-side)
             const cfg = await getBoletoConfig()
             setConfig(cfg)
@@ -276,11 +290,15 @@ export default function PayBoleto() {
               <p className="text-fog/70 text-sm">{t('boleto.activationPayDesc', { sats: new Intl.NumberFormat(locale).format(activation.sats) })}</p>
 
               <div className="bg-white rounded-xl p-4 mx-auto w-fit">
-                <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(activation.invoice)}`}
-                  alt="QR Code"
-                  className="w-[220px] h-[220px]"
-                />
+                {activationQr ? (
+                  <img
+                    src={activationQr}
+                    alt="QR Code"
+                    className="w-[220px] h-[220px]"
+                  />
+                ) : (
+                  <div className="w-[220px] h-[220px] flex items-center justify-center text-fog/40 text-sm">Generating QR...</div>
+                )}
               </div>
 
               <div>
