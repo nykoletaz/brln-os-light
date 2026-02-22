@@ -1658,7 +1658,7 @@ func (c *Client) CloseChannel(ctx context.Context, channelPoint string, force bo
     Force: force,
     NoWait: true,
   }
-  if satPerVbyte > 0 {
+  if !force && satPerVbyte > 0 {
     req.SatPerVbyte = uint64(satPerVbyte)
   }
   stream, err := client.CloseChannel(ctx, req)

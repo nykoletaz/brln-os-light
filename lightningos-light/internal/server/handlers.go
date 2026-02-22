@@ -2255,7 +2255,12 @@ func (s *Server) handleLNCloseChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.lnd.CloseChannel(ctx, req.ChannelPoint, req.Force, req.SatPerVbyte); err != nil {
+	satPerVbyte := req.SatPerVbyte
+	if req.Force {
+		satPerVbyte = 0
+	}
+
+	if err := s.lnd.CloseChannel(ctx, req.ChannelPoint, req.Force, satPerVbyte); err != nil {
 		writeError(w, http.StatusInternalServerError, lndDetailedErrorMessage(err))
 		return
 	}

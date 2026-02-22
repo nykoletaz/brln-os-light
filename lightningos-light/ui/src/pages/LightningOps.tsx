@@ -2748,7 +2748,11 @@ export default function LightningOps() {
     }
     try {
       const feeRate = Number(closeFeeRate || 0)
-      await closeChannel({ channel_point: closePoint, force: closeForce, sat_per_vbyte: feeRate > 0 ? feeRate : undefined })
+      await closeChannel({
+        channel_point: closePoint,
+        force: closeForce,
+        sat_per_vbyte: closeForce ? undefined : (feeRate > 0 ? feeRate : undefined)
+      })
       setCloseStatus(t('lightningOps.closeInitiated'))
       load()
     } catch (err: any) {
@@ -3842,6 +3846,7 @@ export default function LightningOps() {
               min={1}
               value={closeFeeRate}
               onChange={(e) => setCloseFeeRate(e.target.value)}
+              disabled={closeForce}
             />
             <button
               className="btn-secondary text-xs px-3 py-2"
@@ -3851,7 +3856,7 @@ export default function LightningOps() {
                   setCloseFeeRate(String(closeFeeHint.fastest))
                 }
               }}
-              disabled={!closeFeeHint?.fastest}
+              disabled={!closeFeeHint?.fastest || closeForce}
             >
               {t('lightningOps.useFastest')}
             </button>
