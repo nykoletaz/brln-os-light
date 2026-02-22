@@ -46,11 +46,45 @@ type BoletoStatus = {
 
 type Step = 'input' | 'confirm' | 'paying' | 'done' | 'error'
 
+const ACTIVATION_STORAGE_KEY = 'pay_boleto_activation_pending'
+
 const fmt = (n: number, locale: string) =>
   new Intl.NumberFormat(locale, { style: 'currency', currency: 'BRL' }).format(n)
 
 const fmtSats = (n: number, locale: string) =>
   new Intl.NumberFormat(locale).format(n) + ' sats'
+
+const savePendingActivation = (activation: ActivationData | null) => {
+  try {
+    if (activation) {
+      window.localStorage.setItem(ACTIVATION_STORAGE_KEY, JSON.stringify(activation))
+    } else {
+      window.localStorage.removeItem(ACTIVATION_STORAGE_KEY)
+    }
+  } catch {
+    // ignore storage failures
+  }
+}
+
+const loadPendingActivation = (): ActivationData | null => {
+  try {
+    const raw = window.localStorage.getItem(ACTIVATION_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as ActivationData
+    if (
+      !parsed ||
+      typeof parsed.invoice !== 'string' ||
+      typeof parsed.paymentHash !== 'string' ||
+      typeof parsed.sats !== 'number' ||
+      typeof parsed.expiresAt !== 'string'
+    ) {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
+}
 
 export default function PayBoleto() {
   const { t } = useTranslation()
@@ -75,21 +109,90 @@ export default function PayBoleto() {
   const activationPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [activationQr, setActivationQr] = useState<string | null>(null)
 
+  const clearActivationPoll = useCallback(() => {
+    if (activationPollRef.current) {
+      clearInterval(activationPollRef.current)
+      activationPollRef.current = null
+    }
+  }, [])
+
+  const startActivationPolling = useCallback((nextActivation: ActivationData) => {
+    clearActivationPoll()
+    const poll = async () => {
+      try {
+        const s: any = await getActivationStatus(nextActivation.paymentHash)
+        if (s.status === 'completed') {
+          clearActivationPoll()
+          savePendingActivation(null)
+          setActivation(null)
+          setActivating(false)
+          setActivationQr(null)
+          const cfg = await getBoletoConfig()
+          setConfig(cfg)
+        } else if (s.status === 'expired') {
+          clearActivationPoll()
+          savePendingActivation(null)
+          setActivation(null)
+          setActivating(false)
+          setActivationQr(null)
+          setError(t('boleto.activationExpired'))
+        }
+      } catch {
+        // continue polling
+      }
+    }
+    poll()
+    activationPollRef.current = setInterval(poll, 4000)
+  }, [clearActivationPoll, t])
+
   // Load config on mount
   useEffect(() => {
-    getBoletoConfig()
-      .then(setConfig)
-      .catch(() => setConfig({ enabled: false, activated: false, feePercent: 6, provider: '' }))
-      .finally(() => setLoading(false))
+    let canceled = false
+    const run = async () => {
+      try {
+        const cfg = await getBoletoConfig()
+        if (canceled) return
+        setConfig(cfg)
+        if (cfg.activated) {
+          savePendingActivation(null)
+          return
+        }
+
+        const pending = loadPendingActivation()
+        if (!pending) return
+
+        const expiresAt = Date.parse(pending.expiresAt)
+        if (!Number.isNaN(expiresAt) && Date.now() > expiresAt) {
+          savePendingActivation(null)
+          return
+        }
+
+        setActivation(pending)
+      } catch {
+        if (!canceled) setConfig({ enabled: false, activated: false, feePercent: 6, provider: '' })
+      } finally {
+        if (!canceled) setLoading(false)
+      }
+    }
+    run()
+    return () => {
+      canceled = true
+    }
   }, [])
+
+  // Resume polling if activation was restored after remount
+  useEffect(() => {
+    if (!activation?.paymentHash || config?.activated) return
+    startActivationPolling(activation)
+  }, [activation?.paymentHash, config?.activated, startActivationPolling])
 
   // Cleanup poll on unmount
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
-      if (activationPollRef.current) clearInterval(activationPollRef.current)
+      clearActivationPoll()
     }
-  }, [])
+  }, [clearActivationPoll])
 
   // Generate QR code locally instead of using external service
   useEffect(() => {
@@ -110,37 +213,13 @@ export default function PayBoleto() {
     try {
       const data = await activateBoleto()
       setActivation(data)
-
-      // Start polling for activation payment
-      const poll = async () => {
-        try {
-          const s: any = await getActivationStatus(data.paymentHash)
-          if (s.status === 'completed') {
-            if (activationPollRef.current) clearInterval(activationPollRef.current)
-            setActivation(null)
-            setActivating(false)
-            setActivationQr(null)
-            // Refresh config (key is now saved server-side)
-            const cfg = await getBoletoConfig()
-            setConfig(cfg)
-          } else if (s.status === 'expired') {
-            if (activationPollRef.current) clearInterval(activationPollRef.current)
-            setActivation(null)
-            setActivating(false)
-            setError(t('boleto.activationExpired'))
-          }
-        } catch {
-          // continue polling
-        }
-      }
-
-      poll()
-      activationPollRef.current = setInterval(poll, 4000)
+      savePendingActivation(data)
+      startActivationPolling(data)
     } catch (err: any) {
       setError(err.message || t('boleto.activationError'))
       setActivating(false)
     }
-  }, [t])
+  }, [startActivationPolling, t])
 
   const copyActivationInvoice = useCallback(() => {
     if (!activation) return
