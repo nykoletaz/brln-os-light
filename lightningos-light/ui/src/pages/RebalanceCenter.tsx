@@ -1379,7 +1379,184 @@ export default function RebalanceCenter() {
             </div>
           </div>
         </div>
-        <div className="max-h-[520px] overflow-x-auto overflow-y-auto pr-1">
+        <div className="space-y-3 md:hidden">
+          <div className="flex flex-wrap items-center gap-4 text-xs text-fog/60">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={sortedChannels.length > 0 && sortedChannels.every((ch) => ch.auto_enabled)}
+                onChange={(e) => handleBulkAuto(e.target.checked)}
+              />
+              {t('rebalanceCenter.channels.bulkAuto')}
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={sortedChannels.length > 0 && sortedChannels.every((ch) => ch.excluded_as_source)}
+                onChange={(e) => handleBulkExclude(e.target.checked)}
+              />
+              {t('rebalanceCenter.channels.bulkExclude')}
+            </label>
+          </div>
+          {sortedChannels.map((ch) => {
+            const scoreMeta = config ? computeChannelScore(ch) : null
+            const expectedRoiValid = scoreMeta ? scoreMeta.expectedRoiValid : true
+            const expectedRoi = scoreMeta ? scoreMeta.expectedRoi : 0
+            const meetsRoi =
+              !config || config.roi_min <= 0 || !expectedRoiValid || expectedRoi >= config.roi_min
+            const passesProfit = !scoreMeta || !(scoreMeta.expectedGain > 0 && scoreMeta.estimatedCost > 0 && scoreMeta.expectedGain < scoreMeta.estimatedCost)
+            const isAutoTarget = ch.eligible_as_target && ch.auto_enabled && meetsRoi && passesProfit
+            const highlight = isAutoTarget
+              ? 'bg-rose-500/10'
+              : ch.eligible_as_target
+                ? 'bg-amber-500/10'
+                : ch.eligible_as_source
+                  ? 'bg-emerald-500/10'
+                  : ''
+            const lightningOpsLink = ch.channel_point
+              ? buildHashWithChannelPoint(LIGHTNING_OPS_ROUTE_KEY, ch.channel_point)
+              : `#${LIGHTNING_OPS_ROUTE_KEY}`
+
+            return (
+              <article
+                key={`mobile-${ch.channel_point || String(ch.channel_id)}`}
+                className={`rounded-2xl border border-white/10 bg-ink/50 p-3 ${highlight}`}
+              >
+                <a
+                  className="text-sm font-semibold text-fog hover:text-white hover:underline underline-offset-2"
+                  href={lightningOpsLink}
+                  title={t('rebalanceCenter.channels.openInLightningOps')}
+                >
+                  {ch.peer_alias || ch.remote_pubkey}
+                </a>
+                <div className="text-[11px] text-fog/50 break-all">{ch.channel_point}</div>
+
+                <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <div className="text-fog/50">{t('rebalanceCenter.channels.balance')}</div>
+                    <div>{formatPct(ch.local_pct)} / {formatPct(ch.remote_pct)}</div>
+                    <div className="text-fog/50">{formatSats(ch.local_balance_sat)} | {formatSats(ch.remote_balance_sat)}</div>
+                  </div>
+                  <div>
+                    <div className="text-fog/50">{t('rebalanceCenter.channels.fees')}</div>
+                    <div>{t('rebalanceCenter.channels.feeOut', { value: ch.outgoing_fee_ppm })}</div>
+                    <div>{t('rebalanceCenter.channels.feePeer', { value: ch.peer_fee_rate_ppm })}</div>
+                    <div className="text-fog/50">{t('rebalanceCenter.channels.spread', { value: ch.spread_ppm })}</div>
+                  </div>
+                </div>
+
+                <div className="mt-3 space-y-2">
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+                    <input
+                      className="input-field h-9 w-full min-w-0"
+                      type="number"
+                      min={1}
+                      max={99}
+                      step={0.1}
+                      title={t('rebalanceCenter.channelsHints.targetOutbound')}
+                      value={editTargets[ch.channel_id] ?? String(Math.round(ch.target_outbound_pct * 10) / 10)}
+                      onChange={(e) => setEditTargets((prev) => ({ ...prev, [ch.channel_id]: e.target.value }))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          handleSaveChannelSettings(ch)
+                        }
+                      }}
+                    />
+                    <span className="text-xs text-fog/60">%</span>
+                    <input
+                      className="input-field h-9 w-full min-w-0"
+                      type="text"
+                      inputMode="decimal"
+                      title={t('rebalanceCenter.channelsHints.econRatio')}
+                      value={channelEconRatioInput(ch)}
+                      disabled={channelUseDefaultEconRatio(ch)}
+                      onChange={(e) => setEditEconRatios((prev) => ({ ...prev, [ch.channel_id]: e.target.value }))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          handleSaveChannelSettings(ch)
+                        }
+                      }}
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-fog/60" title={t('rebalanceCenter.channelsHints.useDefaultEconRatio')}>
+                    <input
+                      type="checkbox"
+                      checked={channelUseDefaultEconRatio(ch)}
+                      onChange={(e) => handleUseDefaultEconRatioToggle(ch, e.target.checked)}
+                    />
+                    {t('rebalanceCenter.channels.useDefaultEconRatio')}
+                  </label>
+                  <div className="text-xs text-fog/50">
+                    {t('rebalanceCenter.channels.amount', { value: formatSats(ch.target_amount_sat) })}
+                  </div>
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <div className="text-fog/50">{t('rebalanceCenter.channels.protected')}</div>
+                    <div>{formatSats(ch.protected_liquidity_sat)}</div>
+                    <div className="text-fog/50">{t('rebalanceCenter.channels.payback', { value: (ch.payback_progress * 100).toFixed(0) })}</div>
+                  </div>
+                  <div>
+                    <div className="text-fog/50">
+                      {scoreMeta && expectedRoiValid
+                        ? t('rebalanceCenter.channels.roiEstimate', { value: formatRoi(expectedRoi) })
+                        : t('rebalanceCenter.channels.roiEstimateNA')}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button
+                    className="btn-secondary text-xs px-3 py-1"
+                    onClick={() => handleSaveChannelSettings(ch)}
+                    title={t('rebalanceCenter.channelsHints.save')}
+                  >
+                    {t('rebalanceCenter.channels.save')}
+                  </button>
+                  <button
+                    className="btn-primary text-xs px-3 py-1"
+                    onClick={() => handleRunRebalance(ch)}
+                    disabled={!ch.eligible_as_target}
+                    title={t('rebalanceCenter.channelsHints.rebalanceIn')}
+                  >
+                    {t('rebalanceCenter.channels.rebalanceIn')}
+                  </button>
+                  <label className="flex items-center gap-1 text-[11px] text-fog/60" title={t('rebalanceCenter.channelsHints.rebalanceRestart')}>
+                    <span>⟳</span>
+                    <input
+                      type="checkbox"
+                      checked={manualRestart[ch.channel_point] === true}
+                      onChange={(e) => handleManualRestartToggle(ch, e.target.checked)}
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+                  <label className="flex items-center gap-2" title={t('rebalanceCenter.channelsHints.auto')}>
+                    <input
+                      type="checkbox"
+                      checked={ch.auto_enabled}
+                      onChange={(e) => handleToggleChannelAuto(ch, e.target.checked)}
+                    />
+                    {t('rebalanceCenter.channels.auto')}
+                  </label>
+                  <label className="flex items-center gap-2" title={t('rebalanceCenter.channelsHints.excludeSource')}>
+                    <input
+                      type="checkbox"
+                      checked={ch.excluded_as_source}
+                      onChange={(e) => handleExcludeSource(ch, e.target.checked)}
+                    />
+                    {t('rebalanceCenter.channels.excludeSource')}
+                  </label>
+                </div>
+              </article>
+            )
+          })}
+        </div>
+        <div className="hidden max-h-[520px] overflow-x-auto overflow-y-auto pr-1 md:block">
             <table className="w-full text-sm text-fog/70">
             <thead>
               <tr className="text-left">
