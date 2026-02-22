@@ -183,6 +183,7 @@ export default function RebalanceCenter() {
   const locale = getLocale(i18n.language)
   const formatter = useMemo(() => new Intl.NumberFormat(locale), [locale])
   const pctFormatter = useMemo(() => new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }), [locale])
+  const econRatioFormatter = useMemo(() => new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }), [locale])
   const roiFormatter = useMemo(
     () => new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
     [locale]
@@ -224,6 +225,7 @@ export default function RebalanceCenter() {
 
   const formatSats = (value: number) => `${formatter.format(Math.round(value))} sats`
   const formatPct = (value: number) => `${pctFormatter.format(value)}%`
+  const formatEconRatio = (value: number) => econRatioFormatter.format(Math.round(value * 100) / 100)
   const formatRoi = (value: number) => (value > 0 && value < 0.01 ? '<0.01' : roiFormatter.format(value))
   const formatTimestamp = (value?: string) => {
     if (!value) return '-'
@@ -409,12 +411,12 @@ export default function RebalanceCenter() {
         return 'text-fog/60'
     }
   }
-  const parseLocaleDecimal = (raw: string) => Number(raw.replace(',', '.').trim())
+  const parseLocaleDecimal = (raw: string) => Number(raw.replace(/\s/g, '').replace(',', '.'))
   const channelUseDefaultEconRatio = (channel: RebalanceChannel) =>
     editUseDefaultEconRatio[channel.channel_id] ?? channel.use_default_econ_ratio
   const channelEconRatioInput = (channel: RebalanceChannel) => {
     if (channelUseDefaultEconRatio(channel)) {
-      return String(Math.round((config?.econ_ratio ?? 0) * 100) / 100)
+      return formatEconRatio(config?.econ_ratio ?? 0)
     }
     const edited = editEconRatios[channel.channel_id]
     if (edited !== undefined) return edited
@@ -422,7 +424,7 @@ export default function RebalanceCenter() {
       channel.econ_ratio_override && channel.econ_ratio_override > 0
         ? channel.econ_ratio_override
         : config?.econ_ratio ?? 0
-    return String(Math.round(fallback * 100) / 100)
+    return formatEconRatio(fallback)
   }
 
   const loadAll = async () => {
@@ -609,7 +611,7 @@ export default function RebalanceCenter() {
       setEditUseDefaultEconRatio((prev) => ({ ...prev, [channel.channel_id]: useDefault }))
       setEditEconRatios((prev) => ({
         ...prev,
-        [channel.channel_id]: useDefault ? String(config?.econ_ratio ?? 0) : String(parsedEcon)
+        [channel.channel_id]: useDefault ? formatEconRatio(config?.econ_ratio ?? 0) : formatEconRatio(parsedEcon)
       }))
       loadAll()
     } catch (err) {
@@ -622,7 +624,7 @@ export default function RebalanceCenter() {
     if (!checked) {
       const current = channelEconRatioInput(channel)
       if (!current || current.trim() === '') {
-        setEditEconRatios((prev) => ({ ...prev, [channel.channel_id]: String(config?.econ_ratio ?? 0) }))
+        setEditEconRatios((prev) => ({ ...prev, [channel.channel_id]: formatEconRatio(config?.econ_ratio ?? 0) }))
       }
     }
   }
@@ -1473,7 +1475,7 @@ export default function RebalanceCenter() {
                   <td className="py-3 pl-6">
                     <div className="flex items-center gap-2">
                       <input
-                        className="input-field w-20"
+                        className="input-field w-14"
                         type="number"
                         min={1}
                         max={99}
@@ -1489,13 +1491,9 @@ export default function RebalanceCenter() {
                         }}
                       />
                       <span className="text-xs text-fog/60">%</span>
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-fog/50">
-                      <span>{t('rebalanceCenter.channels.amount', { value: formatSats(ch.target_amount_sat) })}</span>
-                      <span className="text-fog/40">|</span>
-                      <span>{t('rebalanceCenter.channels.econRatio')}</span>
+                      <span className="ml-1 text-xs text-fog/50">{t('rebalanceCenter.channels.econRatio')}</span>
                       <input
-                        className="input-field h-8 w-20 px-2 py-1 text-xs"
+                        className="input-field h-8 w-16 px-2 py-1 text-xs"
                         type="text"
                         inputMode="decimal"
                         title={t('rebalanceCenter.channelsHints.econRatio')}
@@ -1509,7 +1507,7 @@ export default function RebalanceCenter() {
                           }
                         }}
                       />
-                      <label className="flex items-center gap-1 text-[11px]" title={t('rebalanceCenter.channelsHints.useDefaultEconRatio')}>
+                      <label className="flex items-center gap-1 whitespace-nowrap text-[11px]" title={t('rebalanceCenter.channelsHints.useDefaultEconRatio')}>
                         <input
                           type="checkbox"
                           checked={channelUseDefaultEconRatio(ch)}
@@ -1517,6 +1515,9 @@ export default function RebalanceCenter() {
                         />
                         {t('rebalanceCenter.channels.useDefaultEconRatio')}
                       </label>
+                    </div>
+                    <div className="text-xs text-fog/50">
+                      {t('rebalanceCenter.channels.amount', { value: formatSats(ch.target_amount_sat) })}
                     </div>
                   </td>
                   <td className="py-3 text-center">
