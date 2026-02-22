@@ -171,11 +171,28 @@ func TestHasRebalFallback21dSignal(t *testing.T) {
 }
 
 func TestHasSurgeConfirmSignal(t *testing.T) {
-  if hasSurgeConfirmSignal(0) {
+  capSat := int64(10_000_000)
+  minAmtSat := minSurgeConfirmRebalSat(capSat)
+
+  if hasSurgeConfirmSignal(0, minAmtSat, capSat) {
     t.Fatalf("expected false without recent rebalance touches")
   }
-  if !hasSurgeConfirmSignal(1) {
-    t.Fatalf("expected true with recent rebalance touches")
+  if hasSurgeConfirmSignal(1, minAmtSat-1, capSat) {
+    t.Fatalf("expected false when rebalance amount is below channel-size threshold")
+  }
+  if !hasSurgeConfirmSignal(1, minAmtSat, capSat) {
+    t.Fatalf("expected true when rebalance amount meets channel-size threshold")
+  }
+}
+
+func TestMinSurgeConfirmRebalSat(t *testing.T) {
+  capSat := int64(20_000_000)
+  want := int64(300_000) // 1.5% of capacity.
+  if got := minSurgeConfirmRebalSat(capSat); got != want {
+    t.Fatalf("unexpected minimum surge confirmation amount: got %d want %d", got, want)
+  }
+  if got := minSurgeConfirmRebalSat(0); got != 0 {
+    t.Fatalf("expected zero threshold when capacity is unknown: got %d", got)
   }
 }
 

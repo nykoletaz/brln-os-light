@@ -87,6 +87,7 @@ const (
   stagnationExitMinOutSat1d = 20000
   stagnationExitMinOutCapFrac = 0.005
   surgeConfirmMinRounds = 2
+  surgeConfirmRebalCapFrac = 0.015
 )
 
 func normalizeRebalCostMode(value string) string {
@@ -1707,7 +1708,7 @@ func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string)
   } else if e.svc.logger != nil {
     e.svc.logger.Printf("autofee: rebalStats21d unavailable: %v", err)
   }
-  recentRebalanceTouches := map[uint64]int{}
+  recentRebalanceTouches := map[uint64]recentRebalanceSignal{}
   if touches, err := e.fetchRecentRebalanceTouches(ctx, e.htlcSignalWindow()); err == nil {
     recentRebalanceTouches = touches
   } else if e.svc.logger != nil {
@@ -2024,6 +2025,11 @@ type rebalStat struct {
 type rebalStats struct {
   ByChannel map[uint64]rebalStat
   Global rebalStat
+}
+
+type recentRebalanceSignal struct {
+  Count int
+  AmtSat int64
 }
 
 type htlcFailureSignal struct {
@@ -2399,8 +2405,22 @@ func hasRebalFallback21dSignal(rebalAmt21dSat int64, capacitySat int64) bool {
   return rebalAmt21dSat >= minRebalFallback21dSat(capacitySat)
 }
 
-func hasSurgeConfirmSignal(recentRebalanceCount int) bool {
-  return recentRebalanceCount > 0
+func minSurgeConfirmRebalSat(capacitySat int64) int64 {
+  if capacitySat <= 0 {
+    return 0
+  }
+  return int64(math.Ceil(float64(capacitySat) * surgeConfirmRebalCapFrac))
+}
+
+func hasSurgeConfirmSignal(recentRebalanceCount int, recentRebalanceAmtSat int64, capacitySat int64) bool {
+  if recentRebalanceCount <= 0 {
+    return false
+  }
+  minAmtSat := minSurgeConfirmRebalSat(capacitySat)
+  if minAmtSat <= 0 {
+    return true
+  }
+  return recentRebalanceAmtSat >= minAmtSat
 }
 
 func applySurgeConfirmationGate(st *autofeeChannelState, localPpm int, target int, surgeApplied bool, confirmSignal bool) (int, string) {
@@ -2756,8 +2776,8 @@ where type='rebalance' and occurred_at >= now() - ($1 * interval '1 day')
   return stats, nil
 }
 
-func (e *autofeeEngine) fetchRecentRebalanceTouches(ctx context.Context, window time.Duration) (map[uint64]int, error) {
-  touches := map[uint64]int{}
+func (e *autofeeEngine) fetchRecentRebalanceTouches(ctx context.Context, window time.Duration) (map[uint64]recentRebalanceSignal, error) {
+  touches := map[uint64]recentRebalanceSignal{}
   if window <= 0 {
     window = time.Hour
   }
@@ -2768,19 +2788,19 @@ func (e *autofeeEngine) fetchRecentRebalanceTouches(ctx context.Context, window 
 
   rows, err := e.svc.db.Query(ctx, `
 with recent_rebalances as (
-  select rebal_target_chan_id as chan_id
+  select rebal_target_chan_id as chan_id, coalesce(amount_sat, 0)::bigint as amount_sat
   from notifications
   where type='rebalance'
     and occurred_at >= now() - ($1 * interval '1 second')
     and rebal_target_chan_id is not null
   union all
-  select rebal_source_chan_id as chan_id
+  select rebal_source_chan_id as chan_id, coalesce(amount_sat, 0)::bigint as amount_sat
   from notifications
   where type='rebalance'
     and occurred_at >= now() - ($1 * interval '1 second')
     and rebal_source_chan_id is not null
   union all
-  select channel_id as chan_id
+  select channel_id as chan_id, coalesce(amount_sat, 0)::bigint as amount_sat
   from notifications
   where type='rebalance'
     and occurred_at >= now() - ($1 * interval '1 second')
@@ -2788,7 +2808,7 @@ with recent_rebalances as (
     and rebal_source_chan_id is null
     and channel_id is not null
 )
-select chan_id, count(*)
+select chan_id, count(*), coalesce(sum(amount_sat), 0)::bigint
 from recent_rebalances
 group by chan_id
 `, seconds)
@@ -2800,13 +2820,17 @@ group by chan_id
   for rows.Next() {
     var chanID int64
     var count int64
-    if err := rows.Scan(&chanID, &count); err != nil {
+    var amtSat int64
+    if err := rows.Scan(&chanID, &count, &amtSat); err != nil {
       return touches, err
     }
-    if chanID <= 0 || count <= 0 {
+    if chanID <= 0 || count <= 0 || amtSat < 0 {
       continue
     }
-    touches[uint64(chanID)] = int(count)
+    touches[uint64(chanID)] = recentRebalanceSignal{
+      Count: int(count),
+      AmtSat: amtSat,
+    }
   }
   return touches, rows.Err()
 }
@@ -3156,7 +3180,7 @@ func buildAutofeeChannelLogEntry(d *decision, category string, dryRun bool, err 
 
 func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeChannelState, forwardStats map[uint64]forwardStat,
   forwardStats1d map[uint64]forwardStat, forwardStats7d map[uint64]forwardStat, forwardStats21d map[uint64]forwardStat,
-  inboundStats map[uint64]inboundStat, rebalStats rebalStats, rebalStats21d rebalStats, recentRebalanceTouches map[uint64]int,
+  inboundStats map[uint64]inboundStat, rebalStats rebalStats, rebalStats21d rebalStats, recentRebalanceTouches map[uint64]recentRebalanceSignal,
   htlcSignals map[uint64]htlcFailureSignal, totalOutFeeMsat int64, rebalGlobalPpm int, negMarginGlobal bool) *decision {
 
   localPpm := 0
@@ -3390,8 +3414,10 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     tags = append(tags, "stagnation-pressure")
   }
   recentRebalanceCount := 0
+  recentRebalanceAmtSat := int64(0)
   if recentRebalanceTouches != nil {
-    recentRebalanceCount = recentRebalanceTouches[ch.ChannelID]
+    recentRebalanceCount = recentRebalanceTouches[ch.ChannelID].Count
+    recentRebalanceAmtSat = recentRebalanceTouches[ch.ChannelID].AmtSat
   }
   holdUpOnRecentRebalance := shouldHoldUpOnRecentRebalance(classLabel, outRatio, lowOutProtectThresh, recentRebalanceCount)
   if recentRebalanceCount > 0 {
@@ -3449,7 +3475,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
       surgeApplied = true
     }
   }
-  surgeConfirmSignal := hasSurgeConfirmSignal(recentRebalanceCount)
+  surgeConfirmSignal := hasSurgeConfirmSignal(recentRebalanceCount, recentRebalanceAmtSat, ch.CapacitySat)
   target, surgeGateTag := applySurgeConfirmationGate(st, localPpm, target, surgeApplied, surgeConfirmSignal)
   if surgeGateTag != "" {
     tags = append(tags, surgeGateTag)
