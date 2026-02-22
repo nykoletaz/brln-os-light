@@ -1389,7 +1389,7 @@ export default function RebalanceCenter() {
                 <th className="pb-2 pl-4">
                   <div className="grid grid-cols-[3.5rem_auto_3.5rem_auto] items-end gap-2">
                     <span className="col-span-2">{t('rebalanceCenter.channels.target')}</span>
-                    <span className="text-[11px] font-normal text-fog/50">{t('rebalanceCenter.channels.econRatio')}</span>
+                    <span>{t('rebalanceCenter.channels.econRatio')}</span>
                   </div>
                 </th>
                 <th className="pb-2 text-center">{t('rebalanceCenter.channels.protected')}</th>
