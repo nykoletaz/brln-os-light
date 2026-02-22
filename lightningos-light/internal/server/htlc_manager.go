@@ -25,7 +25,7 @@ const (
   htlcManagerDefaultMinHTLCSat int64 = 1
   htlcManagerDefaultMaxLocalPct = 0
   htlcManagerMaxHysteresisBaseSat int64 = 250
-  htlcManagerMaxHysteresisDivisor int64 = 400 // 0.25% of effective channel capacity in sats
+  htlcManagerMaxHysteresisDivisor int64 = 1000 // 0.10% of effective channel capacity in sats
   htlcManagerVolatileHysteresisMultiplier int64 = 3
   htlcManagerMinIntervalMinutes = 1
   htlcManagerMaxIntervalMinutes = 48 * 60

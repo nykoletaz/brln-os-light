@@ -2423,7 +2423,7 @@ func hasSurgeConfirmSignal(recentRebalanceCount int, recentRebalanceAmtSat int64
   return recentRebalanceAmtSat >= minAmtSat
 }
 
-func applySurgeConfirmationGate(st *autofeeChannelState, localPpm int, target int, surgeApplied bool, confirmSignal bool) (int, string) {
+func applySurgeConfirmationGate(st *autofeeChannelState, localPpm int, target int, surgeApplied bool, confirmSignal bool, roundConfirmSignal bool) (int, string) {
   if st == nil {
     return target, ""
   }
@@ -2447,6 +2447,10 @@ func applySurgeConfirmationGate(st *autofeeChannelState, localPpm int, target in
   st.ExplorerState.SurgeGateRounds++
   if st.ExplorerState.SurgeGateRounds < surgeConfirmMinRounds {
     return localPpm, "surge-hold"
+  }
+
+  if !roundConfirmSignal {
+    return localPpm, "surge-hold-flow"
   }
 
   st.ExplorerState.SurgeGateRounds = 0
@@ -3426,6 +3430,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
   htlcSampleLow := false
   htlcPolicyHot := false
   htlcLiquidityHot := false
+  htlcForwardHot := false
   htlcAttempts := 0
   htlcForwardFails := 0
   htlcPolicyFails := 0
@@ -3458,6 +3463,7 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
       tags = append(tags, "htlc-liquidity-hot")
     }
     if signal.ForwardHot {
+      htlcForwardHot = true
       tags = append(tags, "htlc-forward-hot")
     }
     if signal.PolicyHot && signal.LiquidityHot {
@@ -3476,7 +3482,16 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
   surgeConfirmSignal := hasSurgeConfirmSignal(recentRebalanceCount, recentRebalanceAmtSat, ch.CapacitySat)
-  target, surgeGateTag := applySurgeConfirmationGate(st, localPpm, target, surgeApplied, surgeConfirmSignal)
+  surgeConfirmAttemptsMin := e.profile.HTLCMinAttempts60m
+  if surgeConfirmAttemptsMin <= 0 {
+    surgeConfirmAttemptsMin = 1
+  }
+  if htlcWindowMin > 0 {
+    surgeConfirmAttemptsMin = scaleHTLCThresholdByWindow(surgeConfirmAttemptsMin, htlcWindowMin, surgeConfirmAttemptsMin)
+  }
+  surgeRoundConfirmSignal := htlcForwardHot && htlcAttempts >= surgeConfirmAttemptsMin
+  target, surgeGateTag := applySurgeConfirmationGate(st, localPpm, target, surgeApplied, surgeConfirmSignal, surgeRoundConfirmSignal)
+  surgeHoldActive := surgeGateTag == "surge-hold" || surgeGateTag == "surge-hold-flow"
   if surgeGateTag != "" {
     tags = append(tags, surgeGateTag)
   }
@@ -4090,6 +4105,12 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     finalPpm = localPpm
     if !containsTag(tags, "rebal-recent-noup") {
       tags = append(tags, "rebal-recent-noup")
+    }
+  }
+  if surgeHoldActive && finalPpm > localPpm {
+    finalPpm = localPpm
+    if !containsTag(tags, "surge-hold-lock") {
+      tags = append(tags, "surge-hold-lock")
     }
   }
 

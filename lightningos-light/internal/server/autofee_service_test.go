@@ -201,7 +201,7 @@ func TestApplySurgeConfirmationGate(t *testing.T) {
 
   st.ExplorerState.SurgeGateRounds = 3
   st.ExplorerState.SurgeGatePpm = 1200
-  target, tag := applySurgeConfirmationGate(st, 1200, 1180, false, false)
+  target, tag := applySurgeConfirmationGate(st, 1200, 1180, false, false, false)
   if target != 1180 || tag != "" {
     t.Fatalf("unexpected non-surge result: target=%d tag=%q", target, tag)
   }
@@ -209,7 +209,7 @@ func TestApplySurgeConfirmationGate(t *testing.T) {
     t.Fatalf("expected surge gate state reset when surge is inactive")
   }
 
-  target, tag = applySurgeConfirmationGate(st, 1000, 1100, true, false)
+  target, tag = applySurgeConfirmationGate(st, 1000, 1100, true, false, false)
   if target != 1000 || tag != "surge-hold" {
     t.Fatalf("expected first surge round to hold fee: target=%d tag=%q", target, tag)
   }
@@ -217,9 +217,17 @@ func TestApplySurgeConfirmationGate(t *testing.T) {
     t.Fatalf("unexpected surge gate state after hold: rounds=%d ppm=%d", st.ExplorerState.SurgeGateRounds, st.ExplorerState.SurgeGatePpm)
   }
 
-  target, tag = applySurgeConfirmationGate(st, 1000, 1100, true, false)
+  target, tag = applySurgeConfirmationGate(st, 1000, 1100, true, false, false)
+  if target != 1000 || tag != "surge-hold-flow" {
+    t.Fatalf("expected second surge round without flow confirmation to keep hold: target=%d tag=%q", target, tag)
+  }
+  if st.ExplorerState.SurgeGateRounds != 2 || st.ExplorerState.SurgeGatePpm != 1000 {
+    t.Fatalf("unexpected surge gate state after hold-flow: rounds=%d ppm=%d", st.ExplorerState.SurgeGateRounds, st.ExplorerState.SurgeGatePpm)
+  }
+
+  target, tag = applySurgeConfirmationGate(st, 1000, 1100, true, false, true)
   if target != 1100 || tag != "surge-confirmed-rounds" {
-    t.Fatalf("expected second surge round to confirm: target=%d tag=%q", target, tag)
+    t.Fatalf("expected surge confirmation with flow after minimum rounds: target=%d tag=%q", target, tag)
   }
   if st.ExplorerState.SurgeGateRounds != 0 || st.ExplorerState.SurgeGatePpm != 1000 {
     t.Fatalf("unexpected surge gate state after confirmation: rounds=%d ppm=%d", st.ExplorerState.SurgeGateRounds, st.ExplorerState.SurgeGatePpm)
@@ -227,7 +235,7 @@ func TestApplySurgeConfirmationGate(t *testing.T) {
 
   st.ExplorerState.SurgeGateRounds = 1
   st.ExplorerState.SurgeGatePpm = 1000
-  target, tag = applySurgeConfirmationGate(st, 1000, 1110, true, true)
+  target, tag = applySurgeConfirmationGate(st, 1000, 1110, true, true, false)
   if target != 1110 || tag != "surge-confirmed" {
     t.Fatalf("expected immediate confirmation with rebalance signal: target=%d tag=%q", target, tag)
   }
@@ -237,7 +245,7 @@ func TestApplySurgeConfirmationGate(t *testing.T) {
 
   st.ExplorerState.SurgeGateRounds = 1
   st.ExplorerState.SurgeGatePpm = 1000
-  target, tag = applySurgeConfirmationGate(st, 1050, 1160, true, false)
+  target, tag = applySurgeConfirmationGate(st, 1050, 1160, true, false, false)
   if target != 1050 || tag != "surge-hold" {
     t.Fatalf("expected hold after local ppm change: target=%d tag=%q", target, tag)
   }
