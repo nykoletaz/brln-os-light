@@ -452,6 +452,7 @@
     "chain": "Cadeia",
     "chainCached": "cadeia em cache",
     "chainPending": "cadeia pendente",
+    "channelDbSize": "Tamanho do channel.db",
     "channels": "Canais",
     "connections": "Conexões",
     "copyPubkey": "Copiar pubkey",

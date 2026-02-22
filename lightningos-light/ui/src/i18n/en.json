@@ -452,6 +452,7 @@
     "chain": "Chain",
     "chainCached": "chain cached",
     "chainPending": "chain pending",
+    "channelDbSize": "channel.db size",
     "channels": "Channels",
     "connections": "Connections",
     "copyPubkey": "Copy pubkey",

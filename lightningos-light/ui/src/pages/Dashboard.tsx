@@ -18,6 +18,7 @@ export default function Dashboard() {
   const { t, i18n } = useTranslation()
   const locale = getLocale(i18n.language)
   const gbFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 })
+  const dbGBFormatter = new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const percentFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 })
   const tempFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 })
   const satFormatter = new Intl.NumberFormat(locale, { maximumFractionDigits: 0 })
@@ -56,6 +57,11 @@ export default function Dashboard() {
   const formatGB = (value?: number) => {
     if (typeof value !== 'number' || Number.isNaN(value)) return '-'
     return `${gbFormatter.format(value)} GB`
+  }
+
+  const formatDBSizeGB = (value?: number) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) return t('common.na')
+    return `${dbGBFormatter.format(value)} GB`
   }
 
   const formatPercent = (value?: number) => {
@@ -505,6 +511,12 @@ export default function Dashboard() {
                   <Badge label={t('dashboard.inactiveCount', { count: lnd.channels.inactive })} tone={lnd.channels.inactive > 0 ? 'warn' : 'muted'} />
                 </div>
               </div>
+              {lnd.db_backend === 'bolt' && (
+                <div className="flex justify-between">
+                  <span>{t('dashboard.channelDbSize')}</span>
+                  <span>{formatDBSizeGB(lnd?.channel_db_size_gb)}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span>{t('dashboard.balances')}</span>
                 <span>{t('dashboard.balanceSummary', {

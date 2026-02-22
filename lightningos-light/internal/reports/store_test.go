@@ -42,7 +42,19 @@ func TestBuildUpsertDaily(t *testing.T) {
   if argDate.Year() != 2026 || argDate.Month() != 1 || argDate.Day() != 15 {
     t.Fatalf("unexpected report date arg: %v", argDate)
   }
-  if args[1] != int64(1200) || args[2] != int64(300) || args[3] != int64(900) {
+  if args[1] != int64(1200) || // forward_fee_revenue_sats
+    args[2] != int64(1200000) || // forward_fee_revenue_msat
+    args[3] != int64(300) || // rebalance_fee_cost_sats
+    args[4] != int64(300000) || // rebalance_fee_cost_msat
+    args[5] != int64(900) || // net_routing_profit_sats
+    args[6] != int64(900000) || // net_routing_profit_msat
+    args[7] != int64(4) || // forward_count
+    args[8] != int64(2) || // rebalance_count
+    args[9] != int64(18000) || // routed_volume_sats
+    args[10] != int64(18000000) || // routed_volume_msat
+    args[11] != nil || // onchain_balance_sats
+    args[12] != nil || // lightning_balance_sats
+    args[13] != nil { // total_balance_sats
     t.Fatalf("unexpected metrics args")
   }
 }
