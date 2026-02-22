@@ -17,3 +17,7 @@ configs/tls/
 
 # Logs
 *.log
+
+# Local dev shell/bootstrap
+.dev-env.local.ps1
+ui/tsconfig.tsbuildinfo
