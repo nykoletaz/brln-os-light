@@ -1387,9 +1387,9 @@ export default function RebalanceCenter() {
                 <th className="pb-2 pl-4">{t('rebalanceCenter.channels.balance')}</th>
                 <th className="pb-2 pl-4">{t('rebalanceCenter.channels.fees')}</th>
                 <th className="pb-2 pl-4">
-                  <div className="grid grid-cols-[3.5rem_auto_3.5rem_auto] items-end gap-2">
+                  <div className="grid grid-cols-[3.5rem_auto_4.5rem_auto] items-end gap-2">
                     <span className="col-span-2">{t('rebalanceCenter.channels.target')}</span>
-                    <span>{t('rebalanceCenter.channels.econRatio')}</span>
+                    <span className="whitespace-nowrap">{t('rebalanceCenter.channels.econRatio')}</span>
                   </div>
                 </th>
                 <th className="pb-2 text-center">{t('rebalanceCenter.channels.protected')}</th>
@@ -1497,7 +1497,7 @@ export default function RebalanceCenter() {
                       />
                       <span className="text-xs text-fog/60">%</span>
                       <input
-                        className="input-field h-8 w-14 px-2 py-1 text-xs"
+                        className="input-field h-8 w-10 px-1 py-1 text-xs"
                         type="text"
                         inputMode="decimal"
                         title={t('rebalanceCenter.channelsHints.econRatio')}
