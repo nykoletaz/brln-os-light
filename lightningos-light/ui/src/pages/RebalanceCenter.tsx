@@ -1386,7 +1386,12 @@ export default function RebalanceCenter() {
                 <th className="pb-2">{t('rebalanceCenter.channels.channel')}</th>
                 <th className="pb-2 pl-6">{t('rebalanceCenter.channels.balance')}</th>
                 <th className="pb-2 pl-6">{t('rebalanceCenter.channels.fees')}</th>
-                <th className="pb-2 pl-6">{t('rebalanceCenter.channels.target')}</th>
+                <th className="pb-2 pl-6">
+                  <div className="leading-tight">
+                    <div>{t('rebalanceCenter.channels.target')}</div>
+                    <div className="text-[11px] font-normal text-fog/50">{t('rebalanceCenter.channels.econRatio')}</div>
+                  </div>
+                </th>
                 <th className="pb-2 text-center">{t('rebalanceCenter.channels.protected')}</th>
                 <th className="pb-2">
                   <div className="flex flex-col gap-2">
@@ -1491,9 +1496,8 @@ export default function RebalanceCenter() {
                         }}
                       />
                       <span className="text-xs text-fog/60">%</span>
-                      <span className="ml-1 text-xs text-fog/50">{t('rebalanceCenter.channels.econRatio')}</span>
                       <input
-                        className="input-field h-8 w-16 px-2 py-1 text-xs"
+                        className="input-field h-8 w-14 px-2 py-1 text-xs"
                         type="text"
                         inputMode="decimal"
                         title={t('rebalanceCenter.channelsHints.econRatio')}
