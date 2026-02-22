@@ -106,6 +106,8 @@ type RebalanceChannel = {
   target_amount_sat: number
   auto_enabled: boolean
   manual_restart_enabled: boolean
+  use_default_econ_ratio: boolean
+  econ_ratio_override?: number
   eligible_as_target: boolean
   eligible_as_source: boolean
   protected_liquidity_sat: number
@@ -206,6 +208,8 @@ export default function RebalanceCenter() {
   const [saving, setSaving] = useState(false)
   const [autoOpen, setAutoOpen] = useState(false)
   const [editTargets, setEditTargets] = useState<Record<number, string>>({})
+  const [editEconRatios, setEditEconRatios] = useState<Record<number, string>>({})
+  const [editUseDefaultEconRatio, setEditUseDefaultEconRatio] = useState<Record<number, boolean>>({})
   const [manualRestart, setManualRestart] = useState<Record<string, boolean>>({})
   const [channelSort, setChannelSort] = useState<'economic' | 'emptiest'>('economic')
   const [skipDetailsOpen, setSkipDetailsOpen] = useState(false)
@@ -405,6 +409,21 @@ export default function RebalanceCenter() {
         return 'text-fog/60'
     }
   }
+  const parseLocaleDecimal = (raw: string) => Number(raw.replace(',', '.').trim())
+  const channelUseDefaultEconRatio = (channel: RebalanceChannel) =>
+    editUseDefaultEconRatio[channel.channel_id] ?? channel.use_default_econ_ratio
+  const channelEconRatioInput = (channel: RebalanceChannel) => {
+    if (channelUseDefaultEconRatio(channel)) {
+      return String(Math.round((config?.econ_ratio ?? 0) * 100) / 100)
+    }
+    const edited = editEconRatios[channel.channel_id]
+    if (edited !== undefined) return edited
+    const fallback =
+      channel.econ_ratio_override && channel.econ_ratio_override > 0
+        ? channel.econ_ratio_override
+        : config?.econ_ratio ?? 0
+    return String(Math.round(fallback * 100) / 100)
+  }
 
   const loadAll = async () => {
     try {
@@ -565,23 +584,46 @@ export default function RebalanceCenter() {
     }
   }
 
-  const handleUpdateTarget = async (channel: RebalanceChannel) => {
-    const nextValue = editTargets[channel.channel_id]
-    const parsed = Number(nextValue)
-    if (!Number.isFinite(parsed) || parsed <= 0 || parsed >= 100) {
+  const handleSaveChannelSettings = async (channel: RebalanceChannel) => {
+    const nextTargetValue = editTargets[channel.channel_id]
+    const parsedTarget = nextTargetValue !== undefined ? Number(nextTargetValue) : channel.target_outbound_pct
+    if (!Number.isFinite(parsedTarget) || parsedTarget <= 0 || parsedTarget >= 100) {
       setStatus(t('rebalanceCenter.invalidTarget'))
+      return
+    }
+    const useDefault = channelUseDefaultEconRatio(channel)
+    const parsedEcon = parseLocaleDecimal(channelEconRatioInput(channel))
+    if (!useDefault && (!Number.isFinite(parsedEcon) || parsedEcon < 0.01 || parsedEcon > 0.99)) {
+      setStatus(t('rebalanceCenter.invalidEconRatio'))
       return
     }
     try {
       await updateRebalanceChannelTarget({
         channel_id: channel.channel_id,
         channel_point: channel.channel_point,
-        target_outbound_pct: parsed
+        target_outbound_pct: parsedTarget,
+        use_default_econ_ratio: useDefault,
+        econ_ratio_override: useDefault ? undefined : parsedEcon
       })
-      setEditTargets((prev) => ({ ...prev, [channel.channel_id]: String(parsed) }))
+      setEditTargets((prev) => ({ ...prev, [channel.channel_id]: String(parsedTarget) }))
+      setEditUseDefaultEconRatio((prev) => ({ ...prev, [channel.channel_id]: useDefault }))
+      setEditEconRatios((prev) => ({
+        ...prev,
+        [channel.channel_id]: useDefault ? String(config?.econ_ratio ?? 0) : String(parsedEcon)
+      }))
       loadAll()
     } catch (err) {
       setStatus(err instanceof Error ? err.message : t('rebalanceCenter.saveFailed'))
+    }
+  }
+
+  const handleUseDefaultEconRatioToggle = (channel: RebalanceChannel, checked: boolean) => {
+    setEditUseDefaultEconRatio((prev) => ({ ...prev, [channel.channel_id]: checked }))
+    if (!checked) {
+      const current = channelEconRatioInput(channel)
+      if (!current || current.trim() === '') {
+        setEditEconRatios((prev) => ({ ...prev, [channel.channel_id]: String(config?.econ_ratio ?? 0) }))
+      }
     }
   }
 
@@ -1431,7 +1473,7 @@ export default function RebalanceCenter() {
                   <td className="py-3 pl-6">
                     <div className="flex items-center gap-2">
                       <input
-                        className="input-field w-24"
+                        className="input-field w-20"
                         type="number"
                         min={1}
                         max={99}
@@ -1442,14 +1484,39 @@ export default function RebalanceCenter() {
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             e.preventDefault()
-                            handleUpdateTarget(ch)
+                            handleSaveChannelSettings(ch)
                           }
                         }}
                       />
                       <span className="text-xs text-fog/60">%</span>
                     </div>
-                    <div className="text-xs text-fog/50">
-                      {t('rebalanceCenter.channels.amount', { value: formatSats(ch.target_amount_sat) })}
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-fog/50">
+                      <span>{t('rebalanceCenter.channels.amount', { value: formatSats(ch.target_amount_sat) })}</span>
+                      <span className="text-fog/40">|</span>
+                      <span>{t('rebalanceCenter.channels.econRatio')}</span>
+                      <input
+                        className="input-field h-8 w-20 px-2 py-1 text-xs"
+                        type="text"
+                        inputMode="decimal"
+                        title={t('rebalanceCenter.channelsHints.econRatio')}
+                        value={channelEconRatioInput(ch)}
+                        disabled={channelUseDefaultEconRatio(ch)}
+                        onChange={(e) => setEditEconRatios((prev) => ({ ...prev, [ch.channel_id]: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            handleSaveChannelSettings(ch)
+                          }
+                        }}
+                      />
+                      <label className="flex items-center gap-1 text-[11px]" title={t('rebalanceCenter.channelsHints.useDefaultEconRatio')}>
+                        <input
+                          type="checkbox"
+                          checked={channelUseDefaultEconRatio(ch)}
+                          onChange={(e) => handleUseDefaultEconRatioToggle(ch, e.target.checked)}
+                        />
+                        {t('rebalanceCenter.channels.useDefaultEconRatio')}
+                      </label>
                     </div>
                   </td>
                   <td className="py-3 text-center">
@@ -1460,10 +1527,10 @@ export default function RebalanceCenter() {
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         className="btn-secondary text-xs px-3 py-1"
-                        onClick={() => handleUpdateTarget(ch)}
-                        title={t('rebalanceCenter.channelsHints.saveTarget')}
+                        onClick={() => handleSaveChannelSettings(ch)}
+                        title={t('rebalanceCenter.channelsHints.save')}
                       >
-                        {t('rebalanceCenter.channels.saveTarget')}
+                        {t('rebalanceCenter.channels.save')}
                       </button>
                       <button
                         className="btn-primary text-xs px-3 py-1"
