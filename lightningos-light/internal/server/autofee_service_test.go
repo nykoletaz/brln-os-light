@@ -169,3 +169,62 @@ func TestHasRebalFallback21dSignal(t *testing.T) {
     t.Fatalf("expected true when 21d rebalance amount threshold is met")
   }
 }
+
+func TestHasSurgeConfirmSignal(t *testing.T) {
+  if hasSurgeConfirmSignal(0) {
+    t.Fatalf("expected false without recent rebalance touches")
+  }
+  if !hasSurgeConfirmSignal(1) {
+    t.Fatalf("expected true with recent rebalance touches")
+  }
+}
+
+func TestApplySurgeConfirmationGate(t *testing.T) {
+  st := &autofeeChannelState{}
+
+  st.ExplorerState.SurgeGateRounds = 3
+  st.ExplorerState.SurgeGatePpm = 1200
+  target, tag := applySurgeConfirmationGate(st, 1200, 1180, false, false)
+  if target != 1180 || tag != "" {
+    t.Fatalf("unexpected non-surge result: target=%d tag=%q", target, tag)
+  }
+  if st.ExplorerState.SurgeGateRounds != 0 || st.ExplorerState.SurgeGatePpm != 0 {
+    t.Fatalf("expected surge gate state reset when surge is inactive")
+  }
+
+  target, tag = applySurgeConfirmationGate(st, 1000, 1100, true, false)
+  if target != 1000 || tag != "surge-hold" {
+    t.Fatalf("expected first surge round to hold fee: target=%d tag=%q", target, tag)
+  }
+  if st.ExplorerState.SurgeGateRounds != 1 || st.ExplorerState.SurgeGatePpm != 1000 {
+    t.Fatalf("unexpected surge gate state after hold: rounds=%d ppm=%d", st.ExplorerState.SurgeGateRounds, st.ExplorerState.SurgeGatePpm)
+  }
+
+  target, tag = applySurgeConfirmationGate(st, 1000, 1100, true, false)
+  if target != 1100 || tag != "surge-confirmed-rounds" {
+    t.Fatalf("expected second surge round to confirm: target=%d tag=%q", target, tag)
+  }
+  if st.ExplorerState.SurgeGateRounds != 0 || st.ExplorerState.SurgeGatePpm != 1000 {
+    t.Fatalf("unexpected surge gate state after confirmation: rounds=%d ppm=%d", st.ExplorerState.SurgeGateRounds, st.ExplorerState.SurgeGatePpm)
+  }
+
+  st.ExplorerState.SurgeGateRounds = 1
+  st.ExplorerState.SurgeGatePpm = 1000
+  target, tag = applySurgeConfirmationGate(st, 1000, 1110, true, true)
+  if target != 1110 || tag != "surge-confirmed" {
+    t.Fatalf("expected immediate confirmation with rebalance signal: target=%d tag=%q", target, tag)
+  }
+  if st.ExplorerState.SurgeGateRounds != 0 || st.ExplorerState.SurgeGatePpm != 1000 {
+    t.Fatalf("unexpected surge gate state after signal confirmation: rounds=%d ppm=%d", st.ExplorerState.SurgeGateRounds, st.ExplorerState.SurgeGatePpm)
+  }
+
+  st.ExplorerState.SurgeGateRounds = 1
+  st.ExplorerState.SurgeGatePpm = 1000
+  target, tag = applySurgeConfirmationGate(st, 1050, 1160, true, false)
+  if target != 1050 || tag != "surge-hold" {
+    t.Fatalf("expected hold after local ppm change: target=%d tag=%q", target, tag)
+  }
+  if st.ExplorerState.SurgeGateRounds != 1 || st.ExplorerState.SurgeGatePpm != 1050 {
+    t.Fatalf("unexpected surge gate state after local ppm change: rounds=%d ppm=%d", st.ExplorerState.SurgeGateRounds, st.ExplorerState.SurgeGatePpm)
+  }
+}

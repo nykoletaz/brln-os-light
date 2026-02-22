@@ -86,6 +86,7 @@ const (
   stagnationExitMinFwds1d = 3
   stagnationExitMinOutSat1d = 20000
   stagnationExitMinOutCapFrac = 0.005
+  surgeConfirmMinRounds = 2
 )
 
 func normalizeRebalCostMode(value string) string {
@@ -1652,6 +1653,8 @@ type explorerState struct {
   Seen bool `json:"seen"`
   StagnationNoFwdRounds int `json:"stagnation_no_fwd_rounds,omitempty"`
   StagnationPhase int `json:"stagnation_phase,omitempty"`
+  SurgeGateRounds int `json:"surge_gate_rounds,omitempty"`
+  SurgeGatePpm int `json:"surge_gate_ppm,omitempty"`
 }
 
 func (e *autofeeEngine) Execute(ctx context.Context, dryRun bool, reason string) error {
@@ -2394,6 +2397,40 @@ func minRebalFallback21dSat(capacitySat int64) int64 {
 
 func hasRebalFallback21dSignal(rebalAmt21dSat int64, capacitySat int64) bool {
   return rebalAmt21dSat >= minRebalFallback21dSat(capacitySat)
+}
+
+func hasSurgeConfirmSignal(recentRebalanceCount int) bool {
+  return recentRebalanceCount > 0
+}
+
+func applySurgeConfirmationGate(st *autofeeChannelState, localPpm int, target int, surgeApplied bool, confirmSignal bool) (int, string) {
+  if st == nil {
+    return target, ""
+  }
+
+  if !surgeApplied || target <= localPpm {
+    st.ExplorerState.SurgeGateRounds = 0
+    st.ExplorerState.SurgeGatePpm = 0
+    return target, ""
+  }
+
+  if st.ExplorerState.SurgeGatePpm != localPpm {
+    st.ExplorerState.SurgeGatePpm = localPpm
+    st.ExplorerState.SurgeGateRounds = 0
+  }
+
+  if confirmSignal {
+    st.ExplorerState.SurgeGateRounds = 0
+    return target, "surge-confirmed"
+  }
+
+  st.ExplorerState.SurgeGateRounds++
+  if st.ExplorerState.SurgeGateRounds < surgeConfirmMinRounds {
+    return localPpm, "surge-hold"
+  }
+
+  st.ExplorerState.SurgeGateRounds = 0
+  return target, "surge-confirmed-rounds"
 }
 
 func scaleHTLCThresholdByWindow(base int, windowMin int, fallback int) int {
@@ -3402,13 +3439,20 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
     }
   }
   htlcPressureSignal := !htlcSampleLow && (htlcPolicyHot || htlcLiquidityHot)
+  surgeApplied := false
   if outRatio < 0.10 {
     lack := (0.10 - outRatio) / 0.10
     bump := math.Min(e.profile.SurgeBumpMax, 0.5*lack)
     if bump > 0 {
       target = int(math.Ceil(float64(target) * (1.0 + bump)))
       tags = append(tags, fmt.Sprintf("surge+%d%%", int(bump*100)))
+      surgeApplied = true
     }
+  }
+  surgeConfirmSignal := hasSurgeConfirmSignal(recentRebalanceCount)
+  target, surgeGateTag := applySurgeConfirmationGate(st, localPpm, target, surgeApplied, surgeConfirmSignal)
+  if surgeGateTag != "" {
+    tags = append(tags, surgeGateTag)
   }
   if holdUpOnRecentRebalance && target > localPpm {
     target = localPpm
@@ -4179,6 +4223,8 @@ func (e *autofeeEngine) evalExplorer(st *autofeeChannelState, outRatio float64, 
     if daysSince >= 7 && outRatio >= 0.50 && fwdCount <= 5 {
       stagnationNoFwdRounds := st.ExplorerState.StagnationNoFwdRounds
       stagnationPhase := st.ExplorerState.StagnationPhase
+      surgeGateRounds := st.ExplorerState.SurgeGateRounds
+      surgeGatePpm := st.ExplorerState.SurgeGatePpm
       st.ExplorerState = explorerState{
         Active: true,
         StartedTs: nowTs,
@@ -4187,6 +4233,8 @@ func (e *autofeeEngine) evalExplorer(st *autofeeChannelState, outRatio float64, 
         Seen: true,
         StagnationNoFwdRounds: stagnationNoFwdRounds,
         StagnationPhase: stagnationPhase,
+        SurgeGateRounds: surgeGateRounds,
+        SurgeGatePpm: surgeGatePpm,
       }
       return true
     }
