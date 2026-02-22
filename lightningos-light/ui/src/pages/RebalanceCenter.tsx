@@ -153,6 +153,28 @@ type RebalanceAttempt = {
 const PAYBACK_MODE_PAYBACK = 1
 const PAYBACK_MODE_TIME = 2
 const PAYBACK_MODE_CRITICAL = 4
+const REBALANCE_ROUTE_KEY = 'rebalance-center'
+const LIGHTNING_OPS_ROUTE_KEY = 'lightning-ops'
+const CHANNEL_HASH_PARAM = 'channel_point'
+
+const readHashChannelPoint = (routeKey: string) => {
+  if (typeof window === 'undefined') return ''
+  const rawHash = window.location.hash.startsWith('#')
+    ? window.location.hash.slice(1)
+    : window.location.hash
+  if (!rawHash) return ''
+  const queryIndex = rawHash.indexOf('?')
+  if (queryIndex < 0) return ''
+  if (rawHash.slice(0, queryIndex) !== routeKey) return ''
+  const params = new URLSearchParams(rawHash.slice(queryIndex + 1))
+  return (params.get(CHANNEL_HASH_PARAM) || '').trim()
+}
+
+const buildHashWithChannelPoint = (routeKey: string, channelPoint: string) =>
+  `#${routeKey}?${CHANNEL_HASH_PARAM}=${encodeURIComponent(channelPoint)}`
+
+const channelRowID = (channelPoint: string) =>
+  `rebalance-channel-${channelPoint.replace(/[^a-zA-Z0-9_-]/g, '_')}`
 
 export default function RebalanceCenter() {
   const { t, i18n } = useTranslation()
@@ -190,8 +212,11 @@ export default function RebalanceCenter() {
   const [scanDetailsOpen, setScanDetailsOpen] = useState(false)
   const [scanDetailsReason, setScanDetailsReason] = useState('all')
   const [scanDetailsShowAll, setScanDetailsShowAll] = useState(false)
+  const [focusedChannelPoint, setFocusedChannelPoint] = useState('')
   const configRef = useRef<RebalanceConfig | null>(null)
   const autoOpenRef = useRef(false)
+  const pendingScrollChannelRef = useRef('')
+  const focusClearTimerRef = useRef<number | null>(null)
 
   const formatSats = (value: number) => `${formatter.format(Math.round(value))} sats`
   const formatPct = (value: number) => `${pctFormatter.format(value)}%`
@@ -334,6 +359,34 @@ export default function RebalanceCenter() {
     if (typeof window === 'undefined') return
     window.localStorage.setItem('rebalance_center_channel_sort', channelSort)
   }, [channelSort])
+  useEffect(() => {
+    pendingScrollChannelRef.current = readHashChannelPoint(REBALANCE_ROUTE_KEY)
+    return () => {
+      if (focusClearTimerRef.current !== null) {
+        window.clearTimeout(focusClearTimerRef.current)
+      }
+    }
+  }, [])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const targetChannelPoint = pendingScrollChannelRef.current
+    if (!targetChannelPoint) return
+    const targetExists = sortedChannels.some((channel) => channel.channel_point === targetChannelPoint)
+    if (!targetExists) return
+    const targetElement = document.getElementById(channelRowID(targetChannelPoint))
+    if (!targetElement) return
+    targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setFocusedChannelPoint(targetChannelPoint)
+    pendingScrollChannelRef.current = ''
+    window.history.replaceState(null, '', `#${REBALANCE_ROUTE_KEY}`)
+    if (focusClearTimerRef.current !== null) {
+      window.clearTimeout(focusClearTimerRef.current)
+    }
+    focusClearTimerRef.current = window.setTimeout(() => {
+      setFocusedChannelPoint((current) => (current === targetChannelPoint ? '' : current))
+      focusClearTimerRef.current = null
+    }, 3200)
+  }, [sortedChannels])
   const parseRemaining = (reason?: string) => {
     if (!reason) return null
     const match = reason.match(/remaining\s+(\d+)/i)
@@ -1339,10 +1392,24 @@ export default function RebalanceCenter() {
                     : ch.eligible_as_source
                       ? 'bg-emerald-500/10'
                       : ''
+                const isFocused = focusedChannelPoint === ch.channel_point
+                const lightningOpsLink = ch.channel_point
+                  ? buildHashWithChannelPoint(LIGHTNING_OPS_ROUTE_KEY, ch.channel_point)
+                  : `#${LIGHTNING_OPS_ROUTE_KEY}`
                 return (
-                  <tr key={ch.channel_point || String(ch.channel_id)} className={`border-t border-white/5 group ${highlight}`}>
+                  <tr
+                    key={ch.channel_point || String(ch.channel_id)}
+                    id={channelRowID(ch.channel_point)}
+                    className={`border-t border-white/5 group ${highlight} ${isFocused ? 'bg-sky-500/20' : ''}`}
+                  >
                     <td className="py-3" title={scoreTitle}>
-                      <div className="text-fog">{ch.peer_alias || ch.remote_pubkey}</div>
+                      <a
+                        className="text-fog hover:text-white hover:underline underline-offset-2"
+                        href={lightningOpsLink}
+                        title={t('rebalanceCenter.channels.openInLightningOps')}
+                      >
+                        {ch.peer_alias || ch.remote_pubkey}
+                      </a>
                       <div className="text-xs text-fog/50">{ch.channel_point}</div>
                       {scoreMeta && (
                         <div className="text-xs text-fog/40 opacity-0 transition group-hover:opacity-100">

@@ -25,11 +25,20 @@ import PayBoleto from './pages/PayBoleto'
 import { getBoletoConfig, getDepixConfig, getLndStatus, getWizardStatus } from './api'
 import { defaultPalette, paletteOrder, resolvePalette, resolveTheme, type PaletteKey, type ThemeMode } from './theme'
 
+const readHashRoute = () => {
+  const rawHash = window.location.hash.startsWith('#')
+    ? window.location.hash.slice(1)
+    : window.location.hash
+  if (!rawHash) return ''
+  const queryIndex = rawHash.indexOf('?')
+  return queryIndex >= 0 ? rawHash.slice(0, queryIndex) : rawHash
+}
+
 function useHashRoute() {
-  const [hash, setHash] = useState(window.location.hash.replace('#', ''))
+  const [hash, setHash] = useState(readHashRoute)
 
   useEffect(() => {
-    const handler = () => setHash(window.location.hash.replace('#', ''))
+    const handler = () => setHash(readHashRoute())
     window.addEventListener('hashchange', handler)
     return () => window.removeEventListener('hashchange', handler)
   }, [])

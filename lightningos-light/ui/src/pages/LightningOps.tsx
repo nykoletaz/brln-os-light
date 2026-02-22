@@ -435,6 +435,29 @@ const formatAutofeeHistoryTag = (tag: string) => {
   return tag
 }
 
+const LIGHTNING_OPS_ROUTE_KEY = 'lightning-ops'
+const REBALANCE_ROUTE_KEY = 'rebalance-center'
+const CHANNEL_HASH_PARAM = 'channel_point'
+
+const readHashChannelPoint = (routeKey: string) => {
+  if (typeof window === 'undefined') return ''
+  const rawHash = window.location.hash.startsWith('#')
+    ? window.location.hash.slice(1)
+    : window.location.hash
+  if (!rawHash) return ''
+  const queryIndex = rawHash.indexOf('?')
+  if (queryIndex < 0) return ''
+  if (rawHash.slice(0, queryIndex) !== routeKey) return ''
+  const params = new URLSearchParams(rawHash.slice(queryIndex + 1))
+  return (params.get(CHANNEL_HASH_PARAM) || '').trim()
+}
+
+const buildHashWithChannelPoint = (routeKey: string, channelPoint: string) =>
+  `#${routeKey}?${CHANNEL_HASH_PARAM}=${encodeURIComponent(channelPoint)}`
+
+const channelCardID = (channelPoint: string) =>
+  `lightning-channel-${channelPoint.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+
 export default function LightningOps() {
   const { t } = useTranslation()
   const [channels, setChannels] = useState<Channel[]>([])
@@ -451,6 +474,7 @@ export default function LightningOps() {
   const [sortBy, setSortBy] = useState<'capacity' | 'local' | 'remote' | 'alias'>('local')
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('asc')
   const [showPrivate, setShowPrivate] = useState(true)
+  const [focusedChannelPoint, setFocusedChannelPoint] = useState('')
 
   const [peerAddress, setPeerAddress] = useState('')
   const [peerTemporary, setPeerTemporary] = useState(false)
@@ -588,6 +612,8 @@ export default function LightningOps() {
   const htlcManagerFormDirtyRef = useRef(false)
   const torPeerCheckerIntervalDirtyRef = useRef(false)
   const batchItemIdRef = useRef(1)
+  const pendingScrollChannelRef = useRef('')
+  const focusClearTimerRef = useRef<number | null>(null)
   const [feeStatus, setFeeStatus] = useState('')
 
   const formatPing = (value: number) => {
@@ -1879,6 +1905,14 @@ export default function LightningOps() {
       mounted = false
     }
   }, [feeChannelPoint, feeScopeAll])
+  useEffect(() => {
+    pendingScrollChannelRef.current = readHashChannelPoint(LIGHTNING_OPS_ROUTE_KEY)
+    return () => {
+      if (focusClearTimerRef.current !== null) {
+        window.clearTimeout(focusClearTimerRef.current)
+      }
+    }
+  }, [])
 
   const baseFilteredChannels = useMemo(() => {
     let list = channels
@@ -1951,6 +1985,26 @@ export default function LightningOps() {
     })
     return sorted
   }, [baseFilteredChannels, profitFilter, sortBy, sortDir])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const targetChannelPoint = pendingScrollChannelRef.current
+    if (!targetChannelPoint) return
+    const targetExists = filteredChannels.some((channel) => channel.channel_point === targetChannelPoint)
+    if (!targetExists) return
+    const targetElement = document.getElementById(channelCardID(targetChannelPoint))
+    if (!targetElement) return
+    targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setFocusedChannelPoint(targetChannelPoint)
+    pendingScrollChannelRef.current = ''
+    window.history.replaceState(null, '', `#${LIGHTNING_OPS_ROUTE_KEY}`)
+    if (focusClearTimerRef.current !== null) {
+      window.clearTimeout(focusClearTimerRef.current)
+    }
+    focusClearTimerRef.current = window.setTimeout(() => {
+      setFocusedChannelPoint((current) => (current === targetChannelPoint ? '' : current))
+      focusClearTimerRef.current = null
+    }, 3200)
+  }, [filteredChannels])
 
   const pendingOpen = useMemo(() => pendingChannels.filter((ch) => ch.status === 'opening'), [pendingChannels])
   const pendingClose = useMemo(() => pendingChannels.filter((ch) => ch.status !== 'opening'), [pendingChannels])
@@ -3274,11 +3328,16 @@ export default function LightningOps() {
                   ? ch.out_ppm7d - ch.rebal_ppm7d
                   : undefined
                 const profitMeta = profitBadge(ch.profit_fee_7d_sat)
-                const cardClass = localDisabled && ch.active
+                const isFocused = focusedChannelPoint === ch.channel_point
+                const rebalanceLink = ch.channel_point
+                  ? buildHashWithChannelPoint(REBALANCE_ROUTE_KEY, ch.channel_point)
+                  : `#${REBALANCE_ROUTE_KEY}`
+                const cardClassBase = localDisabled && ch.active
                   ? 'rounded-2xl border border-ember/40 bg-ember/10 p-5 min-h-[170px]'
                   : 'rounded-2xl border border-white/10 bg-ink/60 p-5 min-h-[170px]'
+                const cardClass = `${cardClassBase} ${isFocused ? 'ring-1 ring-sky-300/70 bg-sky-500/10' : ''}`
                 return (
-                  <div key={ch.channel_point} className={cardClass}>
+                  <div key={ch.channel_point} id={channelCardID(ch.channel_point)} className={cardClass}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         {ch.remote_pubkey ? (
@@ -3311,6 +3370,20 @@ export default function LightningOps() {
                             {localDisabled ? t('lightningOps.enableChannel') : t('lightningOps.disableChannel')}
                           </button>
                         )}
+                        <a
+                          href={rebalanceLink}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/15 text-fog/70 transition hover:border-sky-300/70 hover:text-sky-100"
+                          title={t('lightningOps.openInRebalanceCenter')}
+                          aria-label={t('lightningOps.openInRebalanceCenter')}
+                        >
+                          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+                            <path d="M12 4v14" />
+                            <path d="M6 8h12" />
+                            <path d="M8 8l-3 5h6l-3-5z" />
+                            <path d="M16 8l-3 5h6l-3-5z" />
+                            <path d="M8 20h8" />
+                          </svg>
+                        </a>
                         <div className="flex items-center gap-2 text-[11px] text-fog/70">
                           <input
                             type="checkbox"
