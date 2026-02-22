@@ -87,6 +87,7 @@ const (
 	stagnationExitMinOutCapFrac         = 0.005
 	surgeConfirmMinRounds               = 2
 	surgeConfirmRebalCapFrac            = 0.015
+	floorRebalMinCapFrac                = 0.015
 )
 
 func normalizeRebalCostMode(value string) string {
@@ -2444,6 +2445,24 @@ func minSurgeConfirmRebalSat(capacitySat int64) int64 {
 	return int64(math.Ceil(float64(capacitySat) * surgeConfirmRebalCapFrac))
 }
 
+func minFloorRebalSat(capacitySat int64) int64 {
+	if capacitySat <= 0 {
+		return 0
+	}
+	return int64(math.Ceil(float64(capacitySat) * floorRebalMinCapFrac))
+}
+
+func hasFloorRebalSignal(rebalAmtSat int64, capacitySat int64) bool {
+	if rebalAmtSat <= 0 {
+		return false
+	}
+	minAmtSat := minFloorRebalSat(capacitySat)
+	if minAmtSat <= 0 {
+		return true
+	}
+	return rebalAmtSat >= minAmtSat
+}
+
 func hasSurgeConfirmSignal(recentRebalanceCount int, recentRebalanceAmtSat int64, capacitySat int64) bool {
 	if recentRebalanceCount <= 0 {
 		return false
@@ -3557,12 +3576,15 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
 
 	rebal := rebalStats.ByChannel[ch.ChannelID]
 	rebal21d := rebalStats21d.ByChannel[ch.ChannelID]
+	rebalAmtSat7d := rebal.AmtMsat / 1000
 	baseCostPpm := 0
 	perCost := 0
 	perCost21d := 0
 	rebalFrom21dFallback := false
+	rebalFloorSignal := false
 	if rebal.AmtMsat > 0 {
 		perCost = ppmMsat(rebal.FeeMsat, rebal.AmtMsat)
+		rebalFloorSignal = hasFloorRebalSignal(rebalAmtSat7d, ch.CapacitySat)
 	}
 	if rebal21d.AmtMsat > 0 && hasRebalFallback21dSignal(rebal21d.AmtMsat/1000, ch.CapacitySat) {
 		perCost21d = ppmMsat(rebal21d.FeeMsat, rebal21d.AmtMsat)
@@ -3955,7 +3977,25 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
 		}
 	}
 
-	floor := int(math.Ceil(float64(baseCostPpm) * 1.10))
+	floorBasePpm := baseCostPpm
+	if perCost > 0 && !rebalFloorSignal {
+		fallbackFloorBase := floorBasePpm
+		if rebalGlobalPpm > 0 {
+			fallbackFloorBase = rebalGlobalPpm
+		} else if perCost21d > 0 {
+			fallbackFloorBase = perCost21d
+		} else if outPpm7d > 0 {
+			fallbackFloorBase = outPpm7d
+		}
+		if fallbackFloorBase < e.cfg.MinPpm {
+			fallbackFloorBase = e.cfg.MinPpm
+		}
+		if fallbackFloorBase > 0 && fallbackFloorBase < floorBasePpm {
+			floorBasePpm = fallbackFloorBase
+			tags = append(tags, "rebal-floor-low-volume")
+		}
+	}
+	floor := int(math.Ceil(float64(floorBasePpm) * 1.10))
 	floorSrc := "rebal"
 	if strings.EqualFold(classLabel, "sink") && baseCostPpm > 0 && e.profile.SinkExtraFloorMargin > 0 && !highOutStagnationPressure {
 		sinkFloor := int(math.Ceil(float64(baseCostPpm) * (1.10 + e.profile.SinkExtraFloorMargin)))
@@ -4099,6 +4139,16 @@ func (e *autofeeEngine) evaluateChannel(ch lndclient.ChannelInfo, st *autofeeCha
 			profitProtectLocked = true
 		}
 		finalPpm = clampInt(finalPpm, e.cfg.MinPpm, e.cfg.MaxPpm)
+	}
+
+	floorDrivenUp := finalPpm > localPpm && floor > localPpm && floor > target
+	weakDemandSignal := !surgeConfirmSignal &&
+		!(htlcForwardHot && htlcAttempts >= surgeConfirmAttemptsMin) &&
+		!htlcHotSignal &&
+		fwdCount < 4
+	if floorDrivenUp && weakDemandSignal {
+		finalPpm = localPpm
+		tags = append(tags, "floor-up-blocked-low-signal")
 	}
 
 	if rawStep != target {
@@ -4875,6 +4925,10 @@ func formatAutofeeTags(d *decision) string {
 			add("🧯no-signal-noup")
 		case t == "no-signal-floor-relax":
 			add("🧯no-signal-floor")
+		case t == "rebal-floor-low-volume":
+			add("🧪rebal-low-volume")
+		case t == "floor-up-blocked-low-signal":
+			add("🛑floor-up-low-signal")
 		case t == "no-down-low":
 			add("🚫down-low")
 		case t == "no-down-neg-margin":
