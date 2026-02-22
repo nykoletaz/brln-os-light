@@ -201,7 +201,9 @@ type AutofeeStatus = {
 }
 
 type AutofeeChannelSetting = {
-  channel_id: number
+  channel_id?: number | string
+  channel_id_str?: string
+  channel_point?: string
   enabled: boolean
 }
 
@@ -266,7 +268,7 @@ type AutofeeResultItem = {
   revfloor_baseline?: number
   revfloor_min_abs?: number
   alias?: string
-  channel_id?: number
+  channel_id?: number | string
   channel_point?: string
   local_ppm?: number
   new_ppm?: number
@@ -314,9 +316,27 @@ type AutofeeChannelRound = {
   error?: string
 }
 
-const collectAutofeeChannelRounds = (items: AutofeeResultItem[], maxPerChannel = 2): Record<number, AutofeeChannelRound[]> => {
-  const roundsByChannel: Record<number, AutofeeChannelRound[]> = {}
-  const seenRunsByChannel: Record<number, Set<string>> = {}
+const normalizeAutofeeChannelID = (channelID?: number | string) => {
+  if (typeof channelID === 'string') {
+    const trimmed = channelID.trim()
+    return trimmed
+  }
+  if (typeof channelID === 'number' && Number.isFinite(channelID)) {
+    return String(Math.trunc(channelID))
+  }
+  return ''
+}
+
+const autofeeChannelKey = (channelPoint?: string, channelID?: number | string) => {
+  const point = (channelPoint || '').trim()
+  if (point) return point
+  const id = normalizeAutofeeChannelID(channelID)
+  return id ? `id:${id}` : ''
+}
+
+const collectAutofeeChannelRounds = (items: AutofeeResultItem[], maxPerChannel = 2): Record<string, AutofeeChannelRound[]> => {
+  const roundsByChannel: Record<string, AutofeeChannelRound[]> = {}
+  const seenRunsByChannel: Record<string, Set<string>> = {}
   let currentRun: { key: string; timestamp?: string; reason?: string; dryRun: boolean } | null = null
 
   items.forEach((item, index) => {
@@ -332,23 +352,23 @@ const collectAutofeeChannelRounds = (items: AutofeeResultItem[], maxPerChannel =
     }
     if (item.kind !== 'channel') return
 
-    const channelID = Number(item.channel_id || 0)
-    if (!Number.isFinite(channelID) || channelID <= 0) return
+    const channelKey = autofeeChannelKey(item.channel_point, item.channel_id)
+    if (!channelKey) return
     if (currentRun?.dryRun || item.dry_run) return
 
     const runKey = currentRun?.key || `legacy-${index}`
-    if (!seenRunsByChannel[channelID]) {
-      seenRunsByChannel[channelID] = new Set<string>()
+    if (!seenRunsByChannel[channelKey]) {
+      seenRunsByChannel[channelKey] = new Set<string>()
     }
-    if (seenRunsByChannel[channelID].has(runKey)) return
-    seenRunsByChannel[channelID].add(runKey)
+    if (seenRunsByChannel[channelKey].has(runKey)) return
+    seenRunsByChannel[channelKey].add(runKey)
 
-    if (!roundsByChannel[channelID]) {
-      roundsByChannel[channelID] = []
+    if (!roundsByChannel[channelKey]) {
+      roundsByChannel[channelKey] = []
     }
-    if (roundsByChannel[channelID].length >= maxPerChannel) return
+    if (roundsByChannel[channelKey].length >= maxPerChannel) return
 
-    roundsByChannel[channelID].push({
+    roundsByChannel[channelKey].push({
       run_key: runKey,
       timestamp: currentRun?.timestamp,
       reason: currentRun?.reason,
@@ -521,7 +541,7 @@ export default function LightningOps() {
 
   const [autofeeConfig, setAutofeeConfig] = useState<AutofeeConfig | null>(null)
   const [autofeeStatus, setAutofeeStatus] = useState<AutofeeStatus | null>(null)
-  const [autofeeSettings, setAutofeeSettings] = useState<Record<number, boolean>>({})
+  const [autofeeSettings, setAutofeeSettings] = useState<Record<string, boolean>>({})
   const [autofeeBusy, setAutofeeBusy] = useState(false)
   const [autofeeMessage, setAutofeeMessage] = useState('')
   const [autofeeEnabled, setAutofeeEnabled] = useState(false)
@@ -553,10 +573,10 @@ export default function LightningOps() {
   const [autofeeResultsRuns, setAutofeeResultsRuns] = useState('4')
   const [autofeeResultsFrom, setAutofeeResultsFrom] = useState('')
   const [autofeeResultsTo, setAutofeeResultsTo] = useState('')
-  const [autofeeHistoryOpenChannelID, setAutofeeHistoryOpenChannelID] = useState<number | null>(null)
-  const [autofeeHistoryByChannel, setAutofeeHistoryByChannel] = useState<Record<number, AutofeeChannelRound[]>>({})
-  const [autofeeHistoryLoadingByChannel, setAutofeeHistoryLoadingByChannel] = useState<Record<number, boolean>>({})
-  const [autofeeHistoryErrorByChannel, setAutofeeHistoryErrorByChannel] = useState<Record<number, string>>({})
+  const [autofeeHistoryOpenChannelKey, setAutofeeHistoryOpenChannelKey] = useState<string | null>(null)
+  const [autofeeHistoryByChannel, setAutofeeHistoryByChannel] = useState<Record<string, AutofeeChannelRound[]>>({})
+  const [autofeeHistoryLoadingByChannel, setAutofeeHistoryLoadingByChannel] = useState<Record<string, boolean>>({})
+  const [autofeeHistoryErrorByChannel, setAutofeeHistoryErrorByChannel] = useState<Record<string, string>>({})
 
   const [chanStatusBusy, setChanStatusBusy] = useState<string | null>(null)
   const [chanStatusMessage, setChanStatusMessage] = useState('')
@@ -662,7 +682,10 @@ export default function LightningOps() {
 
   const autofeeAllChecked = useMemo(() => {
     if (!channels.length) return true
-    return channels.every((ch) => (autofeeSettings[ch.channel_id] ?? true))
+    return channels.every((ch) => {
+      const key = autofeeChannelKey(ch.channel_point, ch.channel_id)
+      return key ? (autofeeSettings[key] ?? true) : true
+    })
   }, [channels, autofeeSettings])
 
   const formattedAutofeeResults = useMemo(() => {
@@ -1329,36 +1352,37 @@ export default function LightningOps() {
     return collectAutofeeChannelRounds(autofeeResultItems, 2)
   }, [autofeeResultItems])
 
-  const handleAutofeeHistoryToggle = async (channelID: number, enabled: boolean) => {
+  const handleAutofeeHistoryToggle = async (channelKey: string, enabled: boolean) => {
     if (!enabled) return
-    const isOpen = autofeeHistoryOpenChannelID === channelID
-    setAutofeeHistoryOpenChannelID(isOpen ? null : channelID)
+    if (!channelKey) return
+    const isOpen = autofeeHistoryOpenChannelKey === channelKey
+    setAutofeeHistoryOpenChannelKey(isOpen ? null : channelKey)
     if (isOpen) return
 
-    const cached = autofeeHistoryByChannel[channelID]
+    const cached = autofeeHistoryByChannel[channelKey]
     if (Array.isArray(cached) && cached.length > 0) return
-    if (autofeeHistoryLoadingByChannel[channelID]) return
+    if (autofeeHistoryLoadingByChannel[channelKey]) return
 
-    const fromCurrent = recentAutofeeRoundsByChannel[channelID] || []
+    const fromCurrent = recentAutofeeRoundsByChannel[channelKey] || []
     if (fromCurrent.length >= 2) {
-      setAutofeeHistoryByChannel((prev) => ({ ...prev, [channelID]: fromCurrent.slice(0, 2) }))
-      setAutofeeHistoryErrorByChannel((prev) => ({ ...prev, [channelID]: '' }))
+      setAutofeeHistoryByChannel((prev) => ({ ...prev, [channelKey]: fromCurrent.slice(0, 2) }))
+      setAutofeeHistoryErrorByChannel((prev) => ({ ...prev, [channelKey]: '' }))
       return
     }
 
-    setAutofeeHistoryByChannel((prev) => ({ ...prev, [channelID]: fromCurrent.slice(0, 2) }))
-    setAutofeeHistoryErrorByChannel((prev) => ({ ...prev, [channelID]: '' }))
-    setAutofeeHistoryLoadingByChannel((prev) => ({ ...prev, [channelID]: true }))
+    setAutofeeHistoryByChannel((prev) => ({ ...prev, [channelKey]: fromCurrent.slice(0, 2) }))
+    setAutofeeHistoryErrorByChannel((prev) => ({ ...prev, [channelKey]: '' }))
+    setAutofeeHistoryLoadingByChannel((prev) => ({ ...prev, [channelKey]: true }))
     try {
       const payload = await getAutofeeResults({ runs: 20 }) as any
       const items = Array.isArray(payload?.items) ? (payload.items as AutofeeResultItem[]) : []
       const fromExpanded = collectAutofeeChannelRounds(items, 2)
-      setAutofeeHistoryByChannel((prev) => ({ ...prev, [channelID]: fromExpanded[channelID] || [] }))
-      setAutofeeHistoryErrorByChannel((prev) => ({ ...prev, [channelID]: '' }))
+      setAutofeeHistoryByChannel((prev) => ({ ...prev, [channelKey]: fromExpanded[channelKey] || [] }))
+      setAutofeeHistoryErrorByChannel((prev) => ({ ...prev, [channelKey]: '' }))
     } catch (err: any) {
-      setAutofeeHistoryErrorByChannel((prev) => ({ ...prev, [channelID]: err?.message || t('lightningOps.autofeeResultsUnavailable') }))
+      setAutofeeHistoryErrorByChannel((prev) => ({ ...prev, [channelKey]: err?.message || t('lightningOps.autofeeResultsUnavailable') }))
     } finally {
-      setAutofeeHistoryLoadingByChannel((prev) => ({ ...prev, [channelID]: false }))
+      setAutofeeHistoryLoadingByChannel((prev) => ({ ...prev, [channelKey]: false }))
     }
   }
 
@@ -1689,11 +1713,28 @@ export default function LightningOps() {
     }
     if (autofeeChannelsResult.status === 'fulfilled') {
       const settingsPayload = (autofeeChannelsResult.value as any)?.settings as AutofeeChannelSetting[] | undefined
-      const map: Record<number, boolean> = {}
+      const map: Record<string, boolean> = {}
+      const keyByChannelID: Record<string, string> = {}
+      if (channelsResult.status === 'fulfilled') {
+        const channelsPayload = (channelsResult.value as any)?.channels
+        if (Array.isArray(channelsPayload)) {
+          channelsPayload.forEach((raw: any) => {
+            const key = autofeeChannelKey(raw?.channel_point, raw?.channel_id)
+            const id = normalizeAutofeeChannelID(raw?.channel_id)
+            if (key && id) keyByChannelID[id] = key
+          })
+        }
+      }
       if (Array.isArray(settingsPayload)) {
         settingsPayload.forEach((entry) => {
-          if (typeof entry?.channel_id === 'number') {
-            map[entry.channel_id] = Boolean(entry.enabled)
+          const pointKey = autofeeChannelKey(entry?.channel_point, entry?.channel_id)
+          if (pointKey) {
+            map[pointKey] = Boolean(entry.enabled)
+            return
+          }
+          const id = normalizeAutofeeChannelID(entry?.channel_id_str || entry?.channel_id)
+          if (id && keyByChannelID[id]) {
+            map[keyByChannelID[id]] = Boolean(entry.enabled)
           }
         })
       }
@@ -2291,7 +2332,9 @@ export default function LightningOps() {
   const handleAutofeeChannelToggle = async (channel: Channel, enabled: boolean) => {
     try {
       await updateAutofeeChannels({ channel_id: channel.channel_id, channel_point: channel.channel_point, enabled })
-      setAutofeeSettings((prev) => ({ ...prev, [channel.channel_id]: enabled }))
+      const key = autofeeChannelKey(channel.channel_point, channel.channel_id)
+      if (!key) return
+      setAutofeeSettings((prev) => ({ ...prev, [key]: enabled }))
     } catch (err: any) {
       setAutofeeMessage(err?.message || t('lightningOps.autofeeChannelUpdateFailed'))
     }
@@ -2303,9 +2346,10 @@ export default function LightningOps() {
     setAutofeeMessage(enabled ? t('lightningOps.autofeeIncludingAll') : t('lightningOps.autofeeExcludingAll'))
     try {
       await updateAutofeeChannels({ apply_all: true, enabled })
-      const map: Record<number, boolean> = {}
+      const map: Record<string, boolean> = {}
       channels.forEach((ch) => {
-        map[ch.channel_id] = enabled
+        const key = autofeeChannelKey(ch.channel_point, ch.channel_id)
+        if (key) map[key] = enabled
       })
       setAutofeeSettings(map)
       setAutofeeMessage(t('lightningOps.autofeeBulkDone'))
@@ -3328,11 +3372,12 @@ export default function LightningOps() {
                 const localDisabled = ch.local_disabled ?? isLocalChanDisabled(ch.chan_status_flags)
                 const statusBusy = chanStatusBusy === ch.channel_point
                 const showToggle = ch.active
-                const autofeeChecked = autofeeSettings[ch.channel_id] ?? true
-                const autofeeHistoryOpen = autofeeHistoryOpenChannelID === ch.channel_id
-                const autofeeHistoryLoading = Boolean(autofeeHistoryLoadingByChannel[ch.channel_id])
-                const autofeeHistoryError = autofeeHistoryErrorByChannel[ch.channel_id] || ''
-                const autofeeHistoryRounds = autofeeHistoryByChannel[ch.channel_id] || recentAutofeeRoundsByChannel[ch.channel_id] || []
+                const autofeeHistoryKey = autofeeChannelKey(ch.channel_point, ch.channel_id)
+                const autofeeChecked = autofeeHistoryKey ? (autofeeSettings[autofeeHistoryKey] ?? true) : true
+                const autofeeHistoryOpen = autofeeHistoryOpenChannelKey === autofeeHistoryKey
+                const autofeeHistoryLoading = Boolean(autofeeHistoryLoadingByChannel[autofeeHistoryKey])
+                const autofeeHistoryError = autofeeHistoryErrorByChannel[autofeeHistoryKey] || ''
+                const autofeeHistoryRounds = autofeeHistoryByChannel[autofeeHistoryKey] || recentAutofeeRoundsByChannel[autofeeHistoryKey] || []
                 const classLabel = formatChannelClassLabel(ch.class_label)
                 const isInlineFeeEditing = inlineFeeChannelPoint === ch.channel_point
                 const inlineBusy = inlineFeeLoading || inlineFeeSaving
@@ -3412,16 +3457,16 @@ export default function LightningOps() {
                             onChange={(e) => {
                               const enabled = e.target.checked
                               handleAutofeeChannelToggle(ch, enabled)
-                              if (!enabled && autofeeHistoryOpenChannelID === ch.channel_id) {
-                                setAutofeeHistoryOpenChannelID(null)
+                              if (!enabled && autofeeHistoryOpenChannelKey === autofeeHistoryKey) {
+                                setAutofeeHistoryOpenChannelKey(null)
                               }
                             }}
                           />
                           <button
                             type="button"
-                            className={`underline decoration-dotted underline-offset-2 ${autofeeChecked ? 'hover:text-fog' : 'opacity-50 cursor-not-allowed'}`}
-                            onClick={() => handleAutofeeHistoryToggle(ch.channel_id, autofeeChecked)}
-                            disabled={!autofeeChecked}
+                            className={`underline decoration-dotted underline-offset-2 ${autofeeChecked && autofeeHistoryKey ? 'hover:text-fog' : 'opacity-50 cursor-not-allowed'}`}
+                            onClick={() => handleAutofeeHistoryToggle(autofeeHistoryKey, autofeeChecked)}
+                            disabled={!autofeeChecked || !autofeeHistoryKey}
                           >
                             {t('lightningOps.autofeeLabel')}
                           </button>
