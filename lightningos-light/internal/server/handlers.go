@@ -1043,7 +1043,7 @@ func lndChannelDBSizeGB() (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return float64(info.Size()) / (1024.0 * 1024.0 * 1024.0), nil
+	return float64(info.Size()) / (1000.0 * 1000.0 * 1000.0), nil
 }
 
 func (s *Server) handleWizardStatus(w http.ResponseWriter, r *http.Request) {
