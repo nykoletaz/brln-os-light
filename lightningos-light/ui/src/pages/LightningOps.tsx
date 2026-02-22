@@ -722,14 +722,35 @@ export default function LightningOps() {
     }
     const local = Math.round(Number(round.local_ppm || 0))
     const next = Math.round(Number(round.new_ppm ?? local))
+    const category = (round.category || '').toLowerCase().trim()
+    const skipReason = (round.skip_reason || '').toLowerCase().trim()
+
+    // For modern rounds, trust category/skip_reason first so "calculated up"
+    // does not look like an applied change when it was skipped.
+    if (category) {
+      if (category === 'changed') {
+        if (next > local) {
+          return t('lightningOps.autofeeHistoryOutcomeUp', { from: local, to: next })
+        }
+        if (next < local) {
+          return t('lightningOps.autofeeHistoryOutcomeDown', { from: local, to: next })
+        }
+      }
+      if (skipReason === 'cooldown') {
+        return t('lightningOps.autofeeHistoryOutcomeCooldown', { value: local })
+      }
+      return t('lightningOps.autofeeHistoryOutcomeKeep', { value: local })
+    }
+
+    // Backward compatibility for legacy rounds without category.
     if (next > local) {
       return t('lightningOps.autofeeHistoryOutcomeUp', { from: local, to: next })
     }
     if (next < local) {
       return t('lightningOps.autofeeHistoryOutcomeDown', { from: local, to: next })
     }
-    if (round.skip_reason === 'cooldown') {
-      return t('lightningOps.autofeeHistoryOutcomeCooldown', { value: next })
+    if (skipReason === 'cooldown') {
+      return t('lightningOps.autofeeHistoryOutcomeCooldown', { value: local })
     }
     return t('lightningOps.autofeeHistoryOutcomeKeep', { value: next })
   }
