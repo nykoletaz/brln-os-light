@@ -1384,12 +1384,12 @@ export default function RebalanceCenter() {
             <thead>
               <tr className="text-left">
                 <th className="pb-2">{t('rebalanceCenter.channels.channel')}</th>
-                <th className="pb-2 pl-6">{t('rebalanceCenter.channels.balance')}</th>
-                <th className="pb-2 pl-6">{t('rebalanceCenter.channels.fees')}</th>
-                <th className="pb-2 pl-6">
-                  <div className="leading-tight">
-                    <div>{t('rebalanceCenter.channels.target')}</div>
-                    <div className="text-[11px] font-normal text-fog/50">{t('rebalanceCenter.channels.econRatio')}</div>
+                <th className="pb-2 pl-4">{t('rebalanceCenter.channels.balance')}</th>
+                <th className="pb-2 pl-4">{t('rebalanceCenter.channels.fees')}</th>
+                <th className="pb-2 pl-4">
+                  <div className="grid grid-cols-[3.5rem_auto_3.5rem_auto] items-end gap-2">
+                    <span className="col-span-2">{t('rebalanceCenter.channels.target')}</span>
+                    <span className="text-[11px] font-normal text-fog/50">{t('rebalanceCenter.channels.econRatio')}</span>
                   </div>
                 </th>
                 <th className="pb-2 text-center">{t('rebalanceCenter.channels.protected')}</th>
@@ -1466,18 +1466,18 @@ export default function RebalanceCenter() {
                         </div>
                       )}
                     </td>
-                  <td className="py-3 pl-6">
+                  <td className="py-3 pl-4">
                     <div>{formatPct(ch.local_pct)} / {formatPct(ch.remote_pct)}</div>
                     <div className="text-xs text-fog/50">{formatSats(ch.local_balance_sat)} | {formatSats(ch.remote_balance_sat)}</div>
                   </td>
-                  <td className="py-3 pl-6">
+                  <td className="py-3 pl-4">
                     <div>
                       {t('rebalanceCenter.channels.feeOut', { value: ch.outgoing_fee_ppm })} ·{' '}
                       {t('rebalanceCenter.channels.feePeer', { value: ch.peer_fee_rate_ppm })}
                     </div>
                     <div className="text-xs text-fog/50">{t('rebalanceCenter.channels.spread', { value: ch.spread_ppm })}</div>
                   </td>
-                  <td className="py-3 pl-6">
+                  <td className="py-3 pl-4">
                     <div className="flex items-center gap-2">
                       <input
                         className="input-field w-14"
