@@ -17,12 +17,13 @@ import BitcoinLocal from './pages/BitcoinLocal'
 import Elements from './pages/Elements'
 import Notifications from './pages/Notifications'
 import LndConfig from './pages/LndConfig'
+import LndInfo from './pages/LndInfo'
 import AppStore from './pages/AppStore'
 import Terminal from './pages/Terminal'
 import BuyDepix from './pages/BuyDepix'
 import Shortcuts from './pages/Shortcuts'
 import PayBoleto from './pages/PayBoleto'
-import { getBoletoConfig, getDepixConfig, getLndStatus, getWizardStatus } from './api'
+import { getBitcoinLocalStatus, getBoletoConfig, getDepixConfig, getLndStatus, getWizardStatus } from './api'
 import { defaultPalette, paletteOrder, resolvePalette, resolveTheme, type PaletteKey, type ThemeMode } from './theme'
 
 const readHashRoute = () => {
@@ -135,6 +136,7 @@ export default function App() {
   const [walletExists, setWalletExists] = useState<boolean | null>(null)
   const [depixEnabled, setDepixEnabled] = useState(false)
   const [boletoEnabled, setBoletoEnabled] = useState(false)
+  const [externalBitcoinDetected, setExternalBitcoinDetected] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const refreshDepixEnabled = useCallback(async () => {
     try {
@@ -152,6 +154,14 @@ export default function App() {
       setBoletoEnabled(false)
     }
   }, [])
+  const refreshExternalBitcoinDetected = useCallback(async () => {
+    try {
+      const data: any = await getBitcoinLocalStatus()
+      setExternalBitcoinDetected(data?.source === 'external')
+    } catch {
+      // keep previous state on transient failures
+    }
+  }, [])
   const baseRoutes = useMemo(() => {
     const depixRoute = depixEnabled
       ? [{ key: 'buy-depix', label: t('nav.buyDepix'), element: <BuyDepix /> }]
@@ -167,7 +177,11 @@ export default function App() {
       { key: 'rebalance-center', label: t('nav.rebalanceCenter'), element: <RebalanceCenter /> },
       { key: 'onchain-hub', label: t('nav.onchainHub'), element: <OnchainHub /> },
       { key: 'chat', label: t('nav.chat'), element: <Chat /> },
-      { key: 'lnd', label: t('nav.lndConfig'), element: <LndConfig /> },
+      {
+        key: 'lnd',
+        label: externalBitcoinDetected ? t('nav.lndInfo') : t('nav.lndConfig'),
+        element: externalBitcoinDetected ? <LndInfo /> : <LndConfig />
+      },
       { key: 'apps', label: t('nav.apps'), element: <AppStore /> },
       ...depixRoute,
       ...boletoRoute,
@@ -180,7 +194,7 @@ export default function App() {
       { key: 'shortcuts', label: t('nav.shortcuts'), element: <Shortcuts /> },
       { key: 'logs', label: t('nav.logs'), element: <Logs /> }
     ]
-  }, [depixEnabled, boletoEnabled, i18n.language, t])
+  }, [depixEnabled, boletoEnabled, externalBitcoinDetected, i18n.language, t])
   const baseRouteKeys = useMemo(() => baseRoutes.map((item) => item.key), [baseRoutes])
   const [menuConfig, setMenuConfig] = useState<MenuConfig>(() => normalizeMenuConfig(readMenuConfig(), baseRouteKeys))
 
@@ -224,6 +238,7 @@ export default function App() {
 
   useEffect(() => {
     const handleAppsChanged = (event: Event) => {
+      void refreshExternalBitcoinDetected()
       const detail = (event as CustomEvent<{ id?: string }>).detail
       if (detail?.id === 'depixbuy') {
         void refreshDepixEnabled()
@@ -235,15 +250,18 @@ export default function App() {
     }
     void refreshDepixEnabled()
     void refreshBoletoEnabled()
+    void refreshExternalBitcoinDetected()
     const timer = window.setInterval(refreshDepixEnabled, 30000)
     const boletoTimer = window.setInterval(refreshBoletoEnabled, 30000)
+    const externalBitcoinTimer = window.setInterval(refreshExternalBitcoinDetected, 30000)
     window.addEventListener('apps:changed', handleAppsChanged as EventListener)
     return () => {
       window.clearInterval(timer)
       window.clearInterval(boletoTimer)
+      window.clearInterval(externalBitcoinTimer)
       window.removeEventListener('apps:changed', handleAppsChanged as EventListener)
     }
-  }, [refreshDepixEnabled, refreshBoletoEnabled])
+  }, [refreshDepixEnabled, refreshBoletoEnabled, refreshExternalBitcoinDetected])
 
   useEffect(() => {
     setMenuConfig((current) => {

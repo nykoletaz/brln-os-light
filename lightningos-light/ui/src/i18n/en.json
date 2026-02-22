@@ -52,6 +52,7 @@
     "lightningOps": "Lightning Ops",
     "onchainHub": "On-chain Hub",
     "lndConfig": "LND Config",
+    "lndInfo": "LND Info",
     "logs": "Logs",
     "notifications": "Notifications",
     "rebalanceCenter": "Rebalance Center",
@@ -843,6 +844,19 @@
     "switchingBitcoin": "Switching to {{target}} Bitcoin...",
     "title": "LND configuration",
     "toggleBitcoinSource": "Toggle bitcoin source"
+  },
+  "lndInfo": {
+    "title": "LND information",
+    "subtitle": "Read-only LND details for externally managed Bitcoin setups.",
+    "readOnlyHint": "Actions are disabled to protect existing systemd/manual installations.",
+    "externalGuard": "External Bitcoin detected. Configuration is locked in this screen.",
+    "loadFailed": "Failed to load full LND information.",
+    "upgradeReadOnly": "Version data is visible only in this mode.",
+    "upgradeDisabled": "LND upgrade is disabled while this node is linked to external Bitcoin.",
+    "lndConfTitle": "lnd.conf",
+    "viewLndConf": "View lnd.conf",
+    "hideLndConf": "Hide lnd.conf",
+    "emptyLndConf": "No user lnd.conf content found."
   },
   "lndUpgrade": {
     "title": "LND upgrade",
